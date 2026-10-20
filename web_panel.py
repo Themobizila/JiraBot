@@ -720,6 +720,8 @@ body {
 /* Main Content */
 .main-wrapper {
   margin-left: 270px;
+  width: calc(100% - 270px);
+  max-width: calc(100% - 270px);
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -729,7 +731,7 @@ body {
 .topbar {
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
-  padding: 13px 26px;
+  padding: 12px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -743,11 +745,13 @@ body {
 .topbar-left {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .topbar-title {
-  font-size: 17px;
+  font-size: 16.5px;
   font-weight: 700;
   color: var(--text-main);
 }
@@ -755,17 +759,22 @@ body {
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .badge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  text-align: center;
   padding: 4px 10px;
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 600;
+  white-space: nowrap;
+  line-height: 1.2;
+  flex-shrink: 0;
 }
 
 .badge-running { background: var(--success-bg); color: var(--success); }
@@ -775,8 +784,9 @@ body {
 .badge-danger { background: var(--danger-bg); color: var(--danger); }
 
 .content {
-  padding: 24px 26px;
-  max-width: 1480px;
+  padding: 22px 24px;
+  width: 100%;
+  max-width: 1560px;
 }
 
 .tab-pane {
@@ -889,12 +899,15 @@ body {
   border: 1px solid transparent;
   transition: all 0.15s ease;
   text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .btn svg {
   width: 15px;
   height: 15px;
   stroke: currentColor;
+  flex-shrink: 0;
 }
 
 .btn-primary {
@@ -947,6 +960,11 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+td .btn-group {
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 /* Forms */
@@ -1073,6 +1091,8 @@ tr.row-today td {
   font-weight: 700;
   font-size: 12px;
   font-family: Consolas, monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .time-pill {
@@ -1084,6 +1104,7 @@ tr.row-today td {
   font-family: Consolas, monospace;
   font-size: 12px;
   color: var(--text-main);
+  white-space: nowrap;
 }
 
 /* Bulk Action Bar */
@@ -1469,14 +1490,16 @@ pre.terminal-box {
           </div>
         </div>
 
-        <div class="form-grid" style="align-items: end; margin-bottom: 16px;">
-          <div class="form-group" style="margin-bottom:0">
-            <label>Escolher Qualquer Data no Calendário (Exibe a Semana de Segunda a Domingo)</label>
-            <input type="date" id="weekly-ref-date" class="form-control" onchange="loadWeeklyView(this.value)">
-          </div>
-          <div class="form-group" style="margin-bottom:0; flex-direction:row; align-items:center; gap:8px; padding-bottom:8px;">
-            <input type="checkbox" id="weekly-fetch-jira-chk" checked onchange="loadWeeklyView(document.getElementById('weekly-ref-date').value)">
-            <label for="weekly-fetch-jira-chk" style="margin:0; cursor:pointer;">Sincronizar com worklogs reais lançados no Jira nesta semana</label>
+        <div class="schedule-box" style="display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:18px; padding:14px 16px;">
+          <div style="display:flex; align-items:flex-end; flex-wrap:wrap; gap:20px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Escolher Data no Calendário (Exibe de Segunda a Domingo)</label>
+              <input type="date" id="weekly-ref-date" class="form-control" style="width:210px;" onchange="loadWeeklyView(this.value)">
+            </div>
+            <div class="form-group" style="margin-bottom:0; flex-direction:row; align-items:center; gap:8px; height:36px;">
+              <input type="checkbox" id="weekly-fetch-jira-chk" checked onchange="loadWeeklyView(document.getElementById('weekly-ref-date').value)">
+              <label for="weekly-fetch-jira-chk" style="margin:0; cursor:pointer; font-size:13px;">Sincronizar com worklogs reais lançados no Jira nesta semana</label>
+            </div>
           </div>
           <div class="btn-group" style="justify-content:flex-end;">
             <button class="btn btn-success" onclick="openBatchForCurrentWeek()">Lançar Dias Faltantes Desta Semana em Lote</button>
@@ -1508,17 +1531,17 @@ pre.terminal-box {
           <table>
             <thead>
               <tr>
-                <th>Dia</th>
-                <th>Data</th>
-                <th>Início</th>
-                <th>Pausa Almoço</th>
-                <th>Retorno</th>
-                <th>Encerramento</th>
+                <th style="width:92px;">Dia</th>
+                <th style="width:96px;">Data</th>
+                <th style="width:74px; text-align:center;">Início</th>
+                <th style="width:98px; text-align:center;">Pausa Almoço</th>
+                <th style="width:74px; text-align:center;">Retorno</th>
+                <th style="width:98px; text-align:center;">Encerramento</th>
                 <th>Tickets e Descrições</th>
-                <th>Total do Dia</th>
-                <th>Meta</th>
-                <th>Status</th>
-                <th style="text-align:right;">Ações Rápidas</th>
+                <th style="width:98px;">Total do Dia</th>
+                <th style="width:62px;">Meta</th>
+                <th style="width:136px; text-align:center;">Status</th>
+                <th style="width:190px; text-align:right;">Ações Rápidas</th>
               </tr>
             </thead>
             <tbody id="weekly-table-tbody">
@@ -2530,7 +2553,14 @@ async function loadDashboard(forceScheduleFill = false) {
 
     const badge = document.getElementById('top-status-badge');
     const st = data.today.status;
-    badge.textContent = st;
+    const statusLabelsPt = {
+      'RUNNING': 'EM ANDAMENTO',
+      'PAUSED_LUNCH': 'PAUSADO (ALMOÇO)',
+      'PAUSED_AWAY': 'PAUSADO (AUSENTE)',
+      'COMPLETED': 'EXPEDIENTE CONCLUÍDO',
+      'IDLE': 'AGUARDANDO'
+    };
+    badge.textContent = statusLabelsPt[st] || st;
     badge.className = 'badge ' + (
       st === 'RUNNING' ? 'badge-running' :
       (st === 'PAUSED_LUNCH' || st === 'PAUSED_AWAY') ? 'badge-paused' :
@@ -2789,11 +2819,11 @@ async function loadWeeklyView(refDateStr = '') {
                          d.status_type === 'missing' ? 'badge-danger' : 'badge-idle';
 
       const ticketsHtml = d.tickets && d.tickets.length > 0
-        ? d.tickets.map(t => `
-            <div style="margin-bottom:4px;">
+        ? d.tickets.map((t, tIdx) => `
+            <div style="display:flex; align-items:baseline; flex-wrap:wrap; gap:6px; ${tIdx < d.tickets.length - 1 ? 'margin-bottom:6px;' : ''} line-height:1.45;">
               <span class="ticket-pill">${escapeHtml(t.issue_key)}</span>
-              <strong>${t.formatted}</strong>
-              ${t.comment ? `<span style="font-size:11.5px; color:var(--text-muted);"> - "${escapeHtml(t.comment)}"</span>` : ''}
+              <strong style="white-space:nowrap;">${t.formatted}</strong>
+              ${t.comment ? `<span style="font-size:12px; color:var(--text-muted); word-break:break-word;">— "${escapeHtml(t.comment)}"</span>` : ''}
             </div>
           `).join('')
         : (d.is_weekend ? '<span style="color:var(--text-muted);">[Fim de Semana]</span>' : '<span style="color:var(--text-muted);">-</span>');
@@ -2812,18 +2842,23 @@ async function loadWeeklyView(refDateStr = '') {
 
       return `
         <tr class="${rowClass}">
-          <td><strong>${d.weekday}</strong> ${d.is_today ? '<span class="badge badge-completed" style="margin-left:4px;">HOJE</span>' : ''}</td>
-          <td><strong>${d.date_br}</strong></td>
-          <td><span class="time-pill">${sch.start_hm || '-'}</span></td>
-          <td><span class="time-pill">${sch.lunch_start_hm || '-'}</span></td>
-          <td><span class="time-pill">${sch.lunch_end_hm || '-'}</span></td>
-          <td><span class="time-pill">${sch.end_hm || '-'}</span></td>
-          <td>${ticketsHtml}</td>
-          <td><strong>${d.total_formatted}</strong></td>
-          <td>${d.target_formatted}</td>
-          <td><span class="badge ${badgeClass}">${d.status_label}</span></td>
+          <td style="white-space:nowrap;">
+            <div style="display:inline-flex; align-items:center; gap:6px;">
+              <strong>${d.weekday}</strong>
+              ${d.is_today ? '<span class="badge badge-completed">HOJE</span>' : ''}
+            </div>
+          </td>
+          <td style="white-space:nowrap;"><strong>${d.date_br}</strong></td>
+          <td style="white-space:nowrap; text-align:center;"><span class="time-pill">${sch.start_hm || '-'}</span></td>
+          <td style="white-space:nowrap; text-align:center;"><span class="time-pill">${sch.lunch_start_hm || '-'}</span></td>
+          <td style="white-space:nowrap; text-align:center;"><span class="time-pill">${sch.lunch_end_hm || '-'}</span></td>
+          <td style="white-space:nowrap; text-align:center;"><span class="time-pill">${sch.end_hm || '-'}</span></td>
+          <td style="min-width:240px;">${ticketsHtml}</td>
+          <td style="white-space:nowrap;"><strong>${d.total_formatted}</strong></td>
+          <td style="white-space:nowrap;">${d.target_formatted}</td>
+          <td style="white-space:nowrap; text-align:center;"><span class="badge ${badgeClass}">${d.status_label}</span></td>
           <td style="text-align:right; white-space:nowrap;">
-            <div class="btn-group" style="justify-content:flex-end;">
+            <div class="btn-group" style="justify-content:flex-end; flex-wrap:nowrap;">
               ${editBtn}
               <button class="btn btn-primary btn-sm" onclick="openWorklogModalForDate('${d.date}')">+ Lançar no Dia</button>
             </div>
