@@ -366,7 +366,7 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
             weekdays_logged_count += 1
 
         if is_logged:
-            status_label = "Lancado no Jira"
+            status_label = "Lançado no Jira"
             status_type = "logged"
         elif is_today and day_sec > 0:
             status_label = "Em Andamento Hoje"
@@ -378,7 +378,7 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
             status_label = "Dia Futuro"
             status_type = "future"
         else:
-            status_label = "Sem Lancamento"
+            status_label = "Sem Lançamento"
             status_type = "missing"
 
         days_rows.append({
@@ -519,7 +519,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JiraBot Web - Painel de Controle, Lote e Lancamentos</title>
+<title>JiraBot Web - Painel de Controle, Lote e Lançamentos</title>
 <style>
 :root {
   --bg-body: #f1f5f9;
@@ -1231,19 +1231,19 @@ pre.terminal-box {
   <nav class="nav-menu">
     <button class="nav-btn active" onclick="switchTab('tab-dashboard', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-      Painel do Dia e Horarios
+      Painel do Dia e Horários
     </button>
     <button class="nav-btn" onclick="switchTab('tab-weekly', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      Visualizacao Semanal
+      Visualização Semanal
     </button>
     <button class="nav-btn" onclick="switchTab('tab-worklogs', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-      Lancamentos do Jira
+      Lançamentos do Jira
     </button>
     <button class="nav-btn" onclick="switchTab('tab-batch', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-      Lancamentos em Lote
+      Lançamentos em Lote
     </button>
     <button class="nav-btn" onclick="switchTab('tab-profiles', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -1251,18 +1251,18 @@ pre.terminal-box {
     </button>
     <button class="nav-btn" onclick="switchTab('tab-reports', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-      Relatorios e Banco de Horas
+      Relatórios e Banco de Horas
     </button>
     <button class="nav-btn" onclick="switchTab('tab-settings', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      Configuracoes e Atualizacao
+      Configurações e Atualização
     </button>
   </nav>
 
   <div class="sidebar-footer">
     <div class="daemon-pill">
       <span id="sidebar-dot" class="dot"></span>
-      <span id="sidebar-daemon-text">Verificando servico...</span>
+      <span id="sidebar-daemon-text">Verificando serviço...</span>
     </div>
     <div id="sidebar-profile-text">Perfil: -</div>
   </div>
@@ -1281,8 +1281,8 @@ pre.terminal-box {
         <span id="theme-toggle-label">Modo Claro</span>
       </button>
       <button class="btn btn-outline btn-sm" onclick="refreshAll()">Atualizar Dados</button>
-      <button class="btn btn-outline btn-sm" onclick="switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3])">Lancar em Lote</button>
-      <button class="btn btn-primary btn-sm" onclick="openWorklogModal()">+ Novo Lancamento no Jira</button>
+      <button class="btn btn-outline btn-sm" onclick="switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3])">Lançar em Lote</button>
+      <button class="btn btn-primary btn-sm" onclick="openWorklogModal()">+ Novo Lançamento no Jira</button>
     </div>
   </header>
 
@@ -1303,17 +1303,17 @@ pre.terminal-box {
         <div class="stat-card">
           <div class="stat-label">Ticket Ativo Atual</div>
           <div class="stat-value" id="stat-active-ticket">-</div>
-          <div class="stat-sub" id="stat-active-desc">Sem descricao definida</div>
+          <div class="stat-sub" id="stat-active-desc">Sem descrição definida</div>
         </div>
 
         <div class="stat-card">
-          <div class="stat-label">Servico em Background</div>
+          <div class="stat-label">Serviço em Background</div>
           <div class="stat-value" id="stat-daemon-state">Parado</div>
-          <div class="stat-sub" id="stat-last-event">Ultimo evento: -</div>
+          <div class="stat-sub" id="stat-last-event">Último evento: -</div>
         </div>
 
         <div class="stat-card">
-          <div class="stat-label">Sincronizacao Jira Hoje</div>
+          <div class="stat-label">Sincronização Jira Hoje</div>
           <div class="stat-value" id="stat-logged-state">Pendente</div>
           <div class="stat-sub" id="stat-queue-count">Fila offline: 0 item(ns)</div>
         </div>
@@ -1322,11 +1322,11 @@ pre.terminal-box {
       <!-- Controles do Servico e Cronometro -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Controles Rapidos do Servico e Cronometro</div>
+          <div class="card-title">Controles Rápidos do Serviço e Cronômetro</div>
           <div class="btn-group">
-            <button class="btn btn-success btn-sm" onclick="serviceAction('start_daemon')">Iniciar Servico (Tray)</button>
-            <button class="btn btn-danger btn-sm" onclick="serviceAction('stop_daemon')">Parar Servico</button>
-            <button class="btn btn-outline btn-sm" onclick="serviceAction('restart_daemon')">Reiniciar Servico</button>
+            <button class="btn btn-success btn-sm" onclick="serviceAction('start_daemon')">Iniciar Serviço (Tray)</button>
+            <button class="btn btn-danger btn-sm" onclick="serviceAction('stop_daemon')">Parar Serviço</button>
+            <button class="btn btn-outline btn-sm" onclick="serviceAction('restart_daemon')">Reiniciar Serviço</button>
           </div>
         </div>
         <div class="btn-group">
@@ -1334,45 +1334,45 @@ pre.terminal-box {
           <button class="btn btn-warning" onclick="serviceAction('manual_pause')">Pausar Contagem</button>
           <button class="btn btn-outline" onclick="serviceAction('simulate_unlock')">Simular Desbloqueio (Unlock)</button>
           <button class="btn btn-outline" onclick="serviceAction('simulate_lock')">Simular Bloqueio (Lock)</button>
-          <button class="btn btn-outline" onclick="serviceAction('test_popup')">Abrir Janela de Revisao Pre-Saida</button>
-          <button class="btn btn-success" onclick="openLogNowModal()">Lancar Horas de Hoje no Jira Agora</button>
+          <button class="btn btn-outline" onclick="serviceAction('test_popup')">Abrir Janela de Revisão Pré-Saída</button>
+          <button class="btn btn-success" onclick="openLogNowModal()">Lançar Horas de Hoje no Jira Agora</button>
         </div>
       </div>
 
       <!-- Grade Visual de Horarios de Hoje: Inicio, Pausa de Almoco, Retorno e Encerramento -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Horarios do Expediente de Hoje (Inicio, Pausa de Almoco, Retorno e Encerramento)</div>
-          <span style="font-size: 12px; color: var(--text-muted);">Edite os horarios abaixo para recalcular automaticamente o expediente de hoje</span>
+          <div class="card-title">Horários do Expediente de Hoje (Início, Pausa de Almoço, Retorno e Encerramento)</div>
+          <span style="font-size: 12px; color: var(--text-muted);">Edite os horários abaixo para recalcular automaticamente o expediente de hoje</span>
         </div>
 
         <div class="schedule-box">
           <div class="schedule-grid">
             <div class="form-group" style="margin-bottom:0">
-              <label>1. Horario de Inicio (Entrada)</label>
+              <label>1. Horário de Início (Entrada)</label>
               <input type="time" id="today-start-hm" class="form-control" oninput="previewTodaySchedule()">
             </div>
             <div class="form-group" style="margin-bottom:0">
-              <label>2. Pausa de Almoco (Saida)</label>
+              <label>2. Pausa de Almoço (Saída)</label>
               <input type="time" id="today-lunch-start-hm" class="form-control" oninput="previewTodaySchedule()">
             </div>
             <div class="form-group" style="margin-bottom:0">
-              <label>3. Retorno do Almoco</label>
+              <label>3. Retorno do Almoço</label>
               <input type="time" id="today-lunch-end-hm" class="form-control" oninput="previewTodaySchedule()">
             </div>
             <div class="form-group" style="margin-bottom:0">
-              <label>4. Horario de Encerramento (Saida)</label>
+              <label>4. Horário de Encerramento (Saída)</label>
               <input type="time" id="today-end-hm" class="form-control" oninput="previewTodaySchedule()">
             </div>
           </div>
 
           <div class="schedule-summary-bar">
             <div id="today-schedule-calc-text">
-              Preencha os horarios para visualizar o calculo liquido de manha, almoco e tarde.
+              Preencha os horários para visualizar o cálculo líquido de manhã, almoço e tarde.
             </div>
             <div class="btn-group">
-              <button class="btn btn-outline btn-sm" onclick="fillTodayDefaultSchedule()">Preencher Padrao do Perfil</button>
-              <button class="btn btn-primary btn-sm" onclick="saveTodaySchedule()">Aplicar Horarios ao Dia de Hoje</button>
+              <button class="btn btn-outline btn-sm" onclick="fillTodayDefaultSchedule()">Preencher Padrão do Perfil</button>
+              <button class="btn btn-primary btn-sm" onclick="saveTodaySchedule()">Aplicar Horários ao Dia de Hoje</button>
             </div>
           </div>
         </div>
@@ -1382,23 +1382,23 @@ pre.terminal-box {
         <!-- Troca de Ticket Ativo e Edicao de Descricao -->
         <div class="card" style="margin-bottom:0">
           <div class="card-header">
-            <div class="card-title">Trocar Ticket Ativo e Definir Descricao</div>
+            <div class="card-title">Trocar Ticket Ativo e Definir Descrição</div>
           </div>
           <div class="form-group">
             <label>Chave do Ticket Ativo (ex: CONSISABI-427, ATIVDIV-32)</label>
             <input type="text" id="switch-issue-input" class="form-control" placeholder="Ex: CONSISABI-427">
           </div>
           <div class="form-group">
-            <label>Descricao da Atividade Realizada no Ticket</label>
+            <label>Descrição da Atividade Realizada no Ticket</label>
             <textarea id="switch-comment-input" class="form-control" placeholder="Descreva as atividades executadas neste ticket..."></textarea>
           </div>
           <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px;">
             <input type="checkbox" id="today-no-comment-chk" onchange="toggleTodayNoComment(this.checked)">
-            <label for="today-no-comment-chk" style="margin:0; cursor:pointer;">Configurar expediente de hoje para enviar SEM NENHUMA DESCRICAO</label>
+            <label for="today-no-comment-chk" style="margin:0; cursor:pointer;">Configurar expediente de hoje para enviar SEM NENHUMA DESCRIÇÃO</label>
           </div>
           <div class="btn-group">
             <button class="btn btn-primary" onclick="submitSwitchOrComment('switch')">Trocar Ticket Ativo</button>
-            <button class="btn btn-outline" onclick="submitSwitchOrComment('set_comment')">Apenas Salvar Descricao</button>
+            <button class="btn btn-outline" onclick="submitSwitchOrComment('set_comment')">Apenas Salvar Descrição</button>
           </div>
         </div>
 
@@ -1442,11 +1442,11 @@ pre.terminal-box {
               <tr>
                 <th>#</th>
                 <th>Ticket</th>
-                <th>Inicio</th>
+                <th>Início</th>
                 <th>Fim</th>
-                <th>Duracao</th>
-                <th>Descricao do Intervalo</th>
-                <th>Acoes</th>
+                <th>Duração</th>
+                <th>Descrição do Intervalo</th>
+                <th>Ações</th>
               </tr>
             </thead>
             <tbody id="today-intervals-tbody">
@@ -1461,25 +1461,25 @@ pre.terminal-box {
     <section id="tab-weekly" class="tab-pane">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Visualizacao Semanal (Semana Atual ou Escolhida)</div>
+          <div class="card-title">Visualização Semanal (Semana Atual ou Escolhida)</div>
           <div class="btn-group">
             <button class="btn btn-outline btn-sm" onclick="navigateWeek(-1)">&lt; Semana Anterior</button>
             <button class="btn btn-primary btn-sm" onclick="navigateWeek(0)">Semana Atual (Hoje)</button>
-            <button class="btn btn-outline btn-sm" onclick="navigateWeek(1)">Proxima Semana &gt;</button>
+            <button class="btn btn-outline btn-sm" onclick="navigateWeek(1)">Próxima Semana &gt;</button>
           </div>
         </div>
 
         <div class="form-grid" style="align-items: end; margin-bottom: 16px;">
           <div class="form-group" style="margin-bottom:0">
-            <label>Escolher Qualquer Data no Calendario (Exibe a Semana de Segunda a Domingo)</label>
+            <label>Escolher Qualquer Data no Calendário (Exibe a Semana de Segunda a Domingo)</label>
             <input type="date" id="weekly-ref-date" class="form-control" onchange="loadWeeklyView(this.value)">
           </div>
           <div class="form-group" style="margin-bottom:0; flex-direction:row; align-items:center; gap:8px; padding-bottom:8px;">
             <input type="checkbox" id="weekly-fetch-jira-chk" checked onchange="loadWeeklyView(document.getElementById('weekly-ref-date').value)">
-            <label for="weekly-fetch-jira-chk" style="margin:0; cursor:pointer;">Sincronizar com worklogs reais lancados no Jira nesta semana</label>
+            <label for="weekly-fetch-jira-chk" style="margin:0; cursor:pointer;">Sincronizar com worklogs reais lançados no Jira nesta semana</label>
           </div>
           <div class="btn-group" style="justify-content:flex-end;">
-            <button class="btn btn-success" onclick="openBatchForCurrentWeek()">Lancar Dias Faltantes Desta Semana em Lote</button>
+            <button class="btn btn-success" onclick="openBatchForCurrentWeek()">Lançar Dias Faltantes Desta Semana em Lote</button>
           </div>
         </div>
 
@@ -1487,7 +1487,7 @@ pre.terminal-box {
           <div class="stat-card">
             <div class="stat-label">Semana Selecionada</div>
             <div class="stat-value" id="wk-range-label" style="font-size:17px;">-</div>
-            <div class="stat-sub" id="wk-days-logged-sub">Dias uteis lancados: 0 / 5</div>
+            <div class="stat-sub" id="wk-days-logged-sub">Dias úteis lançados: 0 / 5</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Total Trabalhado na Semana</div>
@@ -1495,7 +1495,7 @@ pre.terminal-box {
             <div class="stat-sub" id="wk-full-target-sub">Meta semanal (5 dias): -</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">Meta Esperada ate Hoje</div>
+            <div class="stat-label">Meta Esperada até Hoje</div>
             <div class="stat-value" id="wk-target-today">-</div>
           </div>
           <div class="stat-card">
@@ -1510,19 +1510,19 @@ pre.terminal-box {
               <tr>
                 <th>Dia</th>
                 <th>Data</th>
-                <th>Inicio</th>
-                <th>Pausa Almoco</th>
+                <th>Início</th>
+                <th>Pausa Almoço</th>
                 <th>Retorno</th>
                 <th>Encerramento</th>
-                <th>Tickets e Descricoes</th>
+                <th>Tickets e Descrições</th>
                 <th>Total do Dia</th>
                 <th>Meta</th>
                 <th>Status</th>
-                <th style="text-align:right;">Acoes Rapidas</th>
+                <th style="text-align:right;">Ações Rápidas</th>
               </tr>
             </thead>
             <tbody id="weekly-table-tbody">
-              <tr><td colspan="11" style="text-align:center; padding:24px; color:var(--text-muted);">Carregando visualizacao semanal...</td></tr>
+              <tr><td colspan="11" style="text-align:center; padding:24px; color:var(--text-muted);">Carregando visualização semanal...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1533,30 +1533,30 @@ pre.terminal-box {
     <section id="tab-worklogs" class="tab-pane">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Gerenciador de Todos os Lancamentos do Jira (Worklogs)</div>
+          <div class="card-title">Gerenciador de Todos os Lançamentos do Jira (Worklogs)</div>
           <div class="btn-group">
-            <button class="btn btn-outline" onclick="switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3])">Lancamento Multi-Dias / Semanas em Lote</button>
-            <button class="btn btn-primary" onclick="openWorklogModal()">+ Lancar Novo Worklog no Jira</button>
+            <button class="btn btn-outline" onclick="switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3])">Lançamento Multi-Dias / Semanas em Lote</button>
+            <button class="btn btn-primary" onclick="openWorklogModal()">+ Lançar Novo Worklog no Jira</button>
           </div>
         </div>
 
         <div class="form-grid" style="align-items: end;">
           <div class="form-group" style="margin-bottom:0">
-            <label>Periodo Retroativo (Dias)</label>
+            <label>Período Retroativo (Dias)</label>
             <select id="wl-filter-days" class="form-control" onchange="loadJiraWorklogs()">
-              <option value="7">Ultimos 7 dias (Semanal)</option>
-              <option value="14" selected>Ultimos 14 dias (Quinzena)</option>
-              <option value="30">Ultimos 30 dias (Mensal)</option>
-              <option value="60">Ultimos 60 dias</option>
-              <option value="90">Ultimos 90 dias</option>
+              <option value="7">Últimos 7 dias (Semanal)</option>
+              <option value="14" selected>Últimos 14 dias (Quinzena)</option>
+              <option value="30">Últimos 30 dias (Mensal)</option>
+              <option value="60">Últimos 60 dias</option>
+              <option value="90">Últimos 90 dias</option>
             </select>
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label>Filtrar por Ticket Especifico no Jira (Opcional)</label>
-            <input type="text" id="wl-filter-issue" class="form-control" placeholder="Ex: CONSISABI-427 (vazio = todos meus lancamentos)">
+            <label>Filtrar por Ticket Específico no Jira (Opcional)</label>
+            <input type="text" id="wl-filter-issue" class="form-control" placeholder="Ex: CONSISABI-427 (vazio = todos meus lançamentos)">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label>Busca Rapida na Tabela (Ticket, Data ou Descricao)</label>
+            <label>Busca Rápida na Tabela (Ticket, Data ou Descrição)</label>
             <input type="text" id="wl-search-text" class="form-control" placeholder="Filtrar resultados exibidos..." oninput="renderWorklogsTable()">
           </div>
           <div class="btn-group">
@@ -1569,7 +1569,7 @@ pre.terminal-box {
       <!-- Fila Offline Pendente (se houver) -->
       <div class="card" id="offline-queue-card" style="display:none;">
         <div class="card-header">
-          <div class="card-title">Fila Offline Pendente de Sincronizacao com o Jira</div>
+          <div class="card-title">Fila Offline Pendente de Sincronização com o Jira</div>
           <button class="btn btn-success btn-sm" onclick="serviceAction('flush_queue')">Sincronizar Fila Agora</button>
         </div>
         <div class="table-responsive">
@@ -1579,9 +1579,9 @@ pre.terminal-box {
                 <th>Data</th>
                 <th>Ticket</th>
                 <th>Tempo</th>
-                <th>Descricao</th>
+                <th>Descrição</th>
                 <th>Tentativas / Erro</th>
-                <th>Acoes</th>
+                <th>Ações</th>
               </tr>
             </thead>
             <tbody id="offline-queue-tbody"></tbody>
@@ -1592,10 +1592,10 @@ pre.terminal-box {
       <!-- Barra de Acoes em Lote (Multi-selecao) -->
       <div class="bulk-bar" id="wl-bulk-bar">
         <div>
-          <strong id="wl-selected-count">0</strong> lancamento(s) selecionado(s) na tabela
+          <strong id="wl-selected-count">0</strong> lançamento(s) selecionado(s) na tabela
         </div>
         <div class="btn-group">
-          <button class="btn btn-primary btn-sm" onclick="openBulkEditModal()">Editar / Migrar Ticket / Horarios em Lote</button>
+          <button class="btn btn-primary btn-sm" onclick="openBulkEditModal()">Editar / Migrar Ticket / Horários em Lote</button>
           <button class="btn btn-danger btn-sm" onclick="deleteSelectedWorklogsBulk()">Excluir Selecionados em Lote</button>
           <button class="btn btn-outline btn-sm" onclick="clearWorklogSelection()">Desmarcar Todos</button>
         </div>
@@ -1604,8 +1604,8 @@ pre.terminal-box {
       <!-- Tabela Principal de Lancamentos do Jira -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Lancamentos Encontrados no Jira (<span id="wl-count-label">0</span>)</div>
-          <span style="font-size:12px; color:var(--text-muted);">Marque varios lancamentos para editar/excluir em lote, ou clique em Editar na linha desejada</span>
+          <div class="card-title">Lançamentos Encontrados no Jira (<span id="wl-count-label">0</span>)</div>
+          <span style="font-size:12px; color:var(--text-muted);">Marque vários lançamentos para editar/excluir em lote, ou clique em Editar na linha desejada</span>
         </div>
         <div class="table-responsive">
           <table>
@@ -1614,17 +1614,17 @@ pre.terminal-box {
                 <th style="width:36px;"><input type="checkbox" id="wl-select-all-chk" onchange="toggleSelectAllWorklogs(this.checked)"></th>
                 <th>Data</th>
                 <th>Ticket</th>
-                <th>Inicio</th>
-                <th>Pausa Almoco</th>
+                <th>Início</th>
+                <th>Pausa Almoço</th>
                 <th>Retorno</th>
                 <th>Encerramento</th>
-                <th>Total Lancado</th>
-                <th>Descricao / Comentario</th>
-                <th style="text-align:right;">Acoes</th>
+                <th>Total Lançado</th>
+                <th>Descrição / Comentário</th>
+                <th style="text-align:right;">Ações</th>
               </tr>
             </thead>
             <tbody id="jira-worklogs-tbody">
-              <tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);">Clique em "Consultar no Jira" ou aguarde o carregamento dos lancamentos...</td></tr>
+              <tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);">Clique em "Consultar no Jira" ou aguarde o carregamento dos lançamentos...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1635,35 +1635,35 @@ pre.terminal-box {
     <section id="tab-batch" class="tab-pane">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Gerador de Lancamentos em Lote (Multiplos Dias, Semanas e Multiplos Tickets)</div>
+          <div class="card-title">Gerador de Lançamentos em Lote (Múltiplos Dias, Semanas e Múltiplos Tickets)</div>
           <div class="btn-group" style="align-items:center;">
             <span style="font-size:11.5px; color:var(--text-muted); margin-right:4px;">Atalhos Opcionais:</span>
             <button class="btn btn-outline btn-sm" onclick="setBatchPreset('this_week')">Esta Semana</button>
             <button class="btn btn-outline btn-sm" onclick="setBatchPreset('last_week')">Semana Passada</button>
-            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('2_weeks')">Ultimas 2 Semanas</button>
-            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('3_weeks')">Ultimas 3 Semanas</button>
-            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('month')">Ultimos 30 Dias</button>
+            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('2_weeks')">Últimas 2 Semanas</button>
+            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('3_weeks')">Últimas 3 Semanas</button>
+            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('month')">Últimos 30 Dias</button>
           </div>
         </div>
 
         <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-          Escolha livremente a <strong>Data Inicial</strong> e a <strong>Data Final</strong> do periodo que deseja lancar, marque os dias da semana desejados (por padrao Segunda a Sexta, pulando Sabado e Domingo) e selecione abaixo como os tickets devem ser distribuidos.
+          Escolha livremente a <strong>Data Inicial</strong> e a <strong>Data Final</strong> do período que deseja lançar, marque os dias da semana desejados (por padrão Segunda a Sexta, pulando Sábado e Domingo) e selecione abaixo como os tickets devem ser distribuídos.
         </p>
 
         <div class="form-grid">
           <div class="form-group">
-            <label>Data Inicial do Periodo (Escolha Livre)</label>
+            <label>Data Inicial do Período (Escolha Livre)</label>
             <input type="date" id="batch-start-date" class="form-control" oninput="onBatchPeriodOrWeekdayChange()" onchange="onBatchPeriodOrWeekdayChange()">
           </div>
           <div class="form-group">
-            <label>Data Final do Periodo (Escolha Livre)</label>
+            <label>Data Final do Período (Escolha Livre)</label>
             <input type="date" id="batch-end-date" class="form-control" oninput="onBatchPeriodOrWeekdayChange()" onchange="onBatchPeriodOrWeekdayChange()">
           </div>
           <div class="form-group" style="grid-column: span 2;">
-            <label>Como Deseja Lancar os Tickets neste Periodo?</label>
+            <label>Como Deseja Lançar os Tickets neste Período?</label>
             <select id="batch-multi-mode" class="form-control" onchange="onBatchMultiModeChange()">
-              <option value="one_per_day">1 Ticket por Dia (Em Ordem Cronologica: 1 linha para cada dia habilitado do periodo, limitado ao total de dias)</option>
-              <option value="split_day">Dividir o Mesmo Dia entre Varios Tickets (Lancar 2 ou mais tickets dentro do mesmo dia e repetir esse padrao em todos os dias)</option>
+              <option value="one_per_day">1 Ticket por Dia (Em Ordem Cronológica: 1 linha para cada dia habilitado do período, limitado ao total de dias)</option>
+              <option value="split_day">Dividir o Mesmo Dia entre Vários Tickets (Lançar 2 ou mais tickets dentro do mesmo dia e repetir esse padrão em todos os dias)</option>
             </select>
           </div>
         </div>
@@ -1674,27 +1674,27 @@ pre.terminal-box {
 
         <div class="schedule-box">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-            <div style="font-weight:700; font-size:13px;">Expediente Base de Referencia do Dia</div>
+            <div style="font-weight:700; font-size:13px;">Expediente Base de Referência do Dia</div>
             <div class="btn-group">
-              <button class="btn btn-outline btn-sm" onclick="setBatchBaseProfile('6h')">Padrao 6h (07:45 - 15:15)</button>
-              <button class="btn btn-outline btn-sm" onclick="setBatchBaseProfile('8h')">Padrao 8h (07:42 - 17:42)</button>
+              <button class="btn btn-outline btn-sm" onclick="setBatchBaseProfile('6h')">Padrão 6h (07:45 - 15:15)</button>
+              <button class="btn btn-outline btn-sm" onclick="setBatchBaseProfile('8h')">Padrão 8h (07:42 - 17:42)</button>
             </div>
           </div>
           <div class="schedule-grid">
             <div class="form-group" style="margin-bottom:0">
-              <label>Horario de Inicio</label>
+              <label>Horário de Início</label>
               <input type="time" id="batch-start-hm" class="form-control" value="07:45" oninput="previewBatchBaseSchedule()">
             </div>
             <div class="form-group" style="margin-bottom:0">
-              <label>Pausa de Almoco</label>
+              <label>Pausa de Almoço</label>
               <input type="time" id="batch-ls-hm" class="form-control" value="12:00" oninput="previewBatchBaseSchedule()">
             </div>
             <div class="form-group" style="margin-bottom:0">
-              <label>Retorno do Almoco</label>
+              <label>Retorno do Almoço</label>
               <input type="time" id="batch-le-hm" class="form-control" value="13:30" oninput="previewBatchBaseSchedule()">
             </div>
             <div class="form-group" style="margin-bottom:0">
-              <label>Horario de Encerramento</label>
+              <label>Horário de Encerramento</label>
               <input type="time" id="batch-end-hm" class="form-control" value="15:15" oninput="previewBatchBaseSchedule()">
             </div>
           </div>
@@ -1702,20 +1702,20 @@ pre.terminal-box {
           <div class="schedule-summary-bar">
             <div style="display:flex; flex-direction:column; gap:6px;">
               <div>
-                <strong>Dias da Semana Habilitados para Lancamento:</strong>
+                <strong>Dias da Semana Habilitados para Lançamento:</strong>
                 <div class="weekday-checks">
                   <label><input type="checkbox" class="batch-wd-chk" value="0" checked onchange="onBatchPeriodOrWeekdayChange()"> Seg</label>
                   <label><input type="checkbox" class="batch-wd-chk" value="1" checked onchange="onBatchPeriodOrWeekdayChange()"> Ter</label>
                   <label><input type="checkbox" class="batch-wd-chk" value="2" checked onchange="onBatchPeriodOrWeekdayChange()"> Qua</label>
                   <label><input type="checkbox" class="batch-wd-chk" value="3" checked onchange="onBatchPeriodOrWeekdayChange()"> Qui</label>
                   <label><input type="checkbox" class="batch-wd-chk" value="4" checked onchange="onBatchPeriodOrWeekdayChange()"> Sex</label>
-                  <label><input type="checkbox" class="batch-wd-chk" value="5" onchange="onBatchPeriodOrWeekdayChange()"> Sab</label>
+                  <label><input type="checkbox" class="batch-wd-chk" value="5" onchange="onBatchPeriodOrWeekdayChange()"> Sáb</label>
                   <label><input type="checkbox" class="batch-wd-chk" value="6" onchange="onBatchPeriodOrWeekdayChange()"> Dom</label>
                 </div>
               </div>
               <div id="batch-period-days-info" style="font-size:12.5px; color:var(--primary-text); font-weight:600;"></div>
             </div>
-            <div id="batch-base-calc-text" style="font-weight:600;">Tempo Liquido Base: 06:00</div>
+            <div id="batch-base-calc-text" style="font-weight:600;">Tempo Líquido Base: 06:00</div>
           </div>
         </div>
 
@@ -1728,10 +1728,10 @@ pre.terminal-box {
             </div>
             <div class="btn-group">
               <button class="btn btn-primary btn-sm" id="batch-add-ticket-btn" onclick="addBatchTemplateTicket()">+ Adicionar Ticket</button>
-              <button class="btn btn-outline btn-sm" id="batch-copy-first-btn" onclick="copyFirstTicketToAllBatchTemplates()" title="Copia o codigo e a descricao do Ticket #1 para todas as linhas abaixo">Repetir Ticket #1 em Todos</button>
-              <button class="btn btn-outline btn-sm" id="batch-split-eq-btn" onclick="autoSplitBatchTicketsEqual()" title="Divide o tempo liquido do dia igualmente entre todos os tickets listados">Dividir Horas Iguais no Dia</button>
-              <button class="btn btn-outline btn-sm" id="batch-split-ma-btn" onclick="autoSplitBatchTicketsMorningAfternoon()" title="1o ticket de manha (ate o almoco) e demais tickets a tarde">Dividir Manha / Tarde</button>
-              <button class="btn btn-outline btn-sm" onclick="syncBatchTicketsWithBaseSchedule()" title="Copia o expediente base completo para todos os tickets">Aplicar Horario Base em Todos</button>
+              <button class="btn btn-outline btn-sm" id="batch-copy-first-btn" onclick="copyFirstTicketToAllBatchTemplates()" title="Copia o código e a descrição do Ticket #1 para todas as linhas abaixo">Repetir Ticket #1 em Todos</button>
+              <button class="btn btn-outline btn-sm" id="batch-split-eq-btn" onclick="autoSplitBatchTicketsEqual()" title="Divide o tempo líquido do dia igualmente entre todos os tickets listados">Dividir Horas Iguais no Dia</button>
+              <button class="btn btn-outline btn-sm" id="batch-split-ma-btn" onclick="autoSplitBatchTicketsMorningAfternoon()" title="1º ticket de manhã (até o almoço) e demais tickets à tarde">Dividir Manhã / Tarde</button>
+              <button class="btn btn-outline btn-sm" onclick="syncBatchTicketsWithBaseSchedule()" title="Copia o expediente base completo para todos os tickets">Aplicar Horário Base em Todos</button>
             </div>
           </div>
 
@@ -1741,13 +1741,13 @@ pre.terminal-box {
                 <tr>
                   <th style="min-width:155px;" id="batch-tpl-col-order-hdr">Ordem / Dia Correspondente</th>
                   <th>Ticket (Ex: CONSISABI-427)</th>
-                  <th>Inicio</th>
-                  <th>Pausa Almoco</th>
+                  <th>Início</th>
+                  <th>Pausa Almoço</th>
                   <th>Retorno</th>
                   <th>Encerramento</th>
-                  <th>Liquido</th>
-                  <th>Descricao / Comentario deste Ticket</th>
-                  <th style="text-align:right;">Acao</th>
+                  <th>Líquido</th>
+                  <th>Descrição / Comentário deste Ticket</th>
+                  <th style="text-align:right;">Ação</th>
                 </tr>
               </thead>
               <tbody id="batch-template-tickets-tbody"></tbody>
@@ -1759,15 +1759,15 @@ pre.terminal-box {
           <div style="display:flex; flex-direction:column; gap:6px;">
             <label style="font-size:13px; display:flex; align-items:center; gap:8px; cursor:pointer;">
               <input type="checkbox" id="batch-skip-existing-chk" checked>
-              Consultar o Jira e desmarcar automaticamente os dias que ja possuem lancamento registrado
+              Consultar o Jira e desmarcar automaticamente os dias que já possuem lançamento registrado
             </label>
             <label style="font-size:13px; display:flex; align-items:center; gap:8px; cursor:pointer;">
               <input type="checkbox" id="batch-no-comment-chk">
-              Enviar lancamentos deste lote SEM nenhuma descricao
+              Enviar lançamentos deste lote SEM nenhuma descrição
             </label>
           </div>
           <div class="btn-group">
-            <button class="btn btn-primary" onclick="generateBatchPreview()">1. Validar no Jira e Gerar Pre-Visualizacao de Envio</button>
+            <button class="btn btn-primary" onclick="generateBatchPreview()">1. Validar no Jira e Gerar Pré-Visualização de Envio</button>
           </div>
         </div>
       </div>
@@ -1775,11 +1775,11 @@ pre.terminal-box {
       <!-- Grade Editavel de Pre-Visualizacao do Lote -->
       <div class="card" id="batch-preview-card" style="display:none;">
         <div class="card-header">
-          <div class="card-title">Revisao Dia a Dia do Lote (<span id="batch-selected-summary">0 selecionados</span>)</div>
+          <div class="card-title">Revisão Dia a Dia do Lote (<span id="batch-selected-summary">0 selecionados</span>)</div>
           <div class="btn-group">
             <button class="btn btn-outline btn-sm" onclick="toggleAllBatchRows(true)">Marcar Todos</button>
             <button class="btn btn-outline btn-sm" onclick="toggleAllBatchRows(false)">Desmarcar Todos</button>
-            <button class="btn btn-success" id="batch-submit-btn" onclick="submitBatchWorklogs()">2. Lancar Todos os Selecionados no Jira Agora</button>
+            <button class="btn btn-success" id="batch-submit-btn" onclick="submitBatchWorklogs()">2. Lançar Todos os Selecionados no Jira Agora</button>
           </div>
         </div>
 
@@ -1787,11 +1787,11 @@ pre.terminal-box {
         <div class="schedule-box" style="margin-bottom:14px; padding:10px 14px;">
           <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
             <div style="font-size:12.5px; font-weight:600; color:var(--text-muted);">
-              Alterar Rapido nas Linhas Marcadas Abaixo:
+              Alterar Rápido nas Linhas Marcadas Abaixo:
             </div>
             <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; flex:1; justify-content:flex-end;">
               <input type="text" id="batch-quick-issue" class="form-control" style="width:160px; padding:6px 10px;" placeholder="Novo Ticket (ex: PROJ-10)">
-              <input type="text" id="batch-quick-comment" class="form-control" style="width:240px; padding:6px 10px;" placeholder="Nova Descricao (opcional)">
+              <input type="text" id="batch-quick-comment" class="form-control" style="width:240px; padding:6px 10px;" placeholder="Nova Descrição (opcional)">
               <button class="btn btn-outline btn-sm" onclick="applyQuickFillToBatchRows()">Aplicar nas Linhas Marcadas</button>
             </div>
           </div>
@@ -1806,13 +1806,13 @@ pre.terminal-box {
                 <th>Dia</th>
                 <th>Status Atual no Jira</th>
                 <th>Ticket</th>
-                <th>Inicio</th>
-                <th>Almoco</th>
+                <th>Início</th>
+                <th>Almoço</th>
                 <th>Retorno</th>
                 <th>Encerramento</th>
-                <th>Liquido</th>
-                <th>Descricao</th>
-                <th style="text-align:right;">Acoes no Dia</th>
+                <th>Líquido</th>
+                <th>Descrição</th>
+                <th style="text-align:right;">Ações no Dia</th>
               </tr>
             </thead>
             <tbody id="batch-preview-tbody"></tbody>
@@ -1825,7 +1825,7 @@ pre.terminal-box {
     <section id="tab-profiles" class="tab-pane">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Selecao e Configuracao Visual de Perfis de Turno</div>
+          <div class="card-title">Seleção e Configuração Visual de Perfis de Turno</div>
           <button class="btn btn-primary" onclick="saveProfileSettings()">Salvar Perfil e Janelas</button>
         </div>
 
@@ -1835,26 +1835,26 @@ pre.terminal-box {
             <select id="prof-active-select" class="form-control" onchange="onProfileSelectChange()">
               <option value="8h">Turno de 8h (8h)</option>
               <option value="6h_0745">Turno de 6h Cedo - 07:45 (6h_0745)</option>
-              <option value="6h_0800">Turno de 6h Padrao - 08:00 (6h_0800)</option>
+              <option value="6h_0800">Turno de 6h Padrão - 08:00 (6h_0800)</option>
               <option value="custom">Turno Personalizado (custom)</option>
             </select>
           </div>
           <div class="form-group">
-            <label>Meta Diaria de Horas do Perfil</label>
+            <label>Meta Diária de Horas do Perfil</label>
             <input type="number" step="0.5" min="1" max="24" id="prof-target-hours" class="form-control">
           </div>
           <div class="form-group" style="grid-column: span 2;">
-            <label>Descricao do Perfil</label>
+            <label>Descrição do Perfil</label>
             <input type="text" id="prof-description" class="form-control">
           </div>
         </div>
 
         <div class="grid-2">
           <div class="schedule-box" style="margin-bottom:0">
-            <div style="font-weight:700; font-size:13px; margin-bottom:12px;">Janelas de Deteccao Automatica (Inicio e Fim de cada Janela)</div>
+            <div style="font-weight:700; font-size:13px; margin-bottom:12px;">Janelas de Detecção Automática (Início e Fim de cada Janela)</div>
             <div class="form-grid">
               <div class="form-group">
-                <label>Janela de Entrada (Inicio)</label>
+                <label>Janela de Entrada (Início)</label>
                 <input type="time" id="win-entry-start" class="form-control">
               </div>
               <div class="form-group">
@@ -1863,25 +1863,25 @@ pre.terminal-box {
               </div>
 
               <div class="form-group">
-                <label>Janela Saida Almoco (Inicio)</label>
+                <label>Janela Saída Almoço (Início)</label>
                 <input type="time" id="win-ls-start" class="form-control">
               </div>
               <div class="form-group">
-                <label>Janela Saida Almoco (Fim)</label>
+                <label>Janela Saída Almoço (Fim)</label>
                 <input type="time" id="win-ls-end" class="form-control">
               </div>
 
               <div class="form-group">
-                <label>Janela Retorno Almoco (Inicio)</label>
+                <label>Janela Retorno Almoço (Início)</label>
                 <input type="time" id="win-le-start" class="form-control">
               </div>
               <div class="form-group">
-                <label>Janela Retorno Almoco (Fim)</label>
+                <label>Janela Retorno Almoço (Fim)</label>
                 <input type="time" id="win-le-end" class="form-control">
               </div>
 
               <div class="form-group">
-                <label>Janela de Encerramento (Inicio)</label>
+                <label>Janela de Encerramento (Início)</label>
                 <input type="time" id="win-exit-start" class="form-control">
               </div>
               <div class="form-group">
@@ -1892,7 +1892,7 @@ pre.terminal-box {
           </div>
 
           <div class="schedule-box" style="margin-bottom:0">
-            <div style="font-weight:700; font-size:13px; margin-bottom:12px;">Calculadora de Janelas por Horario Base + Folgas (Minutos)</div>
+            <div style="font-weight:700; font-size:13px; margin-bottom:12px;">Calculadora de Janelas por Horário Base + Folgas (Minutos)</div>
             <div class="form-grid">
               <div class="form-group">
                 <label>Entrada Alvo</label>
@@ -1907,7 +1907,7 @@ pre.terminal-box {
               </div>
 
               <div class="form-group">
-                <label>Saida Almoco Alvo</label>
+                <label>Saída Almoço Alvo</label>
                 <input type="time" id="calc-ls-hm" class="form-control" value="12:00">
               </div>
               <div class="form-group">
@@ -1919,7 +1919,7 @@ pre.terminal-box {
               </div>
 
               <div class="form-group">
-                <label>Retorno Almoco Alvo</label>
+                <label>Retorno Almoço Alvo</label>
                 <input type="time" id="calc-le-hm" class="form-control" value="13:30">
               </div>
               <div class="form-group">
@@ -1952,22 +1952,22 @@ pre.terminal-box {
     <section id="tab-reports" class="tab-pane">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Relatorio Consolidado e Saldo de Horas</div>
+          <div class="card-title">Relatório Consolidado e Saldo de Horas</div>
           <div class="btn-group">
-            <button class="btn btn-outline btn-sm" onclick="loadReport(7)">Ultimos 7 Dias</button>
-            <button class="btn btn-outline btn-sm" onclick="loadReport(14)">Ultimos 14 Dias</button>
-            <button class="btn btn-outline btn-sm" onclick="loadReport(30)">Ultimos 30 Dias</button>
-            <button class="btn btn-outline btn-sm" onclick="loadReport(60)">Ultimos 60 Dias</button>
+            <button class="btn btn-outline btn-sm" onclick="loadReport(7)">Últimos 7 Dias</button>
+            <button class="btn btn-outline btn-sm" onclick="loadReport(14)">Últimos 14 Dias</button>
+            <button class="btn btn-outline btn-sm" onclick="loadReport(30)">Últimos 30 Dias</button>
+            <button class="btn btn-outline btn-sm" onclick="loadReport(60)">Últimos 60 Dias</button>
           </div>
         </div>
 
         <div class="grid-4" style="margin-bottom: 16px;">
           <div class="stat-card">
-            <div class="stat-label">Total Trabalhado no Periodo</div>
+            <div class="stat-label">Total Trabalhado no Período</div>
             <div class="stat-value" id="rep-total-worked">-</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">Meta Esperada (Dias Uteis)</div>
+            <div class="stat-label">Meta Esperada (Dias Úteis)</div>
             <div class="stat-value" id="rep-total-target">-</div>
           </div>
           <div class="stat-card">
@@ -1975,7 +1975,7 @@ pre.terminal-box {
             <div class="stat-value" id="rep-balance">-</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">Periodo Analisado</div>
+            <div class="stat-label">Período Analisado</div>
             <div class="stat-value" id="rep-days-count">7 dias</div>
           </div>
         </div>
@@ -1996,7 +1996,7 @@ pre.terminal-box {
           </table>
         </div>
 
-        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">VISUALIZACAO EM FORMATO TERMINAL</div>
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">VISUALIZAÇÃO EM FORMATO TERMINAL</div>
         <pre class="terminal-box" id="rep-raw-pre"></pre>
       </div>
     </section>
@@ -2006,9 +2006,9 @@ pre.terminal-box {
       <!-- Card de Atualizacao em 1 Clique e Isolamento de Configuracoes Individuais -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Atualizacao do Aplicativo e Isolamento Multi-Usuario de Tokens</div>
+          <div class="card-title">Atualização do Aplicativo e Isolamento Multi-Usuário de Tokens</div>
           <div class="btn-group">
-            <button class="btn btn-outline btn-sm" onclick="checkAppUpdate()">Verificar se ha Atualizacao</button>
+            <button class="btn btn-outline btn-sm" onclick="checkAppUpdate()">Verificar se há Atualização</button>
             <button class="btn btn-primary btn-sm" onclick="runAppUpdate()">Atualizar Aplicativo Agora (1 Clique)</button>
           </div>
         </div>
@@ -2016,17 +2016,17 @@ pre.terminal-box {
         <div class="schedule-box">
           <div class="form-grid">
             <div>
-              <div style="font-size:12px; color:var(--text-muted);">VERSAO INSTALADA</div>
+              <div style="font-size:12px; color:var(--text-muted);">VERSÃO INSTALADA</div>
               <div style="font-size:15px; font-weight:700;" id="upd-version-text">v2.2.0</div>
               <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;" id="upd-lastmod-text">-</div>
             </div>
             <div>
-              <div style="font-size:12px; color:var(--text-muted);">USUARIO WINDOWS ATUAL</div>
+              <div style="font-size:12px; color:var(--text-muted);">USUÁRIO WINDOWS ATUAL</div>
               <div style="font-size:15px; font-weight:700;" id="upd-user-text">-</div>
-              <div style="font-size:11.5px; color:var(--success); margin-top:2px;">Token e dados 100% isolados por usuario</div>
+              <div style="font-size:11.5px; color:var(--success); margin-top:2px;">Token e dados 100% isolados por usuário</div>
             </div>
             <div style="grid-column: span 2;">
-              <div style="font-size:12px; color:var(--text-muted);">PASTA PRIVADA DE CONFIGURACAO E TOKEN (NUNCA AFETADA POR ATUALIZACOES)</div>
+              <div style="font-size:12px; color:var(--text-muted);">PASTA PRIVADA DE CONFIGURAÇÃO E TOKEN (NUNCA AFETADA POR ATUALIZAÇÕES)</div>
               <div style="font-family:Consolas,monospace; font-size:12.5px; margin-top:4px;" id="upd-config-path-text">~/.jirabot/config.json</div>
             </div>
           </div>
@@ -2035,27 +2035,27 @@ pre.terminal-box {
         <div class="grid-2" style="margin-bottom:0">
           <div>
             <div class="form-group">
-              <label>Fonte de Atualizacao para os Usuarios (Pasta Compartilhada na Rede, OneDrive, Git ou URL .zip)</label>
+              <label>Fonte de Atualização para os Usuários (Pasta Compartilhada na Rede, OneDrive, Git ou URL .zip)</label>
               <input type="text" id="cfg-update-source" class="form-control" placeholder="Ex: \\servidor\compartilhamento\JiraBot ou URL .zip">
               <small style="font-size:11.5px; color:var(--text-muted);">
-                Todos os usuarios apontados para a mesma pasta de rede ou Git podem clicar em "Atualizar Aplicativo Agora" sem precisar receber arquivos manualmente e sem perder seus tokens individuais.
+                Todos os usuários apontados para a mesma pasta de rede ou Git podem clicar em "Atualizar Aplicativo Agora" sem precisar receber arquivos manualmente e sem perder seus tokens individuais.
               </small>
             </div>
             <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
               <input type="checkbox" id="cfg-auto-update">
-              <label for="cfg-auto-update" style="margin:0; cursor:pointer;">Buscar e aplicar atualizacoes automaticamente ao iniciar o JiraBot</label>
+              <label for="cfg-auto-update" style="margin:0; cursor:pointer;">Buscar e aplicar atualizações automaticamente ao iniciar o JiraBot</label>
             </div>
           </div>
 
           <div>
             <div class="form-group">
-              <label>Publicar Nova Versao Limpa na Pasta Compartilhada (Uso do Mantenedor)</label>
+              <label>Publicar Nova Versão Limpa na Pasta Compartilhada (Uso do Mantenedor)</label>
               <div style="display:flex; gap:8px;">
                 <input type="text" id="publish-target-dir" class="form-control" placeholder="Ex: \\servidor\compartilhamento\JiraBot" style="flex:1">
-                <button class="btn btn-outline" onclick="publishCleanRelease()">Publicar Codigo Limpo</button>
+                <button class="btn btn-outline" onclick="publishCleanRelease()">Publicar Código Limpo</button>
               </div>
               <small style="font-size:11.5px; color:var(--text-muted);">
-                Copia apenas os arquivos .py, .bat e assets atualizados para a pasta compartilhada da equipe (sem incluir jamais .env, tokens, config.json ou relatorios).
+                Copia apenas os arquivos .py, .bat e assets atualizados para a pasta compartilhada da equipe (sem incluir jamais .env, tokens, config.json ou relatórios).
               </small>
             </div>
           </div>
@@ -2067,7 +2067,7 @@ pre.terminal-box {
         <div class="card">
           <div class="card-header">
             <div class="card-title">Credenciais Individuais e Acesso ao Jira REST API</div>
-            <button class="btn btn-outline btn-sm" onclick="testJiraConnection()">Testar Conexao com o Jira</button>
+            <button class="btn btn-outline btn-sm" onclick="testJiraConnection()">Testar Conexão com o Jira</button>
           </div>
           <div class="form-group">
             <label>URL Base do Jira</label>
@@ -2082,11 +2082,11 @@ pre.terminal-box {
             <input type="password" id="cfg-api-token" class="form-control" placeholder="Deixe em branco para manter o token salvo atual">
           </div>
           <div class="form-group">
-            <label>Ticket Padrao (Default Issue)</label>
+            <label>Ticket Padrão (Default Issue)</label>
             <input type="text" id="cfg-default-issue" class="form-control" placeholder="Ex: ATIVDIV-32">
           </div>
           <div class="form-group">
-            <label>Descricao Padrao de Fallback</label>
+            <label>Descrição Padrão de Fallback</label>
             <input type="text" id="cfg-default-comment" class="form-control">
           </div>
           <div id="test-jira-result" style="margin-top: 10px; font-size: 13px; display:none; padding: 10px; border-radius: 6px;"></div>
@@ -2097,23 +2097,23 @@ pre.terminal-box {
             <div class="card-title">Comportamento do Bot e Sistema Windows</div>
           </div>
           <div class="form-group">
-            <label>Comportamento para Bloqueios Rapidos fora das Janelas (ex: cafe / banheiro)</label>
+            <label>Comportamento para Bloqueios Rápidos fora das Janelas (ex: café / banheiro)</label>
             <select id="cfg-lock-mode" class="form-control">
               <option value="pause">Pausar contagem durante o bloqueio e retomar ao desbloquear (pause)</option>
-              <option value="ignore">Ignorar bloqueios rapidos e manter contagem continua (ignore)</option>
+              <option value="ignore">Ignorar bloqueios rápidos e manter contagem contínua (ignore)</option>
             </select>
           </div>
           <div class="form-group">
-            <label>Tempo Minimo para Lancamento (minutos)</label>
+            <label>Tempo Mínimo para Lançamento (minutos)</label>
             <input type="number" id="cfg-min-log" class="form-control" min="1" max="120">
           </div>
           <div class="form-group" style="flex-direction:row; align-items:center; gap:8px; margin-top: 10px;">
             <input type="checkbox" id="cfg-notifications">
-            <label for="cfg-notifications" style="margin:0; cursor:pointer;">Exibir notificacoes do Windows (Toast Notifications)</label>
+            <label for="cfg-notifications" style="margin:0; cursor:pointer;">Exibir notificações do Windows (Toast Notifications)</label>
           </div>
           <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
             <input type="checkbox" id="cfg-auto-log">
-            <label for="cfg-auto-log" style="margin:0; cursor:pointer;">Lancar worklog automaticamente ao bloquear na janela de fim de expediente</label>
+            <label for="cfg-auto-log" style="margin:0; cursor:pointer;">Lançar worklog automaticamente ao bloquear na janela de fim de expediente</label>
           </div>
           <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
             <input type="checkbox" id="cfg-autostart">
@@ -2121,7 +2121,7 @@ pre.terminal-box {
           </div>
 
           <div style="margin-top: 20px;">
-            <button class="btn btn-primary" onclick="saveGeneralSettings()">Salvar Todas as Configuracoes</button>
+            <button class="btn btn-primary" onclick="saveGeneralSettings()">Salvar Todas as Configurações</button>
           </div>
         </div>
       </div>
@@ -2134,7 +2134,7 @@ pre.terminal-box {
 <div class="modal-backdrop" id="worklog-modal">
   <div class="modal-dialog">
     <div class="modal-header">
-      <h3 id="wl-modal-title">Novo Lancamento no Jira</h3>
+      <h3 id="wl-modal-title">Novo Lançamento no Jira</h3>
       <button class="btn btn-outline btn-sm" onclick="closeWorklogModal()">Fechar</button>
     </div>
     <div class="modal-body">
@@ -2143,38 +2143,38 @@ pre.terminal-box {
 
       <div class="form-grid">
         <div class="form-group">
-          <label>Ticket do Lancamento (ex: CONSISABI-427)</label>
+          <label>Ticket do Lançamento (ex: CONSISABI-427)</label>
           <input type="text" id="wl-modal-issue" class="form-control" placeholder="Ex: CONSISABI-427">
           <span id="wl-modal-migrate-hint" style="font-size:11px; color:var(--primary-text); display:none;">
-            Se alterar a chave do ticket, o lancamento sera migrado automaticamente para o novo ticket.
+            Se alterar a chave do ticket, o lançamento será migrado automaticamente para o novo ticket.
           </span>
         </div>
         <div class="form-group">
-          <label>Data do Lancamento</label>
+          <label>Data do Lançamento</label>
           <input type="date" id="wl-modal-date" class="form-control" oninput="recalcModalWorklog()">
         </div>
       </div>
 
       <div class="schedule-box">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:6px;">
-          <strong style="font-size:13px;">Horarios do Lancamento (Inicio, Pausa de Almoco, Retorno e Encerramento)</strong>
+          <strong style="font-size:13px;">Horários do Lançamento (Início, Pausa de Almoço, Retorno e Encerramento)</strong>
           <label style="font-size:12px; display:flex; align-items:center; gap:6px; cursor:pointer;">
             <input type="checkbox" id="wl-modal-manual-dur-chk" onchange="toggleModalDurationMode()">
-            Informar duracao manualmente sem calcular pelos horarios
+            Informar duração manualmente sem calcular pelos horários
           </label>
         </div>
 
         <div class="schedule-grid" id="wl-modal-schedule-inputs">
           <div class="form-group" style="margin-bottom:0">
-            <label>Horario de Inicio</label>
+            <label>Horário de Início</label>
             <input type="time" id="wl-modal-start-hm" class="form-control" oninput="recalcModalWorklog()">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label>Pausa de Almoco</label>
+            <label>Pausa de Almoço</label>
             <input type="time" id="wl-modal-ls-hm" class="form-control" oninput="recalcModalWorklog()">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label>Retorno do Almoco</label>
+            <label>Retorno do Almoço</label>
             <input type="time" id="wl-modal-le-hm" class="form-control" oninput="recalcModalWorklog()">
           </div>
           <div class="form-group" style="margin-bottom:0">
@@ -2185,27 +2185,27 @@ pre.terminal-box {
 
         <div class="form-grid" style="margin-top:12px; align-items:center;">
           <div class="form-group" style="margin-bottom:0">
-            <label>Tempo Liquido Total a Lancar (ex: 06:00 ou 6h 00m)</label>
+            <label>Tempo Líquido Total a Lançar (ex: 06:00 ou 6h 00m)</label>
             <input type="text" id="wl-modal-duration" class="form-control" placeholder="Ex: 06:00">
           </div>
           <div id="wl-modal-calc-summary" style="font-size:12px; color:var(--text-muted); padding-top:14px;">
-            Altere os horarios acima para calcular o tempo liquido automaticamente.
+            Altere os horários acima para calcular o tempo líquido automaticamente.
           </div>
         </div>
       </div>
 
       <div class="form-group">
-        <label>Descricao / Comentario da Atividade</label>
-        <textarea id="wl-modal-comment" class="form-control" placeholder="Digite a descricao detalhada da atividade para este lancamento..."></textarea>
+        <label>Descrição / Comentário da Atividade</label>
+        <textarea id="wl-modal-comment" class="form-control" placeholder="Digite a descrição detalhada da atividade para este lançamento..."></textarea>
       </div>
       <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
         <input type="checkbox" id="wl-modal-no-comment">
-        <label for="wl-modal-no-comment" style="margin:0; cursor:pointer;">Lancar SEM descricao (vazio)</label>
+        <label for="wl-modal-no-comment" style="margin:0; cursor:pointer;">Lançar SEM descrição (vazio)</label>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeWorklogModal()">Cancelar</button>
-      <button class="btn btn-primary" id="wl-modal-save-btn" onclick="saveModalWorklog()">Salvar Lancamento no Jira</button>
+      <button class="btn btn-primary" id="wl-modal-save-btn" onclick="saveModalWorklog()">Salvar Lançamento no Jira</button>
     </div>
   </div>
 </div>
@@ -2214,19 +2214,19 @@ pre.terminal-box {
 <div class="modal-backdrop" id="bulk-edit-modal">
   <div class="modal-dialog">
     <div class="modal-header">
-      <h3>Editar em Lote (<span id="bulk-edit-count-lbl">0</span> Lancamentos Selecionados)</h3>
+      <h3>Editar em Lote (<span id="bulk-edit-count-lbl">0</span> Lançamentos Selecionados)</h3>
       <button class="btn btn-outline btn-sm" onclick="closeBulkEditModal()">Fechar</button>
     </div>
     <div class="modal-body">
       <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
-        Marque abaixo apenas os campos que voce deseja alterar em todos os lancamentos selecionados:
+        Marque abaixo apenas os campos que você deseja alterar em todos os lançamentos selecionados:
       </p>
 
       <!-- 1. Mudar Ticket em Lote -->
       <div class="schedule-box">
         <label style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; cursor:pointer; margin-bottom:8px;">
           <input type="checkbox" id="bulk-apply-ticket-chk">
-          Mudar o Ticket de todos os lancamentos selecionados (Migrar em Lote)
+          Mudar o Ticket de todos os lançamentos selecionados (Migrar em Lote)
         </label>
         <input type="text" id="bulk-new-ticket" class="form-control" placeholder="Novo Ticket de Destino (ex: CONSISABI-427)">
       </div>
@@ -2235,15 +2235,15 @@ pre.terminal-box {
       <div class="schedule-box">
         <label style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; cursor:pointer; margin-bottom:10px;">
           <input type="checkbox" id="bulk-apply-schedule-chk">
-          Alterar Horarios (Inicio, Pausa de Almoco, Retorno e Encerramento) de todos os selecionados
+          Alterar Horários (Início, Pausa de Almoço, Retorno e Encerramento) de todos os selecionados
         </label>
         <div class="schedule-grid">
           <div class="form-group" style="margin-bottom:0">
-            <label>Inicio</label>
+            <label>Início</label>
             <input type="time" id="bulk-edit-start-hm" class="form-control" value="07:45" oninput="recalcBulkEditModal()">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label>Pausa Almoco</label>
+            <label>Pausa Almoço</label>
             <input type="time" id="bulk-edit-ls-hm" class="form-control" value="12:00" oninput="recalcBulkEditModal()">
           </div>
           <div class="form-group" style="margin-bottom:0">
@@ -2256,7 +2256,7 @@ pre.terminal-box {
           </div>
         </div>
         <div id="bulk-edit-calc-lbl" style="font-size:12px; color:var(--text-muted); margin-top:8px;">
-          Tempo liquido resultante: 06:00
+          Tempo líquido resultante: 06:00
         </div>
       </div>
 
@@ -2264,14 +2264,14 @@ pre.terminal-box {
       <div class="schedule-box" style="margin-bottom:0">
         <label style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; cursor:pointer; margin-bottom:8px;">
           <input type="checkbox" id="bulk-apply-comment-chk">
-          Alterar a Descricao / Comentario de todos os selecionados
+          Alterar a Descrição / Comentário de todos os selecionados
         </label>
-        <textarea id="bulk-new-comment" class="form-control" placeholder="Nova descricao para aplicar aos lancamentos selecionados..."></textarea>
+        <textarea id="bulk-new-comment" class="form-control" placeholder="Nova descrição para aplicar aos lançamentos selecionados..."></textarea>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeBulkEditModal()">Cancelar</button>
-      <button class="btn btn-primary" id="bulk-edit-save-btn" onclick="submitBulkEditWorklogs()">Aplicar Alteracoes em Lote no Jira</button>
+      <button class="btn btn-primary" id="bulk-edit-save-btn" onclick="submitBulkEditWorklogs()">Aplicar Alterações em Lote no Jira</button>
     </div>
   </div>
 </div>
@@ -2291,16 +2291,16 @@ pre.terminal-box {
       </div>
       <div class="form-grid">
         <div class="form-group">
-          <label>Horario de Inicio (HH:MM)</label>
+          <label>Horário de Início (HH:MM)</label>
           <input type="time" id="inter-modal-start" class="form-control">
         </div>
         <div class="form-group">
-          <label>Horario de Fim (HH:MM - vazio se em andamento)</label>
+          <label>Horário de Fim (HH:MM - vazio se em andamento)</label>
           <input type="time" id="inter-modal-end" class="form-control">
         </div>
       </div>
       <div class="form-group">
-        <label>Descricao / Comentario</label>
+        <label>Descrição / Comentário</label>
         <input type="text" id="inter-modal-comment" class="form-control">
       </div>
     </div>
@@ -2315,21 +2315,21 @@ pre.terminal-box {
 <div class="modal-backdrop" id="lognow-modal">
   <div class="modal-dialog" style="max-width: 520px;">
     <div class="modal-header">
-      <h3>Lancar Expediente de Hoje no Jira Agora</h3>
+      <h3>Lançar Expediente de Hoje no Jira Agora</h3>
       <button class="btn btn-outline btn-sm" onclick="closeLogNowModal()">Fechar</button>
     </div>
     <div class="modal-body">
       <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
-        Isso encerrara os intervalos em aberto de hoje e enviara imediatamente os apontamentos acumulados de cada ticket para o Jira.
+        Isso encerrará os intervalos em aberto de hoje e enviará imediatamente os apontamentos acumulados de cada ticket para o Jira.
       </p>
       <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
         <input type="checkbox" id="lognow-no-comment">
-        <label for="lognow-no-comment" style="margin:0; cursor:pointer;">Enviar apontamentos SEM nenhuma descricao</label>
+        <label for="lognow-no-comment" style="margin:0; cursor:pointer;">Enviar apontamentos SEM nenhuma descrição</label>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeLogNowModal()">Cancelar</button>
-      <button class="btn btn-success" onclick="confirmLogNow()">Confirmar e Lancar no Jira</button>
+      <button class="btn btn-success" onclick="confirmLogNow()">Confirmar e Lançar no Jira</button>
     </div>
   </div>
 </div>
@@ -2422,12 +2422,12 @@ function switchTab(tabId, btnEl) {
 
   const titles = {
     'tab-dashboard': 'Painel do Dia e Controle de Expediente',
-    'tab-weekly': 'Visualizacao Semanal (Calendario e Status)',
-    'tab-worklogs': 'Lancamentos do Jira (Worklogs e Multi-Selecao)',
-    'tab-batch': 'Lancamentos em Lote (Multiplos Dias e Semanas)',
-    'tab-profiles': 'Perfis de Turno e Janelas de Horario',
-    'tab-reports': 'Relatorios Consolidados e Banco de Horas',
-    'tab-settings': 'Configuracoes, Isolamento Multi-Usuario e Atualizacao'
+    'tab-weekly': 'Visualização Semanal (Calendário e Status)',
+    'tab-worklogs': 'Lançamentos do Jira (Worklogs e Multi-Seleção)',
+    'tab-batch': 'Lançamentos em Lote (Múltiplos Dias e Semanas)',
+    'tab-profiles': 'Perfis de Turno e Janelas de Horário',
+    'tab-reports': 'Relatórios Consolidados e Banco de Horas',
+    'tab-settings': 'Configurações, Isolamento Multi-Usuário e Atualização'
   };
   document.getElementById('page-title').textContent = titles[tabId] || 'JiraBot Web';
 
@@ -2478,18 +2478,18 @@ function computeScheduleMinutes(startHm, lsHm, leHm, endHm) {
   }
 
   if (ls !== null && le !== null) {
-    if (ls < s || le < ls) return { error: 'Verifique a ordem entre Inicio, Pausa de Almoco e Retorno.' };
+    if (ls < s || le < ls) return { error: 'Verifique a ordem entre Início, Pausa de Almoço e Retorno.' };
     morning = ls - s;
     lunch = le - ls;
     if (e !== null) {
-      if (e < le) return { error: 'O encerramento nao pode ser anterior ao retorno do almoco.' };
+      if (e < le) return { error: 'O encerramento não pode ser anterior ao retorno do almoço.' };
       afternoon = e - le;
     }
   } else if (ls !== null && le === null && e === null) {
-    if (ls < s) return { error: 'A pausa de almoco nao pode ser anterior ao inicio.' };
+    if (ls < s) return { error: 'A pausa de almoço não pode ser anterior ao início.' };
     morning = ls - s;
   } else if (e !== null) {
-    if (e < s) return { error: 'O encerramento nao pode ser anterior ao inicio.' };
+    if (e < s) return { error: 'O encerramento não pode ser anterior ao início.' };
     morning = e - s;
   }
 
@@ -2519,11 +2519,11 @@ async function loadDashboard(forceScheduleFill = false) {
     const dText = document.getElementById('sidebar-daemon-text');
     if (data.service.is_running) {
       dot.className = 'dot online';
-      dText.textContent = `Servico Ativo (PID: ${data.service.pid})`;
+      dText.textContent = `Serviço Ativo (PID: ${data.service.pid})`;
       document.getElementById('stat-daemon-state').textContent = `Ativo (${data.service.pid})`;
     } else {
       dot.className = 'dot';
-      dText.textContent = 'Servico Parado';
+      dText.textContent = 'Serviço Parado';
       document.getElementById('stat-daemon-state').textContent = 'Parado';
     }
     document.getElementById('sidebar-profile-text').textContent = `Perfil: ${data.profile.name} (${data.profile.target_hours}h)`;
@@ -2543,12 +2543,12 @@ async function loadDashboard(forceScheduleFill = false) {
 
     document.getElementById('stat-active-ticket').textContent = data.today.target_issue;
     if (data.today.no_comment) {
-      document.getElementById('stat-active-desc').textContent = '(Configurado para enviar SEM descricao)';
+      document.getElementById('stat-active-desc').textContent = '(Configurado para enviar SEM descrição)';
     } else {
-      document.getElementById('stat-active-desc').textContent = data.today.active_comment || '(Usando descricao padrao do ticket)';
+      document.getElementById('stat-active-desc').textContent = data.today.active_comment || '(Usando descrição padrão do ticket)';
     }
 
-    document.getElementById('stat-last-event').textContent = `Ultimo: ${data.today.last_event} (${data.today.last_event_time})`;
+    document.getElementById('stat-last-event').textContent = `Último: ${data.today.last_event} (${data.today.last_event_time})`;
     document.getElementById('stat-logged-state').textContent = data.today.is_logged ? 'Enviado ao Jira' : 'Pendente';
     document.getElementById('stat-queue-count').textContent = `Fila offline: ${data.queue.length} item(ns)`;
 
@@ -2577,9 +2577,9 @@ async function loadDashboard(forceScheduleFill = false) {
           <div>
             <span class="ticket-pill">${escapeHtml(item.issue_key)}</span>
             <strong style="margin-left:8px;">${item.formatted}</strong>
-            <span style="color:var(--text-muted); margin-left:8px; font-size:12px;">${item.comment ? '"' + escapeHtml(item.comment) + '"' : '(padrao)'}</span>
+            <span style="color:var(--text-muted); margin-left:8px; font-size:12px;">${item.comment ? '"' + escapeHtml(item.comment) + '"' : '(padrão)'}</span>
           </div>
-          <button class="btn btn-outline btn-sm" onclick="quickEditIssueToday('${escapeHtml(item.issue_key)}', '${escapeHtml(item.comment || '').replace(/'/g, "\\'")}')">Editar Descricao</button>
+          <button class="btn btn-outline btn-sm" onclick="quickEditIssueToday('${escapeHtml(item.issue_key)}', '${escapeHtml(item.comment || '').replace(/'/g, "\\'")}')">Editar Descrição</button>
         </div>
       `).join('');
     }
@@ -2615,7 +2615,7 @@ async function loadDashboard(forceScheduleFill = false) {
           <td>${q.date}</td>
           <td><span class="ticket-pill">${escapeHtml(q.issue_key)}</span></td>
           <td><strong>${q.time_formatted}</strong></td>
-          <td>${escapeHtml(q.comment || '(Sem descricao)')}</td>
+          <td>${escapeHtml(q.comment || '(Sem descrição)')}</td>
           <td>Tentativas: ${q.retry_count} ${q.last_error ? '<br><small style="color:var(--danger)">' + escapeHtml(q.last_error) + '</small>' : ''}</td>
           <td>
             <button class="btn btn-danger btn-sm" onclick="deleteQueueItem('${q.id}')">Remover da Fila</button>
@@ -2640,14 +2640,14 @@ function previewTodaySchedule(markTouched = true) {
 
   const res = computeScheduleMinutes(s, ls, le, e);
   if (!res) {
-    label.textContent = 'Informe ao menos o Horario de Inicio para calcular o expediente.';
+    label.textContent = 'Informe ao menos o Horário de Início para calcular o expediente.';
     return;
   }
   if (res.error) {
     label.innerHTML = `<span style="color:var(--danger); font-weight:600;">${res.error}</span>`;
     return;
   }
-  label.innerHTML = `Manha: <strong>${minutesToHM(res.morning)}</strong> | Pausa Almoco: <strong>${minutesToHM(res.lunch)}</strong> | Tarde: <strong>${minutesToHM(res.afternoon)}</strong> | Total Liquido: <strong style="color:var(--primary-text); font-size:14px;">${minutesToHM(res.total)}</strong>`;
+  label.innerHTML = `Manhã: <strong>${minutesToHM(res.morning)}</strong> | Pausa Almoço: <strong>${minutesToHM(res.lunch)}</strong> | Tarde: <strong>${minutesToHM(res.afternoon)}</strong> | Total Líquido: <strong style="color:var(--primary-text); font-size:14px;">${minutesToHM(res.total)}</strong>`;
 }
 
 function fillTodayDefaultSchedule() {
@@ -2666,7 +2666,7 @@ async function saveTodaySchedule() {
   const end_hm = document.getElementById('today-end-hm').value;
 
   if (!start_hm) {
-    showToast('Informe o Horario de Inicio.', 'error');
+    showToast('Informe o Horário de Início.', 'error');
     return;
   }
   try {
@@ -2674,7 +2674,7 @@ async function saveTodaySchedule() {
       start_hm, lunch_start_hm, lunch_end_hm, end_hm
     });
     scheduleInputsTouched = false;
-    showToast(res.message || 'Horarios de hoje atualizados com sucesso!', 'success');
+    showToast(res.message || 'Horários de hoje atualizados com sucesso!', 'success');
     await loadDashboard(true);
   } catch (err) {
     showToast(err.message, 'error');
@@ -2684,7 +2684,7 @@ async function saveTodaySchedule() {
 async function serviceAction(action) {
   try {
     const res = await apiCall('/api/service', 'POST', { action });
-    showToast(res.message || 'Acao executada com sucesso!', 'success');
+    showToast(res.message || 'Ação executada com sucesso!', 'success');
     await loadDashboard(true);
   } catch (err) {
     showToast(err.message, 'error');
@@ -2772,7 +2772,7 @@ async function loadWeeklyView(refDateStr = '') {
 
     document.getElementById('weekly-ref-date').value = data.ref_date;
     document.getElementById('wk-range-label').textContent = `${data.monday_br} a ${data.sunday_br}`;
-    document.getElementById('wk-days-logged-sub').textContent = `Dias uteis lancados: ${data.weekdays_logged_count} / 5`;
+    document.getElementById('wk-days-logged-sub').textContent = `Dias úteis lançados: ${data.weekdays_logged_count} / 5`;
     document.getElementById('wk-total-worked').textContent = data.total_week_formatted;
     document.getElementById('wk-full-target-sub').textContent = `Meta semanal (5 dias): ${data.full_week_target_formatted}`;
     document.getElementById('wk-target-today').textContent = data.target_until_today_formatted;
@@ -2825,7 +2825,7 @@ async function loadWeeklyView(refDateStr = '') {
           <td style="text-align:right; white-space:nowrap;">
             <div class="btn-group" style="justify-content:flex-end;">
               ${editBtn}
-              <button class="btn btn-primary btn-sm" onclick="openWorklogModalForDate('${d.date}')">+ Lancar no Dia</button>
+              <button class="btn btn-primary btn-sm" onclick="openWorklogModalForDate('${d.date}')">+ Lançar no Dia</button>
             </div>
           </td>
         </tr>
@@ -2885,7 +2885,7 @@ async function saveIntervalModal() {
   const comment = document.getElementById('inter-modal-comment').value.trim();
 
   if (!start_hm) {
-    showToast('Informe o horario de inicio do intervalo.', 'error');
+    showToast('Informe o horário de início do intervalo.', 'error');
     return;
   }
   try {
@@ -2949,7 +2949,7 @@ async function loadJiraWorklogs() {
   const days = document.getElementById('wl-filter-days').value;
   const issue = document.getElementById('wl-filter-issue').value.trim().toUpperCase();
   const tbody = document.getElementById('jira-worklogs-tbody');
-  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);">Consultando lancamentos no Jira... Aguarde.</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);">Consultando lançamentos no Jira... Aguarde.</td></tr>';
 
   try {
     const q = new URLSearchParams({ days });
@@ -2960,7 +2960,7 @@ async function loadJiraWorklogs() {
     updateBulkBarUI();
     renderWorklogsTable();
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:var(--danger); padding:20px;">Erro ao carregar lancamentos: ${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:var(--danger); padding:20px;">Erro ao carregar lançamentos: ${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -2981,7 +2981,7 @@ function renderWorklogsTable() {
   document.getElementById('wl-count-label').textContent = filtered.length;
 
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);">Nenhum lancamento encontrado para o filtro selecionado.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);">Nenhum lançamento encontrado para o filtro selecionado.</td></tr>';
     return;
   }
 
@@ -2990,7 +2990,7 @@ function renderWorklogsTable() {
     const isChecked = selectedWorklogIds.has(String(w.id)) ? 'checked' : '';
     const commentHtml = w.comment
       ? `<span>${escapeHtml(w.comment)}</span>`
-      : `<span style="color:var(--text-muted); font-style:italic;">(Sem descricao)</span>`;
+      : `<span style="color:var(--text-muted); font-style:italic;">(Sem descrição)</span>`;
     return `
       <tr>
         <td><input type="checkbox" class="wl-row-chk" value="${w.id}" ${isChecked} onchange="onWorklogRowCheck('${w.id}', this.checked)"></td>
@@ -3007,7 +3007,7 @@ function renderWorklogsTable() {
         <td style="max-width: 280px;">${commentHtml}</td>
         <td style="text-align:right; white-space:nowrap;">
           <div class="btn-group" style="justify-content:flex-end;">
-            <button class="btn btn-outline btn-sm" onclick="openEditWorklogById('${w.id}')">Editar / Horarios / Ticket</button>
+            <button class="btn btn-outline btn-sm" onclick="openEditWorklogById('${w.id}')">Editar / Horários / Ticket</button>
             <button class="btn btn-danger btn-sm" onclick="deleteJiraWorklog('${w.issue_key}', '${w.id}', '${w.date}')">Excluir</button>
           </div>
         </td>
@@ -3075,10 +3075,10 @@ function recalcBulkEditModal() {
   const res = computeScheduleMinutes(s, ls, le, e);
   const lbl = document.getElementById('bulk-edit-calc-lbl');
   if (!res || res.error) {
-    lbl.textContent = res && res.error ? res.error : 'Informe horarios validos.';
+    lbl.textContent = res && res.error ? res.error : 'Informe horários válidos.';
     return;
   }
-  lbl.innerHTML = `Tempo liquido resultante para cada lancamento: <strong>${minutesToHM(res.total)}</strong>`;
+  lbl.innerHTML = `Tempo líquido resultante para cada lançamento: <strong>${minutesToHM(res.total)}</strong>`;
 }
 
 async function submitBulkEditWorklogs() {
@@ -3093,7 +3093,7 @@ async function submitBulkEditWorklogs() {
   const newComment = document.getElementById('bulk-new-comment').value.trim();
 
   if (!applyTicket && !applySchedule && !applyComment) {
-    showToast('Marque ao menos uma alteracao (Ticket, Horarios ou Descricao).', 'error');
+    showToast('Marque ao menos uma alteração (Ticket, Horários ou Descrição).', 'error');
     return;
   }
   if (applyTicket && !newTicket) {
@@ -3104,7 +3104,7 @@ async function submitBulkEditWorklogs() {
   const items = loadedWorklogs.filter(w => selectedWorklogIds.has(String(w.id)));
   const btn = document.getElementById('bulk-edit-save-btn');
   btn.disabled = true;
-  btn.textContent = `Processando ${items.length} lancamentos...`;
+  btn.textContent = `Processando ${items.length} lançamentos...`;
 
   try {
     const res = await apiCall('/api/worklogs/batch-update', 'POST', {
@@ -3133,14 +3133,14 @@ async function submitBulkEditWorklogs() {
     showToast(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Aplicar Alteracoes em Lote no Jira';
+    btn.textContent = 'Aplicar Alterações em Lote no Jira';
   }
 }
 
 async function deleteSelectedWorklogsBulk() {
   const items = loadedWorklogs.filter(w => selectedWorklogIds.has(String(w.id)));
   if (items.length === 0) return;
-  if (!confirm(`Confirma a EXCLUSAO em lote de ${items.length} lancamento(s) selecionado(s) no Jira?`)) return;
+  if (!confirm(`Confirma a EXCLUSÃO em lote de ${items.length} lançamento(s) selecionado(s) no Jira?`)) return;
 
   try {
     const res = await apiCall('/api/worklogs/batch-delete', 'POST', {
@@ -3168,7 +3168,7 @@ function getBatchActiveDaysInfo() {
   const allowedWeekdays = new Set(
     Array.from(document.querySelectorAll('.batch-wd-chk:checked')).map(c => parseInt(c.value, 10))
   );
-  const weekdaysNames = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
+  const weekdaysNames = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 
   if (!startDateStr || !endDateStr || startDateStr > endDateStr) {
     return { valid: false, calendarDays: 0, skippedDays: 0, activeDays: [] };
@@ -3213,11 +3213,11 @@ function onBatchPeriodOrWeekdayChange() {
 
   if (!info.valid) {
     if (infoEl) {
-      infoEl.innerHTML = `<span style="color:var(--text-muted);">Escolha a <strong>Data Inicial</strong> e a <strong>Data Final</strong> acima para calcular os dias habilitados do periodo (ou clique em um dos atalhos opcionais).</span>`;
+      infoEl.innerHTML = `<span style="color:var(--text-muted);">Escolha a <strong>Data Inicial</strong> e a <strong>Data Final</strong> acima para calcular os dias habilitados do período (ou clique em um dos atalhos opcionais).</span>`;
     }
   } else {
     if (infoEl) {
-      infoEl.innerHTML = `Periodo selecionado: <strong>${info.calendarDays} dia(s) corrido(s)</strong> | <strong>${info.activeDays.length} dia(s) habilitado(s)</strong> para lancamento (${info.skippedDays} dia(s) pulado(s) pelo seletor Seg-Dom).`;
+      infoEl.innerHTML = `Período selecionado: <strong>${info.calendarDays} dia(s) corrido(s)</strong> | <strong>${info.activeDays.length} dia(s) habilitado(s)</strong> para lançamento (${info.skippedDays} dia(s) pulado(s) pelo seletor Seg-Dom).`;
     }
   }
 
@@ -3305,22 +3305,22 @@ function updateBatchModeExplanation(infoObj = null) {
     if (box) {
       box.innerHTML = `
         <div style="font-weight:700; font-size:13px; color:var(--primary-text); margin-bottom:4px;">
-          Como funciona o modo "1 Ticket por Dia (Em Ordem Cronologica)":
+          Como funciona o modo "1 Ticket por Dia (Em Ordem Cronológica)":
         </div>
         <div style="font-size:12.5px; color:var(--text-main); line-height:1.5;">
-          1. O sistema calcula automaticamente quantos dias serao lancados no periodo que voce escolheu, descontando os dias da semana desmarcados (por exemplo: um periodo de <strong>14 dias corridos</strong> com Sabado e Domingo desmarcados gera exatamente <strong>10 dias uteis/tickets</strong>).<br>
-          2. A tabela abaixo cria <strong>automaticamente 1 linha para cada dia habilitado, em ordem cronologica</strong>: o <strong>Ticket #1</strong> sera lancado no <strong>1o dia util</strong> do periodo, o <strong>Ticket #2</strong> no <strong>2o dia util</strong>, e assim sucessivamente ate o ultimo dia.<br>
+          1. O sistema calcula automaticamente quantos dias serão lançados no período que você escolheu, descontando os dias da semana desmarcados (por exemplo: um período de <strong>14 dias corridos</strong> com Sábado e Domingo desmarcados gera exatamente <strong>10 dias úteis/tickets</strong>).<br>
+          2. A tabela abaixo cria <strong>automaticamente 1 linha para cada dia habilitado, em ordem cronológica</strong>: o <strong>Ticket #1</strong> será lançado no <strong>1º dia útil</strong> do período, o <strong>Ticket #2</strong> no <strong>2º dia útil</strong>, e assim sucessivamente até o último dia.<br>
           3. A quantidade de tickets fica <strong>estritamente limitada ao total de dias habilitados (${activeCount} dia(s) neste momento)</strong>.
         </div>
       `;
     }
     if (secTitle) {
-      secTitle.innerHTML = `Tickets por Dia do Periodo (<span id="batch-tickets-count-lbl">${batchTemplateTickets.length}</span> de ${activeCount || batchTemplateTickets.length} dia(s) habilitado(s))`;
+      secTitle.innerHTML = `Tickets por Dia do Período (<span id="batch-tickets-count-lbl">${batchTemplateTickets.length}</span> de ${activeCount || batchTemplateTickets.length} dia(s) habilitado(s))`;
     }
     if (secSub) {
       secSub.textContent = info.valid
-        ? `As ${activeCount} linha(s) abaixo foram ajustadas automaticamente para os ${activeCount} dia(s) habilitados do periodo escolhido (em ordem do 1o ao ultimo dia).`
-        : `Escolha a Data Inicial e a Data Final acima para que o sistema gere automaticamente 1 linha para cada dia util do periodo.`;
+        ? `As ${activeCount} linha(s) abaixo foram ajustadas automaticamente para os ${activeCount} dia(s) habilitados do período escolhido (em ordem do 1º ao último dia).`
+        : `Escolha a Data Inicial e a Data Final acima para que o sistema gere automaticamente 1 linha para cada dia útil do período.`;
     }
     if (colHdr) colHdr.textContent = 'Ordem / Data do Dia';
     if (splitEqBtn) splitEqBtn.style.display = 'none';
@@ -3336,11 +3336,11 @@ function updateBatchModeExplanation(infoObj = null) {
     if (box) {
       box.innerHTML = `
         <div style="font-weight:700; font-size:13px; color:var(--primary-text); margin-bottom:4px;">
-          Como funciona o modo "Dividir o Mesmo Dia entre Varios Tickets":
+          Como funciona o modo "Dividir o Mesmo Dia entre Vários Tickets":
         </div>
         <div style="font-size:12.5px; color:var(--text-main); line-height:1.5;">
-          1. Use esta opcao quando voce trabalha em <strong>2 ou mais tickets diferentes dentro do mesmo dia</strong> (por exemplo: 3h pela manha no <code>TICKET-A</code> e 3h a tarde no <code>TICKET-B</code>) e quer repetir essa mesma divisao diaria em todos os <strong>${activeCount} dia(s) habilitados</strong> do periodo.<br>
-          2. Na tabela abaixo voce cadastra apenas os tickets que compoem <strong>1 dia de trabalho</strong> e pode clicar em <strong>Dividir Horas Iguais no Dia</strong> ou <strong>Dividir Manha / Tarde</strong> para repartir o horario sem sobreposicao.
+          1. Use esta opção quando você trabalha em <strong>2 ou mais tickets diferentes dentro do mesmo dia</strong> (por exemplo: 3h pela manhã no <code>TICKET-A</code> e 3h à tarde no <code>TICKET-B</code>) e quer repetir essa mesma divisão diária em todos os <strong>${activeCount} dia(s) habilitados</strong> do período.<br>
+          2. Na tabela abaixo você cadastra apenas os tickets que compõem <strong>1 dia de trabalho</strong> e pode clicar em <strong>Dividir Horas Iguais no Dia</strong> ou <strong>Dividir Manhã / Tarde</strong> para repartir o horário sem sobreposição.
         </div>
       `;
     }
@@ -3348,7 +3348,7 @@ function updateBatchModeExplanation(infoObj = null) {
       secTitle.innerHTML = `Tickets que Dividem Cada Dia de Trabalho (<span id="batch-tickets-count-lbl">${batchTemplateTickets.length}</span> ticket(s) por dia)`;
     }
     if (secSub) {
-      secSub.textContent = `Todos os ${batchTemplateTickets.length} ticket(s) abaixo serao lancados dentro de cada um dos ${activeCount} dia(s) habilitados do periodo.`;
+      secSub.textContent = `Todos os ${batchTemplateTickets.length} ticket(s) abaixo serão lançados dentro de cada um dos ${activeCount} dia(s) habilitados do período.`;
     }
     if (colHdr) colHdr.textContent = 'Ordem no Dia';
     if (splitEqBtn) splitEqBtn.style.display = 'inline-flex';
@@ -3365,7 +3365,7 @@ function copyFirstTicketToAllBatchTemplates() {
   const firstIssue = (batchTemplateTickets[0].issue_key || '').trim().toUpperCase();
   const firstComment = batchTemplateTickets[0].comment || '';
   if (!firstIssue) {
-    showToast('Informe primeiro o codigo do Ticket #1.', 'error');
+    showToast('Informe primeiro o código do Ticket #1.', 'error');
     return;
   }
   batchTemplateTickets.forEach(t => {
@@ -3406,7 +3406,7 @@ function renderBatchTemplateTickets(infoObj = null) {
 
   tbody.innerHTML = batchTemplateTickets.map((t, idx) => {
     const calc = computeScheduleMinutes(t.start_hm, t.lunch_start_hm, t.lunch_end_hm, t.end_hm);
-    const netStr = (calc && !calc.error) ? minutesToHM(calc.total) : 'Invalido';
+    const netStr = (calc && !calc.error) ? minutesToHM(calc.total) : 'Inválido';
     const disableDel = batchTemplateTickets.length <= 1 ? 'disabled' : '';
 
     let orderCellHtml = `<strong>#${idx + 1}</strong>`;
@@ -3444,7 +3444,7 @@ function renderBatchTemplateTickets(infoObj = null) {
           <strong id="batch-tpl-net-${idx}" style="color:var(--primary-text);">${netStr}</strong>
         </td>
         <td>
-          <input type="text" class="form-control" style="min-width:200px; padding:6px 8px;" value="${escapeHtml(t.comment)}" placeholder="Opcional (vazio usa padrao do ticket)" oninput="batchTemplateTickets[${idx}].comment=this.value">
+          <input type="text" class="form-control" style="min-width:200px; padding:6px 8px;" value="${escapeHtml(t.comment)}" placeholder="Opcional (vazio usa padrão do ticket)" oninput="batchTemplateTickets[${idx}].comment=this.value">
         </td>
         <td style="text-align:right;">
           <button class="btn btn-danger btn-sm" ${disableDel} onclick="removeBatchTemplateTicket(${idx})">Remover</button>
@@ -3459,7 +3459,7 @@ function updateBatchTemplateRowNet(idx) {
   const calc = computeScheduleMinutes(t.start_hm, t.lunch_start_hm, t.lunch_end_hm, t.end_hm);
   const el = document.getElementById(`batch-tpl-net-${idx}`);
   if (el) {
-    el.textContent = (calc && !calc.error) ? minutesToHM(calc.total) : 'Invalido';
+    el.textContent = (calc && !calc.error) ? minutesToHM(calc.total) : 'Inválido';
   }
 }
 
@@ -3468,11 +3468,11 @@ function addBatchTemplateTicket() {
   const info = getBatchActiveDaysInfo();
   if (mode === 'one_per_day') {
     if (!info.valid || info.activeDays.length === 0) {
-      showToast('Escolha primeiro a Data Inicial e a Data Final do periodo.', 'error');
+      showToast('Escolha primeiro a Data Inicial e a Data Final do período.', 'error');
       return;
     }
     if (batchTemplateTickets.length >= info.activeDays.length) {
-      showToast(`Limite atingido: o periodo possui ${info.activeDays.length} dia(s) habilitado(s), portanto o maximo no modo 1 Ticket por Dia e ${info.activeDays.length}.`, 'error');
+      showToast(`Limite atingido: o período possui ${info.activeDays.length} dia(s) habilitado(s), portanto o máximo no modo 1 Ticket por Dia é ${info.activeDays.length}.`, 'error');
       return;
     }
   }
@@ -3658,10 +3658,10 @@ function previewBatchBaseSchedule() {
   const res = computeScheduleMinutes(s, ls, le, e);
   const el = document.getElementById('batch-base-calc-text');
   if (!res || res.error) {
-    el.innerHTML = `<span style="color:var(--danger)">${res ? res.error : 'Horarios invalidos'}</span>`;
+    el.innerHTML = `<span style="color:var(--danger)">${res ? res.error : 'Horários inválidos'}</span>`;
     return;
   }
-  el.innerHTML = `Tempo Liquido Base: <span style="color:var(--primary-text)">${minutesToHM(res.total)}</span>`;
+  el.innerHTML = `Tempo Líquido Base: <span style="color:var(--primary-text)">${minutesToHM(res.total)}</span>`;
 }
 
 async function generateBatchPreview() {
@@ -3672,7 +3672,7 @@ async function generateBatchPreview() {
   const info = getBatchActiveDaysInfo();
 
   if (!info.valid || info.activeDays.length === 0) {
-    showToast('Escolha uma Data Inicial e uma Data Final validas com pelo menos 1 dia da semana habilitado.', 'error');
+    showToast('Escolha uma Data Inicial e uma Data Final válidas com pelo menos 1 dia da semana habilitado.', 'error');
     return;
   }
 
@@ -3748,7 +3748,7 @@ async function generateBatchPreview() {
 function renderBatchPreviewTable() {
   const tbody = document.getElementById('batch-preview-tbody');
   if (batchPreviewRows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; padding:20px; color:var(--text-muted);">Nenhum dia corresponde aos criterios selecionados.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; padding:20px; color:var(--text-muted);">Nenhum dia corresponde aos critérios selecionados.</td></tr>';
     updateBatchSummaryCount();
     return;
   }
@@ -3757,8 +3757,8 @@ function renderBatchPreviewTable() {
     const calc = computeScheduleMinutes(r.start_hm, r.lunch_start_hm, r.lunch_end_hm, r.end_hm);
     const netStr = (calc && !calc.error) ? minutesToHM(calc.total) : 'Erro';
     const statusBadge = r.existing_seconds > 0
-      ? `<span class="badge badge-running">Ja possui ${minutesToHM(r.existing_seconds / 60)}</span>`
-      : `<span class="badge badge-idle">Sem lancamento</span>`;
+      ? `<span class="badge badge-running">Já possui ${minutesToHM(r.existing_seconds / 60)}</span>`
+      : `<span class="badge badge-idle">Sem lançamento</span>`;
 
     return `
       <tr>
@@ -3772,7 +3772,7 @@ function renderBatchPreviewTable() {
         <td><input type="time" class="form-control" style="padding:5px 6px;" value="${r.lunch_end_hm}" oninput="batchPreviewRows[${idx}].lunch_end_hm=this.value; updateBatchRowNet(${idx})"></td>
         <td><input type="time" class="form-control" style="padding:5px 6px;" value="${r.end_hm}" oninput="batchPreviewRows[${idx}].end_hm=this.value; updateBatchRowNet(${idx})"></td>
         <td><strong id="batch-row-net-${idx}" style="color:var(--primary-text);">${netStr}</strong></td>
-        <td><input type="text" class="form-control" style="min-width:170px; padding:5px 8px;" value="${escapeHtml(r.comment)}" placeholder="Padrao do ticket" oninput="batchPreviewRows[${idx}].comment=this.value"></td>
+        <td><input type="text" class="form-control" style="min-width:170px; padding:5px 8px;" value="${escapeHtml(r.comment)}" placeholder="Padrão do ticket" oninput="batchPreviewRows[${idx}].comment=this.value"></td>
         <td style="text-align:right; white-space:nowrap;">
           <div class="btn-group" style="justify-content:flex-end;">
             <button class="btn btn-outline btn-sm" onclick="addTicketRowForDay(${idx})" title="Adicionar outro ticket para esta mesma data">+ Ticket no Dia</button>
@@ -3842,7 +3842,7 @@ function applyQuickFillToBatchRows() {
   const newIssue = (document.getElementById('batch-quick-issue').value || '').trim().toUpperCase();
   const newComm = (document.getElementById('batch-quick-comment').value || '').trim();
   if (!newIssue && !newComm) {
-    showToast('Informe um Ticket ou uma Descricao para aplicar nas linhas marcadas.', 'error');
+    showToast('Informe um Ticket ou uma Descrição para aplicar nas linhas marcadas.', 'error');
     return;
   }
   let count = 0;
@@ -3854,11 +3854,11 @@ function applyQuickFillToBatchRows() {
     }
   });
   if (count === 0) {
-    showToast('Nenhuma linha esta marcada na tabela.', 'error');
+    showToast('Nenhuma linha está marcada na tabela.', 'error');
     return;
   }
   renderBatchPreviewTable();
-  showToast(`Alteracao aplicada em ${count} linha(s) marcada(s)!`, 'success');
+  showToast(`Alteração aplicada em ${count} linha(s) marcada(s)!`, 'success');
 }
 
 function updateBatchRowNet(idx) {
@@ -3866,7 +3866,7 @@ function updateBatchRowNet(idx) {
   const calc = computeScheduleMinutes(r.start_hm, r.lunch_start_hm, r.lunch_end_hm, r.end_hm);
   const el = document.getElementById(`batch-row-net-${idx}`);
   if (el) {
-    el.textContent = (calc && !calc.error) ? minutesToHM(calc.total) : 'Invalido';
+    el.textContent = (calc && !calc.error) ? minutesToHM(calc.total) : 'Inválido';
   }
 }
 
@@ -3880,23 +3880,23 @@ function updateBatchSummaryCount() {
   const distinctDays = new Set(selectedRows.map(r => r.date)).size;
   const distinctTickets = new Set(selectedRows.map(r => r.issue_key)).size;
   document.getElementById('batch-selected-summary').textContent =
-    `${selectedRows.length} lancamento(s) marcado(s) em ${distinctDays} dia(s) (${distinctTickets} ticket(s))`;
+    `${selectedRows.length} lançamento(s) marcado(s) em ${distinctDays} dia(s) (${distinctTickets} ticket(s))`;
 }
 
 async function submitBatchWorklogs() {
   const selected = batchPreviewRows.filter(r => r.selected);
   if (selected.length === 0) {
-    showToast('Selecione ao menos 1 lancamento na tabela para enviar.', 'error');
+    showToast('Selecione ao menos 1 lançamento na tabela para enviar.', 'error');
     return;
   }
   const distinctDays = new Set(selected.map(r => r.date)).size;
   const distinctTickets = Array.from(new Set(selected.map(r => r.issue_key))).join(', ');
   const no_comment = document.getElementById('batch-no-comment-chk').checked;
-  if (!confirm(`Confirma o lancamento em lote de ${selected.length} apontamento(s) (${distinctDays} dia(s) | Tickets: ${distinctTickets}) diretamente no Jira?`)) return;
+  if (!confirm(`Confirma o lançamento em lote de ${selected.length} apontamento(s) (${distinctDays} dia(s) | Tickets: ${distinctTickets}) diretamente no Jira?`)) return;
 
   const btn = document.getElementById('batch-submit-btn');
   btn.disabled = true;
-  btn.textContent = `Enviando ${selected.length} lancamentos ao Jira...`;
+  btn.textContent = `Enviando ${selected.length} lançamentos ao Jira...`;
 
   try {
     const res = await apiCall('/api/worklogs/batch-create', 'POST', {
@@ -3910,7 +3910,7 @@ async function submitBatchWorklogs() {
     showToast(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = '2. Lancar Todos os Selecionados no Jira Agora';
+    btn.textContent = '2. Lançar Todos os Selecionados no Jira Agora';
   }
 }
 
@@ -3919,8 +3919,8 @@ async function submitBatchWorklogs() {
 function openWorklogModal(worklog = null) {
   const isEdit = Boolean(worklog && worklog.id);
   document.getElementById('wl-modal-title').textContent = isEdit
-    ? `Editar Lancamento #${worklog.id} (${worklog.issue_key})`
-    : 'Lancar Novo Worklog no Jira';
+    ? `Editar Lançamento #${worklog.id} (${worklog.issue_key})`
+    : 'Lançar Novo Worklog no Jira';
   document.getElementById('wl-modal-id').value = isEdit ? worklog.id : '';
   document.getElementById('wl-modal-source-issue').value = isEdit ? worklog.issue_key : '';
   document.getElementById('wl-modal-issue').value = isEdit
@@ -3988,7 +3988,7 @@ function recalcModalWorklog() {
 
   const res = computeScheduleMinutes(s, ls, le, e);
   if (!res) {
-    summaryEl.textContent = 'Preencha inicio e encerramento para calcular automaticamente.';
+    summaryEl.textContent = 'Preencha início e encerramento para calcular automaticamente.';
     return;
   }
   if (res.error) {
@@ -3998,7 +3998,7 @@ function recalcModalWorklog() {
   if (!manual && res.total > 0) {
     document.getElementById('wl-modal-duration').value = minutesToHM(res.total);
   }
-  summaryEl.innerHTML = `Manha: <strong>${minutesToHM(res.morning)}</strong> | Almoco: <strong>${minutesToHM(res.lunch)}</strong> | Tarde: <strong>${minutesToHM(res.afternoon)}</strong> | Liquido: <strong>${minutesToHM(res.total)}</strong>`;
+  summaryEl.innerHTML = `Manhã: <strong>${minutesToHM(res.morning)}</strong> | Almoço: <strong>${minutesToHM(res.lunch)}</strong> | Tarde: <strong>${minutesToHM(res.afternoon)}</strong> | Líquido: <strong>${minutesToHM(res.total)}</strong>`;
 }
 
 async function saveModalWorklog() {
@@ -4016,7 +4016,7 @@ async function saveModalWorklog() {
   const no_comment = document.getElementById('wl-modal-no-comment').checked;
 
   if (!target_issue || !date_str) {
-    showToast('Informe o Ticket e a Data do lancamento.', 'error');
+    showToast('Informe o Ticket e a Data do lançamento.', 'error');
     return;
   }
 
@@ -4041,7 +4041,7 @@ async function saveModalWorklog() {
       no_comment
     });
     closeWorklogModal();
-    showToast(res.message || 'Lancamento salvo com sucesso!', 'success');
+    showToast(res.message || 'Lançamento salvo com sucesso!', 'success');
     if (document.getElementById('tab-worklogs').classList.contains('active')) {
       await loadJiraWorklogs();
     }
@@ -4053,12 +4053,12 @@ async function saveModalWorklog() {
     showToast(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Salvar Lancamento no Jira';
+    btn.textContent = 'Salvar Lançamento no Jira';
   }
 }
 
 async function deleteJiraWorklog(issueKey, worklogId, dateStr) {
-  if (!confirm(`Confirma a EXCLUSAO permanente do lancamento #${worklogId} do ticket ${issueKey} (${dateStr}) no Jira?`)) {
+  if (!confirm(`Confirma a EXCLUSÃO permanente do lançamento #${worklogId} do ticket ${issueKey} (${dateStr}) no Jira?`)) {
     return;
   }
   try {
@@ -4102,7 +4102,7 @@ async function loadConfigData() {
 
     if (data.version_info) {
       document.getElementById('upd-version-text').textContent = `v${data.version_info.version}`;
-      document.getElementById('upd-lastmod-text').textContent = `Ultima modificacao: ${data.version_info.last_modified}`;
+      document.getElementById('upd-lastmod-text').textContent = `Última modificação: ${data.version_info.last_modified}`;
       document.getElementById('upd-user-text').textContent = data.version_info.current_windows_user;
       document.getElementById('upd-config-path-text').textContent = data.version_info.user_config_file;
     }
@@ -4219,7 +4219,7 @@ async function checkAppUpdate() {
   box.style.display = 'block';
   box.style.background = 'var(--bg-subtle)';
   box.style.color = 'var(--text-main)';
-  box.textContent = 'Verificando disponibilidade de atualizacao...';
+  box.textContent = 'Verificando disponibilidade de atualização...';
   try {
     const res = await apiCall('/api/update', 'POST', { action: 'check', update_source: src });
     box.style.background = res.has_update ? 'var(--info-bg)' : 'var(--success-bg)';
@@ -4238,13 +4238,13 @@ async function runAppUpdate() {
   box.style.display = 'block';
   box.style.background = 'var(--bg-subtle)';
   box.style.color = 'var(--text-main)';
-  box.textContent = 'Aplicando atualizacao de codigo (preservando suas configuracoes pessoais)...';
+  box.textContent = 'Aplicando atualização de código (preservando suas configurações pessoais)...';
   try {
     const res = await apiCall('/api/update', 'POST', { action: 'update', update_source: src });
     box.style.background = 'var(--success-bg)';
     box.style.color = 'var(--success)';
     box.textContent = res.message;
-    showToast('Atualizacao concluida!', 'success');
+    showToast('Atualização concluída!', 'success');
     await loadConfigData();
   } catch (err) {
     box.style.background = 'var(--danger-bg)';
@@ -4263,13 +4263,13 @@ async function publishCleanRelease() {
   box.style.display = 'block';
   box.style.background = 'var(--bg-subtle)';
   box.style.color = 'var(--text-main)';
-  box.textContent = 'Publicando arquivos de codigo limpos na pasta compartilhada...';
+  box.textContent = 'Publicando arquivos de código limpos na pasta compartilhada...';
   try {
     const res = await apiCall('/api/update', 'POST', { action: 'publish', target_dir: targetDir });
     box.style.background = 'var(--success-bg)';
     box.style.color = 'var(--success)';
     box.textContent = res.message;
-    showToast('Versao limpa publicada com sucesso!', 'success');
+    showToast('Versão limpa publicada com sucesso!', 'success');
   } catch (err) {
     box.style.background = 'var(--danger-bg)';
     box.style.color = 'var(--danger)';
@@ -4282,7 +4282,7 @@ async function testJiraConnection() {
   box.style.display = 'block';
   box.style.background = 'var(--bg-subtle)';
   box.style.color = 'var(--text-main)';
-  box.textContent = 'Testando autenticacao com a API REST do Jira...';
+  box.textContent = 'Testando autenticação com a API REST do Jira...';
   try {
     const res = await apiCall('/api/test-jira', 'POST', {});
     box.style.background = res.success ? 'var(--success-bg)' : 'var(--danger-bg)';
@@ -4468,7 +4468,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 self._send_json({"worklogs": worklogs})
                 return
 
-            self._send_json({"error": "Rota nao encontrada"}, status_code=404)
+            self._send_json({"error": "Rota não encontrada"}, status_code=404)
         except Exception as e:
             logger.exception("Erro em GET %s", path)
             self._send_json({"error": str(e)}, status_code=500)
@@ -4517,19 +4517,19 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
                 if action == "start_daemon":
                     pid = start_background()
-                    self._send_json({"success": True, "message": f"Servico iniciado em background (PID: {pid})."})
+                    self._send_json({"success": True, "message": f"Serviço iniciado em background (PID: {pid})."})
                 elif action == "stop_daemon":
                     stop_background()
-                    self._send_json({"success": True, "message": "Servico em background encerrado."})
+                    self._send_json({"success": True, "message": "Serviço em background encerrado."})
                 elif action == "restart_daemon":
                     pid = restart_background()
-                    self._send_json({"success": True, "message": f"Servico reiniciado com sucesso (Novo PID: {pid})."})
+                    self._send_json({"success": True, "message": f"Serviço reiniciado com sucesso (Novo PID: {pid})."})
                 elif action == "manual_start":
                     engine.manual_start()
-                    self._send_json({"success": True, "message": "Cronometro iniciado/retomado com sucesso."})
+                    self._send_json({"success": True, "message": "Cronômetro iniciado/retomado com sucesso."})
                 elif action == "manual_pause":
                     engine.manual_pause()
-                    self._send_json({"success": True, "message": "Cronometro pausado."})
+                    self._send_json({"success": True, "message": "Cronômetro pausado."})
                 elif action == "simulate_lock":
                     st = engine.handle_lock()
                     self._send_json({"success": True, "message": f"Evento LOCK processado. Novo estado: {st.status}."})
@@ -4538,7 +4538,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     self._send_json({"success": True, "message": f"Evento UNLOCK processado. Novo estado: {st.status}."})
                 elif action == "test_popup":
                     show_pre_exit_popup(state_mgr)
-                    self._send_json({"success": True, "message": "Janela grafica de revisao pre-saida disparada."})
+                    self._send_json({"success": True, "message": "Janela gráfica de revisão pré-saída disparada."})
                 elif action == "flush_queue":
                     client = JiraClient(cfg.jira, state_mgr)
                     count = client.flush_queue()
@@ -4548,7 +4548,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     state_mgr.remove_from_queue(item_id)
                     self._send_json({"success": True, "message": "Item removido da fila offline."})
                 else:
-                    self._send_json({"error": f"Acao desconhecida: {action}"}, status_code=400)
+                    self._send_json({"error": f"Ação desconhecida: {action}"}, status_code=400)
                 return
 
             if path == "/api/today/schedule":
@@ -4563,13 +4563,13 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     default_issue=cfg.jira.default_issue,
                 )
                 if not res.get("success"):
-                    self._send_json({"error": res.get("message", "Horario invalido")}, status_code=400)
+                    self._send_json({"error": res.get("message", "Horário inválido")}, status_code=400)
                     return
                 state_mgr.save_state(state)
                 dur_str = format_duration(state.get_total_seconds())
                 self._send_json({
                     "success": True,
-                    "message": f"Horarios do expediente atualizados! Tempo liquido calculado: {dur_str}.",
+                    "message": f"Horários do expediente atualizados! Tempo líquido calculado: {dur_str}.",
                 })
                 return
 
@@ -4584,10 +4584,10 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     st_dt = _parse_hm(state.date_str, body.get("start_hm", ""))
                     en_dt = _parse_hm(state.date_str, body.get("end_hm", ""))
                     if not st_dt:
-                        self._send_json({"error": "Horario de inicio invalido."}, status_code=400)
+                        self._send_json({"error": "Horário de início inválido."}, status_code=400)
                         return
                     if en_dt and en_dt < st_dt:
-                        self._send_json({"error": "Horario de fim nao pode ser anterior ao inicio."}, status_code=400)
+                        self._send_json({"error": "Horário de fim não pode ser anterior ao início."}, status_code=400)
                         return
 
                     new_inter = TimeInterval(
@@ -4605,7 +4605,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                             state.intervals[idx] = new_inter
                             msg = f"Intervalo #{idx + 1} atualizado com sucesso."
                         else:
-                            self._send_json({"error": "Indice de intervalo invalido."}, status_code=400)
+                            self._send_json({"error": "Índice de intervalo inválido."}, status_code=400)
                             return
 
                     state.intervals.sort(key=lambda x: x.start)
@@ -4620,9 +4620,9 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     if 0 <= idx < len(state.intervals):
                         state.intervals.pop(idx)
                         state_mgr.save_state(state)
-                        self._send_json({"success": True, "message": f"Intervalo #{idx + 1} excluido."})
+                        self._send_json({"success": True, "message": f"Intervalo #{idx + 1} excluído."})
                     else:
-                        self._send_json({"error": "Indice de intervalo invalido."}, status_code=400)
+                        self._send_json({"error": "Índice de intervalo inválido."}, status_code=400)
                     return
 
             if path == "/api/today/ticket":
@@ -4647,14 +4647,14 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     if issue_key:
                         state.set_issue_comment(issue_key, comment)
                     state_mgr.save_state(state)
-                    self._send_json({"success": True, "message": f"Descricao de {issue_key} atualizada."})
+                    self._send_json({"success": True, "message": f"Descrição de {issue_key} atualizada."})
                     return
 
                 if action == "toggle_no_comment":
                     state = state_mgr.load_state()
                     state.no_comment = bool(body.get("no_comment", False))
                     state_mgr.save_state(state)
-                    msg = "Configurado para enviar SEM descricao." if state.no_comment else "Envio de descricao reativado."
+                    msg = "Configurado para enviar SEM descrição." if state.no_comment else "Envio de descrição reativado."
                     self._send_json({"success": True, "message": msg})
                     return
 
@@ -4666,7 +4666,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     engine = BotEngine(config=cfg, state_manager=state_mgr)
                     transferred = engine.transfer_today_hours(source_issue=src, target_issue=tgt, seconds=sec)
                     if transferred <= 0:
-                        self._send_json({"error": f"Nenhuma hora disponivel em {src} para transferir hoje."}, status_code=400)
+                        self._send_json({"error": f"Nenhuma hora disponível em {src} para transferir hoje."}, status_code=400)
                         return
                     self._send_json({
                         "success": True,
@@ -4700,7 +4700,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     total_sec = engine.manual_log(no_comment=no_comment)
                     self._send_json({
                         "success": True,
-                        "message": f"Lancamento concluido! Total processado: {format_duration(total_sec)}.",
+                        "message": f"Lançamento concluído! Total processado: {format_duration(total_sec)}.",
                         "worklog_ids": created_ids,
                     })
                     return
@@ -4714,7 +4714,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 entries = body.get("entries", [])
                 no_comment = bool(body.get("no_comment", False))
                 if not entries:
-                    self._send_json({"error": "Nenhum lancamento informado no lote."}, status_code=400)
+                    self._send_json({"error": "Nenhum lançamento informado no lote."}, status_code=400)
                     return
 
                 success_count = 0
@@ -4752,7 +4752,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         comment=raw_comment,
                     )
                     if not calc.get("success") or int(calc.get("total_seconds", 0)) <= 0:
-                        errors.append(f"{d_str} ({issue_key}): Horarios invalidos")
+                        errors.append(f"{d_str} ({issue_key}): Horários inválidos")
                         continue
 
                     sec = int(calc["total_seconds"])
@@ -4791,12 +4791,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         errors.append(f"{d_str} ({issue_key}): {e}")
 
                 if success_count == 0 and errors:
-                    self._send_json({"error": f"Falha ao lancar lote: {'; '.join(errors[:3])}"}, status_code=400)
+                    self._send_json({"error": f"Falha ao lançar lote: {'; '.join(errors[:3])}"}, status_code=400)
                     return
 
                 tickets_str = ", ".join(tickets_launched) if tickets_launched else "-"
                 msg = (
-                    f"Lote concluido! {success_count} de {len(entries)} apontamento(s) lancado(s) com sucesso "
+                    f"Lote concluído! {success_count} de {len(entries)} apontamento(s) lançado(s) com sucesso "
                     f"em {len(days_launched)} dia(s) (Tickets: {tickets_str})."
                 )
                 if errors:
@@ -4850,7 +4850,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                             issue_key=target_issue if apply_ticket else src_issue,
                         )
                         if not calc.get("success") or int(calc.get("total_seconds", 0)) <= 0:
-                            errors.append(f"#{wid}: Horarios invalidos")
+                            errors.append(f"#{wid}: Horários inválidos")
                             continue
                         sec_to_use = int(calc["total_seconds"])
                         started_to_use = calc["started_iso"]
@@ -4901,12 +4901,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                             errors.append(f"#{wid}: {upd.get('message')}")
 
                 if updated_count == 0 and errors:
-                    self._send_json({"error": f"Falha na edicao em lote: {'; '.join(errors[:3])}"}, status_code=400)
+                    self._send_json({"error": f"Falha na edição em lote: {'; '.join(errors[:3])}"}, status_code=400)
                     return
                 self._send_json({
                     "success": True,
                     "updated_count": updated_count,
-                    "message": f"Edicao em lote concluida! {updated_count} de {len(items)} lancamento(s) atualizado(s).",
+                    "message": f"Edição em lote concluída! {updated_count} de {len(items)} lançamento(s) atualizado(s).",
                 })
                 return
 
@@ -4926,7 +4926,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 self._send_json({
                     "success": True,
                     "deleted_count": deleted_count,
-                    "message": f"{deleted_count} de {len(items)} lancamento(s) excluido(s) do Jira com sucesso.",
+                    "message": f"{deleted_count} de {len(items)} lançamento(s) excluído(s) do Jira com sucesso.",
                 })
                 return
 
@@ -4966,7 +4966,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         comment=comment,
                     )
                     if not calc.get("success"):
-                        self._send_json({"error": calc.get("message", "Horarios invalidos.")}, status_code=400)
+                        self._send_json({"error": calc.get("message", "Horários inválidos.")}, status_code=400)
                         return
                     total_seconds = int(calc["total_seconds"])
                     started_iso = calc["started_iso"]
@@ -4976,7 +4976,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     started_iso = st_dt.isoformat()
 
                 if total_seconds <= 0:
-                    self._send_json({"error": "O tempo total liquido deve ser maior que zero."}, status_code=400)
+                    self._send_json({"error": "O tempo total líquido deve ser maior que zero."}, status_code=400)
                     return
 
                 if path == "/api/worklogs/create":
@@ -4995,12 +4995,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     self._send_json({
                         "success": True,
                         "worklog_id": new_id,
-                        "message": f"Worklog lancado com sucesso em {target_issue} ({format_duration(total_seconds)})!",
+                        "message": f"Worklog lançado com sucesso em {target_issue} ({format_duration(total_seconds)})!",
                     })
                     return
 
                 if not worklog_id:
-                    self._send_json({"error": "ID do worklog nao informado."}, status_code=400)
+                    self._send_json({"error": "ID do worklog não informado."}, status_code=400)
                     return
 
                 if source_issue and target_issue and source_issue != target_issue:
@@ -5021,7 +5021,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     self._send_json({
                         "success": True,
                         "worklog_id": new_id,
-                        "message": mig.get("message", f"Lancamento migrado para {target_issue} e atualizado!"),
+                        "message": mig.get("message", f"Lançamento migrado para {target_issue} e atualizado!"),
                     })
                     return
                 else:
@@ -5039,7 +5039,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     self._send_json({
                         "success": True,
                         "worklog_id": worklog_id,
-                        "message": f"Lancamento #{worklog_id} ({target_issue}) atualizado com sucesso!",
+                        "message": f"Lançamento #{worklog_id} ({target_issue}) atualizado com sucesso!",
                     })
                     return
 
@@ -5047,19 +5047,19 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 issue_key = (body.get("issue_key") or "").strip().upper()
                 worklog_id = str(body.get("worklog_id") or "").strip()
                 if not issue_key or not worklog_id:
-                    self._send_json({"error": "Ticket e ID do worklog sao obrigatorios."}, status_code=400)
+                    self._send_json({"error": "Ticket e ID do worklog são obrigatórios."}, status_code=400)
                     return
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
                 client = JiraClient(cfg.jira, state_mgr)
                 ok = client.delete_worklog(issue_key, worklog_id)
                 if not ok:
-                    self._send_json({"error": f"Nao foi possivel excluir o worklog {worklog_id} no Jira."}, status_code=400)
+                    self._send_json({"error": f"Não foi possível excluir o worklog {worklog_id} no Jira."}, status_code=400)
                     return
                 state_mgr.delete_worklog_schedule(worklog_id)
                 self._send_json({
                     "success": True,
-                    "message": f"Lancamento #{worklog_id} excluido de {issue_key} com sucesso.",
+                    "message": f"Lançamento #{worklog_id} excluído de {issue_key} com sucesso.",
                 })
                 return
 
@@ -5108,7 +5108,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         from cli import set_windows_autostart
                         set_windows_autostart(bool(body["autostart_enabled"]))
 
-                    self._send_json({"success": True, "message": "Configuracoes gravadas com sucesso!"})
+                    self._send_json({"success": True, "message": "Configurações gravadas com sucesso!"})
                     return
 
             if path == "/api/test-jira":
@@ -5118,7 +5118,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 self._send_json(res)
                 return
 
-            self._send_json({"error": "Rota POST nao encontrada"}, status_code=404)
+            self._send_json({"error": "Rota POST não encontrada"}, status_code=404)
         except Exception as e:
             logger.exception("Erro em POST %s", path)
             self._send_json({"error": str(e)}, status_code=500)

@@ -97,7 +97,7 @@ def get_version_info() -> Dict[str, Any]:
 
 def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
     """
-    Verifica se existem atualizacoes disponiveis na origem configurada (Pasta de Rede/Local, Git ou URL).
+    Verifica se existem atualizações disponíveis na origem configurada (Pasta de Rede/Local, Git ou URL).
     """
     cfg = BotConfig.load()
     src = (update_source if update_source is not None else cfg.update_source).strip()
@@ -109,7 +109,7 @@ def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
             return {
                 "success": False,
                 "has_update": False,
-                "message": f"Caminho de atualizacao nao encontrado ou inacessivel: {src}",
+                "message": f"Caminho de atualização não encontrado ou inacessível: {src}",
             }
 
         changed_files: List[str] = []
@@ -129,14 +129,14 @@ def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
                 "has_update": True,
                 "mode": "folder",
                 "changed_files": changed_files,
-                "message": f"Atualizacao disponivel! {len(changed_files)} arquivo(s) modificado(s) na origem: {', '.join(changed_files)}",
+                "message": f"Atualização disponível! {len(changed_files)} arquivo(s) modificado(s) na origem: {', '.join(changed_files)}",
             }
         return {
             "success": True,
             "has_update": False,
             "mode": "folder",
             "changed_files": [],
-            "message": "Seu aplicativo ja esta na versao mais recente disponivel na pasta de origem.",
+            "message": "Seu aplicativo já está na versão mais recente disponível na pasta de origem.",
         }
 
     # 2. Caso seja um repositorio Git local
@@ -158,13 +158,13 @@ def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
                         "has_update": True,
                         "mode": "git",
                         "behind_commits": behind,
-                        "message": f"Atualizacao disponivel via Git ({behind} novo(s) commit(s) no repositorio remoto).",
+                        "message": f"Atualização disponível via Git ({behind} novo(s) commit(s) no repositório remoto).",
                     }
                 return {
                     "success": True,
                     "has_update": False,
                     "mode": "git",
-                    "message": "Seu aplicativo ja esta atualizado com a ultima versao do repositorio Git.",
+                    "message": "Seu aplicativo já está atualizado com a última versão do repositório Git.",
                 }
         except Exception as e:
             return {"success": False, "has_update": False, "message": f"Erro ao consultar Git: {e}"}
@@ -181,14 +181,14 @@ def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
     return {
         "success": False,
         "has_update": False,
-        "message": "Nenhuma fonte de atualizacao configurada. Informe uma Pasta Compartilhada na Rede, URL de pacote .zip ou inicialize um repositorio Git.",
+        "message": "Nenhuma fonte de atualização configurada. Informe uma Pasta Compartilhada na Rede, URL de pacote .zip ou inicialize um repositório Git.",
     }
 
 
 def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
     """
-    Executa a atualizacao dos arquivos do aplicativo preservando 100% das configuracoes
-    individuais e tokens de cada usuario em %USERPROFILE%\\.jirabot.
+    Executa a atualização dos arquivos do aplicativo preservando 100% das configurações
+    individuais e tokens de cada usuário em %USERPROFILE%\\.jirabot.
     """
     cfg = BotConfig.load()
     src = (update_source if update_source is not None else cfg.update_source).strip()
@@ -200,7 +200,7 @@ def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
     if src and not src.startswith(("http://", "https://", "git@")):
         src_path = Path(src)
         if not src_path.exists() or not src_path.is_dir():
-            return {"success": False, "message": f"Pasta de origem nao encontrada: {src}"}
+            return {"success": False, "message": f"Pasta de origem não encontrada: {src}"}
 
         updated_files: List[str] = []
         for rel in list_local_app_files(src_path):
@@ -215,13 +215,13 @@ def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
             return {
                 "success": True,
                 "updated_count": 0,
-                "message": "Nenhum arquivo precisou ser atualizado. Voce ja possui a versao mais recente!",
+                "message": "Nenhum arquivo precisou ser atualizado. Você já possui a versão mais recente!",
             }
         return {
             "success": True,
             "updated_count": len(updated_files),
             "updated_files": updated_files,
-            "message": f"Aplicativo atualizado com sucesso! {len(updated_files)} arquivo(s) atualizado(s) ({', '.join(updated_files)}). Suas configuracoes pessoais e token foram preservados.",
+            "message": f"Aplicativo atualizado com sucesso! {len(updated_files)} arquivo(s) atualizado(s) ({', '.join(updated_files)}). Suas configurações pessoais e token foram preservados.",
         }
 
     # Modo 2: URL HTTP/HTTPS apontando para um pacote .zip
@@ -255,10 +255,10 @@ def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
                 "success": True,
                 "updated_count": len(updated_files),
                 "updated_files": updated_files,
-                "message": f"Atualizacao via pacote ZIP concluida! {len(updated_files)} arquivo(s) atualizado(s). Configuracoes individuais preservadas.",
+                "message": f"Atualização via pacote ZIP concluída! {len(updated_files)} arquivo(s) atualizado(s). Configurações individuais preservadas.",
             }
         except Exception as e:
-            return {"success": False, "message": f"Falha ao baixar/extrair pacote de atualizacao: {e}"}
+            return {"success": False, "message": f"Falha ao baixar/extrair pacote de atualização: {e}"}
 
     # Modo 3: Repositorio Git
     if (APP_DIR / ".git").exists():
@@ -274,26 +274,26 @@ def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
                 out = (proc.stdout or "").strip()
                 return {
                     "success": True,
-                    "message": f"Atualizacao via Git concluida com sucesso!\n{out}\nSuas configuracoes pessoais em ~/.jirabot foram preservadas.",
+                    "message": f"Atualização via Git concluída com sucesso!\n{out}\nSuas configurações pessoais em ~/.jirabot foram preservadas.",
                 }
             return {
                 "success": False,
-                "message": f"Nao foi possivel executar git pull automaticamente: {proc.stderr or proc.stdout}",
+                "message": f"Não foi possível executar git pull automaticamente: {proc.stderr or proc.stdout}",
             }
         except Exception as e:
             return {"success": False, "message": f"Erro ao executar git pull: {e}"}
 
     return {
         "success": False,
-        "message": "Configure primeiro uma Pasta de Origem na Rede ou inicialize um repositorio Git para atualizar.",
+        "message": "Configure primeiro uma Pasta de Origem na Rede ou inicialize um repositório Git para atualizar.",
     }
 
 
 def publish_clean_release(target_dir: str) -> Dict[str, Any]:
     """
-    Publica/copia apenas os arquivos de codigo limpos (.py, .bat, assets, README, requirements)
-    para uma pasta compartilhada de distribuicao, garantindo que NENHUM token, .env, config.json
-    ou relatorio pessoal seja enviado.
+    Publica/copia apenas os arquivos de código limpos (.py, .bat, assets, README, requirements)
+    para uma pasta compartilhada de distribuição, garantindo que NENHUM token, .env, config.json
+    ou relatório pessoal seja enviado.
     """
     clean_target = (target_dir or "").strip()
     if not clean_target:
@@ -301,7 +301,7 @@ def publish_clean_release(target_dir: str) -> Dict[str, Any]:
 
     dest_path = Path(clean_target).resolve()
     if dest_path == APP_DIR:
-        return {"success": False, "message": "A pasta de destino nao pode ser a propria pasta local de execucao."}
+        return {"success": False, "message": "A pasta de destino não pode ser a própria pasta local de execução."}
 
     try:
         dest_path.mkdir(parents=True, exist_ok=True)
@@ -318,7 +318,7 @@ def publish_clean_release(target_dir: str) -> Dict[str, Any]:
             "published_count": len(copied_files),
             "published_files": copied_files,
             "target_dir": str(dest_path),
-            "message": f"Publicacao limpa concluida! {len(copied_files)} arquivo(s) do aplicativo copiados para '{dest_path}' (zero tokens ou dados pessoais incluidos).",
+            "message": f"Publicação limpa concluída! {len(copied_files)} arquivo(s) do aplicativo copiados para '{dest_path}' (zero tokens ou dados pessoais incluídos).",
         }
     except Exception as e:
         return {"success": False, "message": f"Erro ao publicar arquivos na pasta de destino: {e}"}

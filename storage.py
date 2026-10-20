@@ -388,7 +388,7 @@ def calculate_shift_schedule(
     target_date = (date_str or date.today().isoformat())[:10]
     start_dt = _parse_hm(target_date, start_hm)
     if not start_dt:
-        return {"success": False, "message": "Horario de inicio invalido. Use o formato HH:MM (ex: 07:45)."}
+        return {"success": False, "message": "Horário de início inválido. Use o formato HH:MM (ex: 07:45)."}
 
     lunch_s_dt = _parse_hm(target_date, lunch_start_hm)
     lunch_e_dt = _parse_hm(target_date, lunch_end_hm)
@@ -405,11 +405,11 @@ def calculate_shift_schedule(
 
     if lunch_s_dt and lunch_e_dt:
         if lunch_s_dt < start_dt:
-            return {"success": False, "message": "A pausa de almoco nao pode ser anterior ao horario de inicio."}
+            return {"success": False, "message": "A pausa de almoço não pode ser anterior ao horário de início."}
         if lunch_e_dt < lunch_s_dt:
-            return {"success": False, "message": "O retorno do almoco nao pode ser anterior a saida para almoco."}
+            return {"success": False, "message": "O retorno do almoço não pode ser anterior à saída para almoço."}
         if end_dt and end_dt < lunch_e_dt:
-            return {"success": False, "message": "O horario de encerramento nao pode ser anterior ao retorno do almoco."}
+            return {"success": False, "message": "O horário de encerramento não pode ser anterior ao retorno do almoço."}
 
         intervals.append(
             TimeInterval(
@@ -448,7 +448,7 @@ def calculate_shift_schedule(
 
     elif lunch_s_dt and not lunch_e_dt and not end_dt:
         if lunch_s_dt < start_dt:
-            return {"success": False, "message": "A pausa de almoco nao pode ser anterior ao horario de inicio."}
+            return {"success": False, "message": "A pausa de almoço não pode ser anterior ao horário de início."}
         intervals.append(
             TimeInterval(
                 start=start_dt.isoformat(),
@@ -463,7 +463,7 @@ def calculate_shift_schedule(
     else:
         if end_dt:
             if end_dt < start_dt:
-                return {"success": False, "message": "O horario de encerramento nao pode ser anterior ao horario de inicio."}
+                return {"success": False, "message": "O horário de encerramento não pode ser anterior ao horário de início."}
             intervals.append(
                 TimeInterval(
                     start=start_dt.isoformat(),

@@ -13,14 +13,14 @@ from engine import format_duration
 from storage import DaySummary, StateManager
 
 
-WEEKDAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom"]
+WEEKDAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
 
 def generate_report(
     days: int = 7,
     base_dir: Optional[Path] = None,
 ) -> str:
-    """Gera um relatorio tabular formatado dos ultimos N dias."""
+    """Gera um relatório tabular formatado dos últimos N dias."""
     config = BotConfig.load()
     state_mgr = StateManager(base_dir=base_dir)
     history = state_mgr.load_history()
@@ -49,7 +49,7 @@ def generate_report(
 
     lines: List[str] = []
     lines.append("=" * 80)
-    lines.append(f"          RELATORIO DE HORAS JIRABOT (ULTIMOS {days} DIAS)")
+    lines.append(f"          RELATÓRIO DE HORAS JIRABOT (ÚLTIMOS {days} DIAS)")
     lines.append("=" * 80)
     lines.append(f"{'Data':<12} {'Dia':<5} {'Tickets / Horas':<30} {'Total':<10} {'Meta':<8} {'Jira'}")
     lines.append("-" * 80)
@@ -102,9 +102,9 @@ def generate_report(
     diff_sign = "+" if diff_seconds >= 0 else "-"
     diff_str = f"{diff_sign}{format_duration(abs(diff_seconds))}"
 
-    lines.append(f"Total Trabalhado no Periodo : {total_period_str}")
-    lines.append(f"Meta Esperada no Periodo   : {total_target_str}")
-    lines.append(f"Saldo de Horas (Banco)     : {diff_str}")
+    lines.append(f"Total Trabalhado no Período : {total_period_str}")
+    lines.append(f"Meta Esperada no Período    : {total_target_str}")
+    lines.append(f"Saldo de Horas (Banco)      : {diff_str}")
     lines.append("=" * 80)
 
     return "\n".join(lines)
