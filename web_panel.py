@@ -1,0 +1,4568 @@
+"""
+Painel Web Interativo do JiraBot (v2.2.0).
+Servidor HTTP nativo (Standard Library) com interface grafica Web completa para:
+- Monitoramento e controle do servico em background e cronometro do dia
+- Dark Mode / Light Mode com persistencia por usuario
+- Visualizacao Semanal interativa (semana atual ou escolhida no calendario)
+- Adicao e Edicao de lancamentos em quantidade / lote (multiplas semanas ou multi-selecao)
+- Edicao visual de horario de inicio, pausa de almoco, retorno e encerramento (hoje e historico Jira)
+- Sistema de atualizacao automatica multi-usuario com isolamento seguro de configuracoes e tokens.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import logging
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import threading
+import time
+from typing import Any, Dict, List, Optional
+import urllib.parse
+import webbrowser
+import winreg
+
+from config import BotConfig, ShiftProfile
+from daemon import get_status, restart_background, start_background, stop_background
+from engine import BotEngine, format_duration
+from history import WEEKDAYS_PT, generate_report
+from jira_client import JiraClient
+from review_dialog import get_fallback_description, show_pre_exit_popup
+from storage import (
+    DailyState,
+    DaySummary,
+    StateManager,
+    TimeInterval,
+    _parse_hm,
+    calculate_shift_schedule,
+)
+from updater import (
+    APP_VERSION,
+    check_for_updates,
+    get_version_info,
+    perform_update,
+    publish_clean_release,
+)
+
+logger = logging.getLogger("JiraBot.WebPanel")
+
+AUTOSTART_REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+AUTOSTART_APP_NAME = "JiraBotBackgroundService"
+
+
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    """Servidor HTTP multithread com reutilizacao imediata de porta e threads daemon."""
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def is_autostart_enabled() -> bool:
+    """Verifica no Registro do Windows (HKCU) se a inicializacao automatica esta ativa."""
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY, 0, winreg.KEY_READ)
+        val, _ = winreg.QueryValueEx(key, AUTOSTART_APP_NAME)
+        winreg.CloseKey(key)
+        return bool(val)
+    except Exception:
+        return False
+
+
+def parse_duration_input(text: str) -> Optional[int]:
+    """Converte strings como '06:00', '1h30m', '45m', '2h', '1.5h' em segundos."""
+    s = (text or "").strip().lower()
+    if not s:
+        return None
+    if ":" in s:
+        parts = s.split(":")
+        try:
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            sec = int(parts[2]) if len(parts) > 2 else 0
+            return h * 3600 + m * 60 + sec
+        except ValueError:
+            return None
+
+    import re
+    total = 0
+    h_match = re.search(r"(\d+(?:\.\d+)?)\s*h", s)
+    m_match = re.search(r"(\d+)\s*m", s)
+    s_match = re.search(r"(\d+)\s*s", s)
+    if h_match:
+        total += int(float(h_match.group(1)) * 3600)
+    if m_match:
+        total += int(m_match.group(1)) * 60
+    if s_match:
+        total += int(s_match.group(1))
+    if total > 0:
+        return total
+    try:
+        val = float(s.replace(",", "."))
+        if val <= 24:
+            return int(val * 3600)
+        return int(val * 60)
+    except ValueError:
+        return None
+
+
+def format_hm_from_seconds(seconds: int) -> str:
+    """Formata segundos no padrao HH:MM."""
+    if seconds < 0:
+        seconds = 0
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    return f"{h:02d}:{m:02d}"
+
+
+def build_dashboard_payload() -> Dict[str, Any]:
+    """Constroi o payload completo de status do dia, servico, fila e configuracao."""
+    status = get_status()
+    config = BotConfig.load()
+    profile = config.get_current_profile()
+    state_mgr = StateManager()
+    state = state_mgr.load_state()
+    queue = state_mgr.load_queue()
+
+    active_issue = (state.target_issue or config.jira.default_issue or "ATIVDIV-32").strip().upper()
+    total_sec = state.get_total_seconds()
+    target_sec = int(profile.target_hours * 3600)
+    progress_pct = min(100, round((total_sec / target_sec) * 100, 1)) if target_sec > 0 else 0.0
+
+    intervals_list: List[Dict[str, Any]] = []
+    for idx, inter in enumerate(state.intervals):
+        dur = inter.get_duration_seconds()
+        st_hm = inter.start[11:16] if len(inter.start) >= 16 else ""
+        en_hm = inter.end[11:16] if (inter.end and len(inter.end) >= 16) else ""
+        intervals_list.append({
+            "index": idx,
+            "start": inter.start,
+            "end": inter.end,
+            "start_hm": st_hm,
+            "end_hm": en_hm,
+            "issue_key": inter.issue_key or active_issue,
+            "comment": inter.comment or "",
+            "duration_seconds": dur,
+            "duration_formatted": format_duration(dur),
+        })
+
+    by_issue = state.get_seconds_by_issue(default_issue=config.jira.default_issue)
+    all_issues = state.get_all_issues_worked(default_issue=config.jira.default_issue)
+    for k in by_issue.keys():
+        if k not in all_issues and k != "SEM_TICKET":
+            all_issues.append(k)
+
+    issues_summary: List[Dict[str, Any]] = []
+    for iss in all_issues:
+        sec = by_issue.get(iss, 0)
+        custom_c = state.get_issue_comment(iss)
+        issues_summary.append({
+            "issue_key": iss,
+            "seconds": sec,
+            "formatted": format_duration(sec),
+            "hm_formatted": format_hm_from_seconds(sec),
+            "comment": custom_c,
+            "is_active": (iss == active_issue),
+        })
+
+    queue_list: List[Dict[str, Any]] = []
+    for q in queue:
+        queue_list.append({
+            "id": q.id,
+            "issue_key": q.issue_key,
+            "date": q.started_iso[:10] if len(q.started_iso) >= 10 else "",
+            "started_iso": q.started_iso,
+            "time_spent_seconds": q.time_spent_seconds,
+            "time_formatted": format_duration(q.time_spent_seconds),
+            "comment": q.comment,
+            "retry_count": q.retry_count,
+            "last_error": q.last_error or "",
+        })
+
+    shift_times = state.get_shift_times_summary()
+
+    return {
+        "version": APP_VERSION,
+        "theme": config.theme or "dark",
+        "service": {
+            "is_running": status["is_running"],
+            "pid": status["pid"],
+            "autostart_enabled": is_autostart_enabled(),
+        },
+        "today": {
+            "date_str": state.date_str,
+            "status": state.status,
+            "total_seconds": total_sec,
+            "total_formatted": format_duration(total_sec),
+            "total_hm": format_hm_from_seconds(total_sec),
+            "target_hours": profile.target_hours,
+            "target_seconds": target_sec,
+            "target_formatted": format_duration(target_sec),
+            "progress_percent": progress_pct,
+            "target_issue": active_issue,
+            "active_comment": state.get_issue_comment(active_issue),
+            "no_comment": state.no_comment,
+            "is_logged": state.is_logged,
+            "last_event": state.last_event,
+            "last_event_time": state.last_event_time[11:19] if len(state.last_event_time) >= 19 else state.last_event_time,
+            "shift_times": shift_times,
+            "intervals": intervals_list,
+            "issues_summary": issues_summary,
+        },
+        "profile": {
+            "name": config.active_profile,
+            "description": profile.description,
+            "target_hours": profile.target_hours,
+            "entry_window": profile.entry_window.to_dict(),
+            "lunch_start_window": profile.lunch_start_window.to_dict(),
+            "lunch_end_window": profile.lunch_end_window.to_dict(),
+            "exit_window": profile.exit_window.to_dict(),
+        },
+        "queue": queue_list,
+    }
+
+
+def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dict[str, Any]:
+    """
+    Constroi a Visualizacao Semanal completa (Segunda a Domingo) com base na data ou semana escolhida,
+    combinando historico local, estado de hoje e worklogs reais do Jira naquela semana.
+    """
+    config = BotConfig.load()
+    profile = config.get_current_profile()
+    state_mgr = StateManager()
+    history = state_mgr.load_history()
+    current_state = state_mgr.load_state()
+
+    try:
+        ref_date = date.fromisoformat(ref_date_str[:10]) if ref_date_str else date.today()
+    except Exception:
+        ref_date = date.today()
+
+    # Segunda-feira (weekday == 0) ate Domingo (weekday == 6)
+    monday = ref_date - timedelta(days=ref_date.weekday())
+    sunday = monday + timedelta(days=6)
+    prev_monday = (monday - timedelta(days=7)).isoformat()
+    next_monday = (monday + timedelta(days=7)).isoformat()
+    today_iso = date.today().isoformat()
+
+    history_by_date: Dict[str, DaySummary] = {h.date_str: h for h in history}
+    if current_state.get_total_seconds() > 0:
+        history_by_date[current_state.date_str] = DaySummary(
+            date_str=current_state.date_str,
+            total_seconds=current_state.get_total_seconds(),
+            by_issue=current_state.get_seconds_by_issue(default_issue=config.jira.default_issue),
+            is_logged=current_state.is_logged,
+            worklog_ids=current_state.jira_worklog_ids,
+            completed_at=current_state.last_event_time,
+        )
+
+    # Busca worklogs diretamente no Jira para o intervalo da semana caso solicitado
+    jira_by_date: Dict[str, List[Dict[str, Any]]] = {}
+    if fetch_jira:
+        try:
+            client = JiraClient(config.jira, state_mgr)
+            is_8h = config.active_profile == "8h"
+            def_ls = "12:00"
+            def_le = "13:00" if is_8h else "13:30"
+            wls = client.get_user_worklogs_by_date_range(monday.isoformat(), sunday.isoformat())
+            for w in wls:
+                d_key = w.get("date", "")
+                sec = int(w.get("time_spent_seconds", 0) or 0)
+                w["time_formatted"] = format_duration(sec)
+                w["hm_formatted"] = format_hm_from_seconds(sec)
+                w["schedule"] = state_mgr.get_or_infer_worklog_schedule(w, def_ls, def_le)
+                jira_by_date.setdefault(d_key, []).append(w)
+        except Exception as e:
+            logger.warning(f"Falha ao buscar worklogs da semana no Jira: {e}")
+
+    target_sec_per_day = int(profile.target_hours * 3600)
+    days_rows: List[Dict[str, Any]] = []
+    total_week_seconds = 0
+    total_week_target = 0
+    weekdays_logged_count = 0
+
+    is_8h_prof = config.active_profile == "8h"
+    default_schedule = {
+        "start_hm": "07:42" if is_8h_prof else "07:45",
+        "lunch_start_hm": "12:00",
+        "lunch_end_hm": "13:00" if is_8h_prof else "13:30",
+        "end_hm": "17:42" if is_8h_prof else "15:15",
+    }
+
+    for i in range(7):
+        curr_date = monday + timedelta(days=i)
+        d_str = curr_date.isoformat()
+        d_br = curr_date.strftime("%d/%m/%Y")
+        weekday_name = WEEKDAYS_PT[curr_date.weekday()]
+        is_weekend = curr_date.weekday() in [5, 6]
+        is_today = (d_str == today_iso)
+        is_future = (curr_date > date.today())
+
+        day_wls = jira_by_date.get(d_str, [])
+        loc_sum = history_by_date.get(d_str)
+
+        if day_wls:
+            day_sec = sum(int(w.get("time_spent_seconds", 0) or 0) for w in day_wls)
+            is_logged = True
+            first_sch = day_wls[-1].get("schedule", {})
+            tickets_info = [
+                {
+                    "id": w.get("id", ""),
+                    "issue_key": w.get("issue_key", ""),
+                    "seconds": w.get("time_spent_seconds", 0),
+                    "formatted": w.get("time_formatted", ""),
+                    "comment": w.get("comment", ""),
+                    "schedule": w.get("schedule", {}),
+                    "date": d_str,
+                }
+                for w in day_wls
+            ]
+        elif is_today and current_state.get_total_seconds() > 0:
+            day_sec = current_state.get_total_seconds()
+            is_logged = current_state.is_logged
+            first_sch = current_state.get_shift_times_summary()
+            tickets_info = [
+                {
+                    "id": "",
+                    "issue_key": k,
+                    "seconds": v,
+                    "formatted": format_duration(v),
+                    "comment": current_state.get_issue_comment(k),
+                    "schedule": first_sch,
+                    "date": d_str,
+                }
+                for k, v in current_state.get_seconds_by_issue(default_issue=config.jira.default_issue).items()
+                if v > 0
+            ]
+        elif loc_sum and loc_sum.total_seconds > 0:
+            day_sec = loc_sum.total_seconds
+            is_logged = loc_sum.is_logged
+            first_sch = default_schedule
+            tickets_info = [
+                {
+                    "id": loc_sum.worklog_ids[0] if loc_sum.worklog_ids else "",
+                    "issue_key": k,
+                    "seconds": v,
+                    "formatted": format_duration(v),
+                    "comment": "",
+                    "schedule": first_sch,
+                    "date": d_str,
+                }
+                for k, v in loc_sum.by_issue.items()
+                if v > 0
+            ]
+        else:
+            day_sec = 0
+            is_logged = False
+            first_sch = {"start_hm": "-", "lunch_start_hm": "-", "lunch_end_hm": "-", "end_hm": "-"}
+            tickets_info = []
+
+        total_week_seconds += day_sec
+        if not is_weekend and not is_future:
+            total_week_target += target_sec_per_day
+        if not is_weekend and (is_logged or day_sec > 0):
+            weekdays_logged_count += 1
+
+        if is_logged:
+            status_label = "Lancado no Jira"
+            status_type = "logged"
+        elif is_today and day_sec > 0:
+            status_label = "Em Andamento Hoje"
+            status_type = "running"
+        elif is_weekend:
+            status_label = "Fim de Semana"
+            status_type = "weekend"
+        elif is_future:
+            status_label = "Dia Futuro"
+            status_type = "future"
+        else:
+            status_label = "Sem Lancamento"
+            status_type = "missing"
+
+        days_rows.append({
+            "date": d_str,
+            "date_br": d_br,
+            "weekday": weekday_name,
+            "is_weekend": is_weekend,
+            "is_today": is_today,
+            "is_future": is_future,
+            "total_seconds": day_sec,
+            "total_formatted": format_duration(day_sec) if day_sec > 0 else ("-" if is_weekend else "0s"),
+            "target_formatted": "0h" if is_weekend else f"{profile.target_hours:.1f}h",
+            "is_logged": is_logged,
+            "status_label": status_label,
+            "status_type": status_type,
+            "schedule": first_sch,
+            "tickets": tickets_info,
+        })
+
+    full_week_target_sec = int(5 * target_sec_per_day)
+    diff_sec = total_week_seconds - total_week_target
+    diff_sign = "+" if diff_sec >= 0 else "-"
+
+    return {
+        "ref_date": ref_date.isoformat(),
+        "monday": monday.isoformat(),
+        "sunday": sunday.isoformat(),
+        "monday_br": monday.strftime("%d/%m/%Y"),
+        "sunday_br": sunday.strftime("%d/%m/%Y"),
+        "prev_monday": prev_monday,
+        "next_monday": next_monday,
+        "total_week_seconds": total_week_seconds,
+        "total_week_formatted": format_duration(total_week_seconds),
+        "target_until_today_formatted": format_duration(total_week_target),
+        "full_week_target_formatted": format_duration(full_week_target_sec),
+        "balance_seconds": diff_sec,
+        "balance_positive": diff_sec >= 0,
+        "balance_formatted": f"{diff_sign}{format_duration(abs(diff_sec))}",
+        "weekdays_logged_count": weekdays_logged_count,
+        "days": days_rows,
+    }
+
+
+def build_report_payload(days: int = 7) -> Dict[str, Any]:
+    """Gera os dados estruturados e texto do relatorio de horas para o Painel Web."""
+    config = BotConfig.load()
+    state_mgr = StateManager()
+    history = state_mgr.load_history()
+    current_state = state_mgr.load_state()
+
+    history_by_date: Dict[str, DaySummary] = {h.date_str: h for h in history}
+    if current_state.get_total_seconds() > 0:
+        history_by_date[current_state.date_str] = DaySummary(
+            date_str=current_state.date_str,
+            total_seconds=current_state.get_total_seconds(),
+            by_issue=current_state.get_seconds_by_issue(default_issue=config.jira.default_issue),
+            is_logged=current_state.is_logged,
+            worklog_ids=current_state.jira_worklog_ids,
+            completed_at=current_state.last_event_time,
+        )
+
+    profile = config.get_current_profile()
+    target_seconds_per_day = int(profile.target_hours * 3600)
+
+    today = date.today()
+    start_date = today - timedelta(days=max(1, days) - 1)
+
+    rows: List[Dict[str, Any]] = []
+    total_period_seconds = 0
+    total_target_seconds = 0
+
+    curr = start_date
+    while curr <= today:
+        d_str = curr.isoformat()
+        day_of_week = WEEKDAYS_PT[curr.weekday()]
+        is_weekend = curr.weekday() in [5, 6]
+        summary = history_by_date.get(d_str)
+
+        if summary:
+            t_sec = summary.total_seconds
+            total_period_seconds += t_sec
+            if not is_weekend:
+                total_target_seconds += target_seconds_per_day
+            tickets_list = [
+                {"issue_key": k, "seconds": v, "formatted": format_duration(v)}
+                for k, v in summary.by_issue.items()
+                if v > 0
+            ]
+            rows.append({
+                "date": d_str,
+                "weekday": day_of_week,
+                "is_weekend": is_weekend,
+                "total_seconds": t_sec,
+                "total_formatted": format_duration(t_sec),
+                "target_seconds": 0 if is_weekend else target_seconds_per_day,
+                "target_formatted": "0h" if is_weekend else f"{profile.target_hours:.1f}h",
+                "is_logged": summary.is_logged,
+                "status_label": "Enviado" if summary.is_logged else "Pendente",
+                "tickets": tickets_list,
+            })
+        else:
+            if not is_weekend:
+                total_target_seconds += target_seconds_per_day
+            rows.append({
+                "date": d_str,
+                "weekday": day_of_week,
+                "is_weekend": is_weekend,
+                "total_seconds": 0,
+                "total_formatted": "-" if is_weekend else "0s",
+                "target_seconds": 0 if is_weekend else target_seconds_per_day,
+                "target_formatted": "0h" if is_weekend else f"{profile.target_hours:.1f}h",
+                "is_logged": False,
+                "status_label": "Fim de Semana" if is_weekend else "-",
+                "tickets": [],
+            })
+        curr += timedelta(days=1)
+
+    rows.reverse()
+    diff_seconds = total_period_seconds - total_target_seconds
+    diff_sign = "+" if diff_seconds >= 0 else "-"
+
+    return {
+        "days": days,
+        "rows": rows,
+        "total_period_seconds": total_period_seconds,
+        "total_period_formatted": format_duration(total_period_seconds),
+        "total_target_seconds": total_target_seconds,
+        "total_target_formatted": format_duration(total_target_seconds),
+        "balance_seconds": diff_seconds,
+        "balance_positive": diff_seconds >= 0,
+        "balance_formatted": f"{diff_sign}{format_duration(abs(diff_seconds))}",
+        "raw_report": generate_report(days=days),
+    }
+
+
+HTML_PAGE = r"""<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JiraBot Web - Painel de Controle, Lote e Lancamentos</title>
+<style>
+:root {
+  --bg-body: #f1f5f9;
+  --bg-sidebar: #0f172a;
+  --bg-sidebar-hover: #1e293b;
+  --bg-card: #ffffff;
+  --bg-subtle: #f8fafc;
+  --bg-input: #ffffff;
+  --bg-input-readonly: #f1f5f9;
+  --text-main: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --border-color: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --primary: #0052cc;
+  --primary-hover: #0747a6;
+  --primary-light: #deebff;
+  --primary-text: #0052cc;
+  --success: #059669;
+  --success-bg: #d1fae5;
+  --warning: #d97706;
+  --warning-bg: #fef3c7;
+  --danger: #dc2626;
+  --danger-bg: #fee2e2;
+  --info: #2563eb;
+  --info-bg: #dbeafe;
+  --radius: 10px;
+  --shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="dark"] {
+  --bg-body: #0b1120;
+  --bg-sidebar: #070b14;
+  --bg-sidebar-hover: #1e293b;
+  --bg-card: #111827;
+  --bg-subtle: #1e293b;
+  --bg-input: #0f172a;
+  --bg-input-readonly: #1e293b;
+  --text-main: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --border-color: #1f2937;
+  --border-strong: #334155;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-light: rgba(59, 130, 246, 0.18);
+  --primary-text: #60a5fa;
+  --success: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.18);
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.18);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.18);
+  --info: #60a5fa;
+  --info-bg: rgba(96, 165, 250, 0.18);
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+  background-color: var(--bg-body);
+  color: var(--text-main);
+  display: flex;
+  min-height: 100vh;
+  overflow-x: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 270px;
+  background-color: var(--bg-sidebar);
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 100;
+  border-right: 1px solid var(--border-color);
+}
+
+.brand {
+  padding: 20px;
+  border-bottom: 1px solid #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #0052cc, #3b82f6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 17px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.brand-text h1 {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.brand-text span {
+  font-size: 11px;
+  color: #94a3b8;
+  display: block;
+  margin-top: 2px;
+}
+
+.nav-menu {
+  padding: 14px 12px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+}
+
+.nav-btn {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  padding: 11px 14px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  transition: all 0.15s ease;
+}
+
+.nav-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  flex-shrink: 0;
+}
+
+.nav-btn:hover {
+  background-color: var(--bg-sidebar-hover);
+  color: #ffffff;
+}
+
+.nav-btn.active {
+  background-color: var(--primary);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.sidebar-footer {
+  padding: 15px 18px;
+  border-top: 1px solid #1e293b;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.daemon-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background-color: #ef4444;
+}
+
+.dot.online {
+  background-color: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+/* Main Content */
+.main-wrapper {
+  margin-left: 270px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  padding: 13px 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.topbar-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.badge-running { background: var(--success-bg); color: var(--success); }
+.badge-paused { background: var(--warning-bg); color: var(--warning); }
+.badge-completed { background: var(--info-bg); color: var(--info); }
+.badge-idle { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--border-strong); }
+.badge-danger { background: var(--danger-bg); color: var(--danger); }
+
+.content {
+  padding: 24px 26px;
+  max-width: 1480px;
+}
+
+.tab-pane {
+  display: none;
+}
+
+.tab-pane.active {
+  display: block;
+}
+
+/* Grid & Cards */
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+
+.stat-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.stat-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.progress-bar-wrap {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-subtle);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--success));
+  transition: width 0.3s ease;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+
+.btn svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+}
+
+.btn-primary {
+  background-color: var(--primary);
+  color: #ffffff;
+}
+.btn-primary:hover {
+  background-color: var(--primary-hover);
+}
+
+.btn-success {
+  background-color: var(--success);
+  color: #ffffff;
+}
+.btn-success:hover {
+  filter: brightness(0.92);
+}
+
+.btn-warning {
+  background-color: var(--warning);
+  color: #ffffff;
+}
+.btn-warning:hover {
+  filter: brightness(0.92);
+}
+
+.btn-danger {
+  background-color: var(--danger);
+  color: #ffffff;
+}
+.btn-danger:hover {
+  filter: brightness(0.92);
+}
+
+.btn-outline {
+  background-color: var(--bg-card);
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+.btn-outline:hover {
+  background-color: var(--bg-subtle);
+}
+
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.btn-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Forms */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.form-control {
+  padding: 8px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-main);
+  background: var(--bg-input);
+  transition: border-color 0.15s;
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+
+.form-control[readonly] {
+  background: var(--bg-input-readonly);
+}
+
+textarea.form-control {
+  resize: vertical;
+  min-height: 68px;
+}
+
+/* Schedule Box */
+.schedule-box {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .schedule-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.schedule-summary-bar {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+}
+
+/* Tables */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  background-color: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--border-color);
+  white-space: nowrap;
+}
+
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+tr:hover td {
+  background-color: var(--bg-subtle);
+}
+
+tr.row-today td {
+  background-color: var(--primary-light);
+}
+
+.ticket-pill {
+  display: inline-block;
+  padding: 3px 8px;
+  background-color: var(--primary-light);
+  color: var(--primary-text);
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 12px;
+  font-family: Consolas, monospace;
+}
+
+.time-pill {
+  display: inline-block;
+  padding: 2px 7px;
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+/* Bulk Action Bar */
+.bulk-bar {
+  background: var(--primary-light);
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.bulk-bar.active {
+  display: flex;
+}
+
+/* Modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 11, 20, 0.72);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+
+.modal-backdrop.open {
+  display: flex;
+}
+
+.modal-dialog {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 700px;
+  max-height: 92vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-header h3 {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.modal-body {
+  padding: 20px 22px;
+}
+
+.modal-footer {
+  padding: 14px 22px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Toast Notification */
+#toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toast {
+  background: #0f172a;
+  color: #ffffff;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.35);
+  border-left: 4px solid var(--primary);
+  min-width: 280px;
+  max-width: 460px;
+}
+
+.toast.success { border-left-color: #10b981; }
+.toast.error { border-left-color: #ef4444; }
+
+pre.terminal-box {
+  background: #070b14;
+  color: #e2e8f0;
+  border: 1px solid var(--border-strong);
+  padding: 16px;
+  border-radius: 8px;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+.weekday-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.weekday-checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-icon">JB</div>
+    <div class="brand-text">
+      <h1>JiraBot Web</h1>
+      <span id="sidebar-version-label">Gerenciador de Horas v2.2.0</span>
+    </div>
+  </div>
+
+  <nav class="nav-menu">
+    <button class="nav-btn active" onclick="switchTab('tab-dashboard', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Painel do Dia e Horarios
+    </button>
+    <button class="nav-btn" onclick="switchTab('tab-weekly', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      Visualizacao Semanal
+    </button>
+    <button class="nav-btn" onclick="switchTab('tab-worklogs', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Lancamentos do Jira
+    </button>
+    <button class="nav-btn" onclick="switchTab('tab-batch', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+      Lancamentos em Lote
+    </button>
+    <button class="nav-btn" onclick="switchTab('tab-profiles', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Perfis de Turno e Janelas
+    </button>
+    <button class="nav-btn" onclick="switchTab('tab-reports', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      Relatorios e Banco de Horas
+    </button>
+    <button class="nav-btn" onclick="switchTab('tab-settings', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Configuracoes e Atualizacao
+    </button>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="daemon-pill">
+      <span id="sidebar-dot" class="dot"></span>
+      <span id="sidebar-daemon-text">Verificando servico...</span>
+    </div>
+    <div id="sidebar-profile-text">Perfil: -</div>
+  </div>
+</aside>
+
+<!-- Main Wrapper -->
+<div class="main-wrapper">
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-title" id="page-title">Painel do Dia e Controle de Expediente</div>
+      <span id="top-status-badge" class="badge badge-idle">CARREGANDO</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" id="theme-toggle-btn" onclick="toggleTheme()">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <span id="theme-toggle-label">Modo Claro</span>
+      </button>
+      <button class="btn btn-outline btn-sm" onclick="refreshAll()">Atualizar Dados</button>
+      <button class="btn btn-outline btn-sm" onclick="switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3])">Lancar em Lote</button>
+      <button class="btn btn-primary btn-sm" onclick="openWorklogModal()">+ Novo Lancamento no Jira</button>
+    </div>
+  </header>
+
+  <main class="content">
+
+    <!-- ==================== TAB 1: DASHBOARD & EXPEDIENTE DE HOJE ==================== -->
+    <section id="tab-dashboard" class="tab-pane active">
+      <div class="grid-4">
+        <div class="stat-card">
+          <div class="stat-label">Tempo Acumulado Hoje</div>
+          <div class="stat-value" id="stat-today-time">0s</div>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-fill" id="stat-progress-bar" style="width: 0%"></div>
+          </div>
+          <div class="stat-sub" id="stat-today-meta">Meta: 6.0h (0%)</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-label">Ticket Ativo Atual</div>
+          <div class="stat-value" id="stat-active-ticket">-</div>
+          <div class="stat-sub" id="stat-active-desc">Sem descricao definida</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-label">Servico em Background</div>
+          <div class="stat-value" id="stat-daemon-state">Parado</div>
+          <div class="stat-sub" id="stat-last-event">Ultimo evento: -</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-label">Sincronizacao Jira Hoje</div>
+          <div class="stat-value" id="stat-logged-state">Pendente</div>
+          <div class="stat-sub" id="stat-queue-count">Fila offline: 0 item(ns)</div>
+        </div>
+      </div>
+
+      <!-- Controles do Servico e Cronometro -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Controles Rapidos do Servico e Cronometro</div>
+          <div class="btn-group">
+            <button class="btn btn-success btn-sm" onclick="serviceAction('start_daemon')">Iniciar Servico (Tray)</button>
+            <button class="btn btn-danger btn-sm" onclick="serviceAction('stop_daemon')">Parar Servico</button>
+            <button class="btn btn-outline btn-sm" onclick="serviceAction('restart_daemon')">Reiniciar Servico</button>
+          </div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="serviceAction('manual_start')">Iniciar / Retomar Contagem</button>
+          <button class="btn btn-warning" onclick="serviceAction('manual_pause')">Pausar Contagem</button>
+          <button class="btn btn-outline" onclick="serviceAction('simulate_unlock')">Simular Desbloqueio (Unlock)</button>
+          <button class="btn btn-outline" onclick="serviceAction('simulate_lock')">Simular Bloqueio (Lock)</button>
+          <button class="btn btn-outline" onclick="serviceAction('test_popup')">Abrir Janela de Revisao Pre-Saida</button>
+          <button class="btn btn-success" onclick="openLogNowModal()">Lancar Horas de Hoje no Jira Agora</button>
+        </div>
+      </div>
+
+      <!-- Grade Visual de Horarios de Hoje: Inicio, Pausa de Almoco, Retorno e Encerramento -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Horarios do Expediente de Hoje (Inicio, Pausa de Almoco, Retorno e Encerramento)</div>
+          <span style="font-size: 12px; color: var(--text-muted);">Edite os horarios abaixo para recalcular automaticamente o expediente de hoje</span>
+        </div>
+
+        <div class="schedule-box">
+          <div class="schedule-grid">
+            <div class="form-group" style="margin-bottom:0">
+              <label>1. Horario de Inicio (Entrada)</label>
+              <input type="time" id="today-start-hm" class="form-control" oninput="previewTodaySchedule()">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label>2. Pausa de Almoco (Saida)</label>
+              <input type="time" id="today-lunch-start-hm" class="form-control" oninput="previewTodaySchedule()">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label>3. Retorno do Almoco</label>
+              <input type="time" id="today-lunch-end-hm" class="form-control" oninput="previewTodaySchedule()">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label>4. Horario de Encerramento (Saida)</label>
+              <input type="time" id="today-end-hm" class="form-control" oninput="previewTodaySchedule()">
+            </div>
+          </div>
+
+          <div class="schedule-summary-bar">
+            <div id="today-schedule-calc-text">
+              Preencha os horarios para visualizar o calculo liquido de manha, almoco e tarde.
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-outline btn-sm" onclick="fillTodayDefaultSchedule()">Preencher Padrao do Perfil</button>
+              <button class="btn btn-primary btn-sm" onclick="saveTodaySchedule()">Aplicar Horarios ao Dia de Hoje</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <!-- Troca de Ticket Ativo e Edicao de Descricao -->
+        <div class="card" style="margin-bottom:0">
+          <div class="card-header">
+            <div class="card-title">Trocar Ticket Ativo e Definir Descricao</div>
+          </div>
+          <div class="form-group">
+            <label>Chave do Ticket Ativo (ex: CONSISABI-427, ATIVDIV-32)</label>
+            <input type="text" id="switch-issue-input" class="form-control" placeholder="Ex: CONSISABI-427">
+          </div>
+          <div class="form-group">
+            <label>Descricao da Atividade Realizada no Ticket</label>
+            <textarea id="switch-comment-input" class="form-control" placeholder="Descreva as atividades executadas neste ticket..."></textarea>
+          </div>
+          <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px;">
+            <input type="checkbox" id="today-no-comment-chk" onchange="toggleTodayNoComment(this.checked)">
+            <label for="today-no-comment-chk" style="margin:0; cursor:pointer;">Configurar expediente de hoje para enviar SEM NENHUMA DESCRICAO</label>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" onclick="submitSwitchOrComment('switch')">Trocar Ticket Ativo</button>
+            <button class="btn btn-outline" onclick="submitSwitchOrComment('set_comment')">Apenas Salvar Descricao</button>
+          </div>
+        </div>
+
+        <!-- Transferencia / Remanejamento de Horas de Hoje -->
+        <div class="card" style="margin-bottom:0">
+          <div class="card-header">
+            <div class="card-title">Transferir / Remanejar Horas entre Tickets (Hoje)</div>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Ticket de Origem (Hoje)</label>
+              <input type="text" id="transfer-src-input" class="form-control" placeholder="Ex: ATIVDIV-32">
+            </div>
+            <div class="form-group">
+              <label>Ticket de Destino</label>
+              <input type="text" id="transfer-tgt-input" class="form-control" placeholder="Ex: CONSISABI-427">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Tempo a Transferir (vazio = transferir TUDO da origem, ou informe ex: 01:30, 45m)</label>
+            <input type="text" id="transfer-time-input" class="form-control" placeholder="Deixe em branco para transferir todo o tempo">
+          </div>
+          <button class="btn btn-primary" onclick="submitTransferToday()">Transferir Horas de Hoje</button>
+
+          <div style="margin-top: 18px; border-top: 1px solid var(--border-color); padding-top: 12px;">
+            <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--text-muted);">RESUMO POR TICKET TRABALHADO HOJE</div>
+            <div id="today-tickets-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabela de Intervalos Detalhados de Hoje -->
+      <div class="card" style="margin-top: 20px;">
+        <div class="card-header">
+          <div class="card-title">Intervalos de Trabalho Registrados Hoje</div>
+          <button class="btn btn-outline btn-sm" onclick="openIntervalModal(-1)">+ Adicionar Intervalo Manual</button>
+        </div>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Ticket</th>
+                <th>Inicio</th>
+                <th>Fim</th>
+                <th>Duracao</th>
+                <th>Descricao do Intervalo</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody id="today-intervals-tbody">
+              <tr><td colspan="7" style="text-align:center; color:var(--text-muted);">Nenhum intervalo registrado hoje.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 2: VISUALIZACAO SEMANAL ==================== -->
+    <section id="tab-weekly" class="tab-pane">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Visualizacao Semanal (Semana Atual ou Escolhida)</div>
+          <div class="btn-group">
+            <button class="btn btn-outline btn-sm" onclick="navigateWeek(-1)">&lt; Semana Anterior</button>
+            <button class="btn btn-primary btn-sm" onclick="navigateWeek(0)">Semana Atual (Hoje)</button>
+            <button class="btn btn-outline btn-sm" onclick="navigateWeek(1)">Proxima Semana &gt;</button>
+          </div>
+        </div>
+
+        <div class="form-grid" style="align-items: end; margin-bottom: 16px;">
+          <div class="form-group" style="margin-bottom:0">
+            <label>Escolher Qualquer Data no Calendario (Exibe a Semana de Segunda a Domingo)</label>
+            <input type="date" id="weekly-ref-date" class="form-control" onchange="loadWeeklyView(this.value)">
+          </div>
+          <div class="form-group" style="margin-bottom:0; flex-direction:row; align-items:center; gap:8px; padding-bottom:8px;">
+            <input type="checkbox" id="weekly-fetch-jira-chk" checked onchange="loadWeeklyView(document.getElementById('weekly-ref-date').value)">
+            <label for="weekly-fetch-jira-chk" style="margin:0; cursor:pointer;">Sincronizar com worklogs reais lancados no Jira nesta semana</label>
+          </div>
+          <div class="btn-group" style="justify-content:flex-end;">
+            <button class="btn btn-success" onclick="openBatchForCurrentWeek()">Lancar Dias Faltantes Desta Semana em Lote</button>
+          </div>
+        </div>
+
+        <div class="grid-4">
+          <div class="stat-card">
+            <div class="stat-label">Semana Selecionada</div>
+            <div class="stat-value" id="wk-range-label" style="font-size:17px;">-</div>
+            <div class="stat-sub" id="wk-days-logged-sub">Dias uteis lancados: 0 / 5</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Trabalhado na Semana</div>
+            <div class="stat-value" id="wk-total-worked">-</div>
+            <div class="stat-sub" id="wk-full-target-sub">Meta semanal (5 dias): -</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Meta Esperada ate Hoje</div>
+            <div class="stat-value" id="wk-target-today">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Saldo da Semana</div>
+            <div class="stat-value" id="wk-balance">-</div>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Dia</th>
+                <th>Data</th>
+                <th>Inicio</th>
+                <th>Pausa Almoco</th>
+                <th>Retorno</th>
+                <th>Encerramento</th>
+                <th>Tickets e Descricoes</th>
+                <th>Total do Dia</th>
+                <th>Meta</th>
+                <th>Status</th>
+                <th style="text-align:right;">Acoes Rapidas</th>
+              </tr>
+            </thead>
+            <tbody id="weekly-table-tbody">
+              <tr><td colspan="11" style="text-align:center; padding:24px; color:var(--text-muted);">Carregando visualizacao semanal...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 3: LANCAMENTOS DO JIRA (WORKLOGS) ==================== -->
+    <section id="tab-worklogs" class="tab-pane">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Gerenciador de Todos os Lancamentos do Jira (Worklogs)</div>
+          <div class="btn-group">
+            <button class="btn btn-outline" onclick="switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3])">Lancamento Multi-Dias / Semanas em Lote</button>
+            <button class="btn btn-primary" onclick="openWorklogModal()">+ Lancar Novo Worklog no Jira</button>
+          </div>
+        </div>
+
+        <div class="form-grid" style="align-items: end;">
+          <div class="form-group" style="margin-bottom:0">
+            <label>Periodo Retroativo (Dias)</label>
+            <select id="wl-filter-days" class="form-control" onchange="loadJiraWorklogs()">
+              <option value="7">Ultimos 7 dias (Semanal)</option>
+              <option value="14" selected>Ultimos 14 dias (Quinzena)</option>
+              <option value="30">Ultimos 30 dias (Mensal)</option>
+              <option value="60">Ultimos 60 dias</option>
+              <option value="90">Ultimos 90 dias</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Filtrar por Ticket Especifico no Jira (Opcional)</label>
+            <input type="text" id="wl-filter-issue" class="form-control" placeholder="Ex: CONSISABI-427 (vazio = todos meus lancamentos)">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Busca Rapida na Tabela (Ticket, Data ou Descricao)</label>
+            <input type="text" id="wl-search-text" class="form-control" placeholder="Filtrar resultados exibidos..." oninput="renderWorklogsTable()">
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" onclick="loadJiraWorklogs()">Consultar no Jira</button>
+            <button class="btn btn-outline" onclick="document.getElementById('wl-filter-issue').value=''; loadJiraWorklogs();">Limpar Filtro</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fila Offline Pendente (se houver) -->
+      <div class="card" id="offline-queue-card" style="display:none;">
+        <div class="card-header">
+          <div class="card-title">Fila Offline Pendente de Sincronizacao com o Jira</div>
+          <button class="btn btn-success btn-sm" onclick="serviceAction('flush_queue')">Sincronizar Fila Agora</button>
+        </div>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Ticket</th>
+                <th>Tempo</th>
+                <th>Descricao</th>
+                <th>Tentativas / Erro</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody id="offline-queue-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Barra de Acoes em Lote (Multi-selecao) -->
+      <div class="bulk-bar" id="wl-bulk-bar">
+        <div>
+          <strong id="wl-selected-count">0</strong> lancamento(s) selecionado(s) na tabela
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary btn-sm" onclick="openBulkEditModal()">Editar / Migrar Ticket / Horarios em Lote</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteSelectedWorklogsBulk()">Excluir Selecionados em Lote</button>
+          <button class="btn btn-outline btn-sm" onclick="clearWorklogSelection()">Desmarcar Todos</button>
+        </div>
+      </div>
+
+      <!-- Tabela Principal de Lancamentos do Jira -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Lancamentos Encontrados no Jira (<span id="wl-count-label">0</span>)</div>
+          <span style="font-size:12px; color:var(--text-muted);">Marque varios lancamentos para editar/excluir em lote, ou clique em Editar na linha desejada</span>
+        </div>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:36px;"><input type="checkbox" id="wl-select-all-chk" onchange="toggleSelectAllWorklogs(this.checked)"></th>
+                <th>Data</th>
+                <th>Ticket</th>
+                <th>Inicio</th>
+                <th>Pausa Almoco</th>
+                <th>Retorno</th>
+                <th>Encerramento</th>
+                <th>Total Lancado</th>
+                <th>Descricao / Comentario</th>
+                <th style="text-align:right;">Acoes</th>
+              </tr>
+            </thead>
+            <tbody id="jira-worklogs-tbody">
+              <tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);">Clique em "Consultar no Jira" ou aguarde o carregamento dos lancamentos...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 4: LANCAMENTOS EM LOTE (MULTI-DIAS / SEMANAS) ==================== -->
+    <section id="tab-batch" class="tab-pane">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Gerador de Lancamentos em Lote (Multiplos Dias ou Semanas de Uma So Vez)</div>
+          <div class="btn-group">
+            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('this_week')">Esta Semana</button>
+            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('last_week')">Semana Passada</button>
+            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('2_weeks')">Ultimas 2 Semanas</button>
+            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('3_weeks')">Ultimas 3 Semanas</button>
+            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('month')">Ultimos 30 Dias</button>
+          </div>
+        </div>
+
+        <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
+          Ideal para quando o bot ficou desligado por varios dias ou semanas: escolha o periodo, os horarios base (inicio, pausa de almoco, retorno e encerramento), revise a tabela gerada e envie todos os dias juntos para o Jira.
+        </p>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Data Inicial do Periodo</label>
+            <input type="date" id="batch-start-date" class="form-control">
+          </div>
+          <div class="form-group">
+            <label>Data Final do Periodo</label>
+            <input type="date" id="batch-end-date" class="form-control">
+          </div>
+          <div class="form-group">
+            <label>Ticket Padrao do Lote (ex: ATIVDIV-32)</label>
+            <input type="text" id="batch-issue-key" class="form-control" placeholder="Ex: ATIVDIV-32">
+          </div>
+          <div class="form-group">
+            <label>Descricao Padrao para os Dias do Lote</label>
+            <input type="text" id="batch-comment" class="form-control" placeholder="Opcional (vazio usa padrao do ticket)">
+          </div>
+        </div>
+
+        <div class="schedule-box">
+          <div style="font-weight:700; font-size:13px; margin-bottom:10px;">Horarios Padrao para Cada Dia do Lote</div>
+          <div class="schedule-grid">
+            <div class="form-group" style="margin-bottom:0">
+              <label>Horario de Inicio</label>
+              <input type="time" id="batch-start-hm" class="form-control" value="07:45" oninput="previewBatchBaseSchedule()">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label>Pausa de Almoco</label>
+              <input type="time" id="batch-ls-hm" class="form-control" value="12:00" oninput="previewBatchBaseSchedule()">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label>Retorno do Almoco</label>
+              <input type="time" id="batch-le-hm" class="form-control" value="13:30" oninput="previewBatchBaseSchedule()">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label>Horario de Encerramento</label>
+              <input type="time" id="batch-end-hm" class="form-control" value="15:15" oninput="previewBatchBaseSchedule()">
+            </div>
+          </div>
+
+          <div class="schedule-summary-bar">
+            <div>
+              <strong>Dias da Semana:</strong>
+              <div class="weekday-checks">
+                <label><input type="checkbox" class="batch-wd-chk" value="0" checked> Seg</label>
+                <label><input type="checkbox" class="batch-wd-chk" value="1" checked> Ter</label>
+                <label><input type="checkbox" class="batch-wd-chk" value="2" checked> Qua</label>
+                <label><input type="checkbox" class="batch-wd-chk" value="3" checked> Qui</label>
+                <label><input type="checkbox" class="batch-wd-chk" value="4" checked> Sex</label>
+                <label><input type="checkbox" class="batch-wd-chk" value="5"> Sab</label>
+                <label><input type="checkbox" class="batch-wd-chk" value="6"> Dom</label>
+              </div>
+            </div>
+            <div id="batch-base-calc-text" style="font-weight:600;">Tempo Liquido por Dia: 06:00</div>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label style="font-size:13px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="batch-skip-existing-chk" checked>
+              Consultar o Jira e desmarcar automaticamente os dias que ja possuem lancamento registrado
+            </label>
+            <label style="font-size:13px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="batch-no-comment-chk">
+              Enviar lancamentos deste lote SEM nenhuma descricao
+            </label>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" onclick="generateBatchPreview()">1. Gerar Grade de Dias do Periodo</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Grade Editavel de Pre-Visualizacao do Lote -->
+      <div class="card" id="batch-preview-card" style="display:none;">
+        <div class="card-header">
+          <div class="card-title">Revisao Dia a Dia do Lote (<span id="batch-selected-summary">0 dias selecionados</span>)</div>
+          <div class="btn-group">
+            <button class="btn btn-outline btn-sm" onclick="toggleAllBatchRows(true)">Marcar Todos</button>
+            <button class="btn btn-outline btn-sm" onclick="toggleAllBatchRows(false)">Desmarcar Todos</button>
+            <button class="btn btn-success" id="batch-submit-btn" onclick="submitBatchWorklogs()">2. Lancar Todos os Dias Selecionados no Jira Agora</button>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:36px;">Incluir</th>
+                <th>Data</th>
+                <th>Dia</th>
+                <th>Status Atual no Jira</th>
+                <th>Ticket</th>
+                <th>Inicio</th>
+                <th>Almoco</th>
+                <th>Retorno</th>
+                <th>Encerramento</th>
+                <th>Liquido</th>
+                <th>Descricao</th>
+              </tr>
+            </thead>
+            <tbody id="batch-preview-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 5: PERFIS DE TURNO E JANELAS ==================== -->
+    <section id="tab-profiles" class="tab-pane">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Selecao e Configuracao Visual de Perfis de Turno</div>
+          <button class="btn btn-primary" onclick="saveProfileSettings()">Salvar Perfil e Janelas</button>
+        </div>
+
+        <div class="form-grid" style="margin-bottom: 18px;">
+          <div class="form-group">
+            <label>Perfil de Turno Ativo</label>
+            <select id="prof-active-select" class="form-control" onchange="onProfileSelectChange()">
+              <option value="8h">Turno de 8h (8h)</option>
+              <option value="6h_0745">Turno de 6h Cedo - 07:45 (6h_0745)</option>
+              <option value="6h_0800">Turno de 6h Padrao - 08:00 (6h_0800)</option>
+              <option value="custom">Turno Personalizado (custom)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Meta Diaria de Horas do Perfil</label>
+            <input type="number" step="0.5" min="1" max="24" id="prof-target-hours" class="form-control">
+          </div>
+          <div class="form-group" style="grid-column: span 2;">
+            <label>Descricao do Perfil</label>
+            <input type="text" id="prof-description" class="form-control">
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="schedule-box" style="margin-bottom:0">
+            <div style="font-weight:700; font-size:13px; margin-bottom:12px;">Janelas de Deteccao Automatica (Inicio e Fim de cada Janela)</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Janela de Entrada (Inicio)</label>
+                <input type="time" id="win-entry-start" class="form-control">
+              </div>
+              <div class="form-group">
+                <label>Janela de Entrada (Fim)</label>
+                <input type="time" id="win-entry-end" class="form-control">
+              </div>
+
+              <div class="form-group">
+                <label>Janela Saida Almoco (Inicio)</label>
+                <input type="time" id="win-ls-start" class="form-control">
+              </div>
+              <div class="form-group">
+                <label>Janela Saida Almoco (Fim)</label>
+                <input type="time" id="win-ls-end" class="form-control">
+              </div>
+
+              <div class="form-group">
+                <label>Janela Retorno Almoco (Inicio)</label>
+                <input type="time" id="win-le-start" class="form-control">
+              </div>
+              <div class="form-group">
+                <label>Janela Retorno Almoco (Fim)</label>
+                <input type="time" id="win-le-end" class="form-control">
+              </div>
+
+              <div class="form-group">
+                <label>Janela de Encerramento (Inicio)</label>
+                <input type="time" id="win-exit-start" class="form-control">
+              </div>
+              <div class="form-group">
+                <label>Janela de Encerramento (Fim)</label>
+                <input type="time" id="win-exit-end" class="form-control">
+              </div>
+            </div>
+          </div>
+
+          <div class="schedule-box" style="margin-bottom:0">
+            <div style="font-weight:700; font-size:13px; margin-bottom:12px;">Calculadora de Janelas por Horario Base + Folgas (Minutos)</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Entrada Alvo</label>
+                <input type="time" id="calc-entry-hm" class="form-control" value="07:45">
+              </div>
+              <div class="form-group">
+                <label>Folga Antes / Depois (min)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="number" id="calc-entry-bef" class="form-control" value="20" style="width:50%">
+                  <input type="number" id="calc-entry-aft" class="form-control" value="20" style="width:50%">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Saida Almoco Alvo</label>
+                <input type="time" id="calc-ls-hm" class="form-control" value="12:00">
+              </div>
+              <div class="form-group">
+                <label>Folga Antes / Depois (min)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="number" id="calc-ls-bef" class="form-control" value="20" style="width:50%">
+                  <input type="number" id="calc-ls-aft" class="form-control" value="20" style="width:50%">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Retorno Almoco Alvo</label>
+                <input type="time" id="calc-le-hm" class="form-control" value="13:30">
+              </div>
+              <div class="form-group">
+                <label>Folga Antes / Depois (min)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="number" id="calc-le-bef" class="form-control" value="10" style="width:50%">
+                  <input type="number" id="calc-le-aft" class="form-control" value="10" style="width:50%">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Encerramento Alvo</label>
+                <input type="time" id="calc-exit-hm" class="form-control" value="15:30">
+              </div>
+              <div class="form-group">
+                <label>Folga Antes / Depois (min)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="number" id="calc-exit-bef" class="form-control" value="15" style="width:50%">
+                  <input type="number" id="calc-exit-aft" class="form-control" value="30" style="width:50%">
+                </div>
+              </div>
+            </div>
+            <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="applyToleranceCalculator()">Calcular e Preencher Janelas ao Lado</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 6: RELATORIOS E BANCO DE HORAS ==================== -->
+    <section id="tab-reports" class="tab-pane">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Relatorio Consolidado e Saldo de Horas</div>
+          <div class="btn-group">
+            <button class="btn btn-outline btn-sm" onclick="loadReport(7)">Ultimos 7 Dias</button>
+            <button class="btn btn-outline btn-sm" onclick="loadReport(14)">Ultimos 14 Dias</button>
+            <button class="btn btn-outline btn-sm" onclick="loadReport(30)">Ultimos 30 Dias</button>
+            <button class="btn btn-outline btn-sm" onclick="loadReport(60)">Ultimos 60 Dias</button>
+          </div>
+        </div>
+
+        <div class="grid-4" style="margin-bottom: 16px;">
+          <div class="stat-card">
+            <div class="stat-label">Total Trabalhado no Periodo</div>
+            <div class="stat-value" id="rep-total-worked">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Meta Esperada (Dias Uteis)</div>
+            <div class="stat-value" id="rep-total-target">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Saldo do Banco de Horas</div>
+            <div class="stat-value" id="rep-balance">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Periodo Analisado</div>
+            <div class="stat-value" id="rep-days-count">7 dias</div>
+          </div>
+        </div>
+
+        <div class="table-responsive" style="margin-bottom: 20px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Dia</th>
+                <th>Tickets e Horas Contabilizadas</th>
+                <th>Total do Dia</th>
+                <th>Meta</th>
+                <th>Status Jira</th>
+              </tr>
+            </thead>
+            <tbody id="rep-table-tbody"></tbody>
+          </table>
+        </div>
+
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">VISUALIZACAO EM FORMATO TERMINAL</div>
+        <pre class="terminal-box" id="rep-raw-pre"></pre>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 7: CONFIGURACOES, ISOLAMENTO MULTI-USUARIO E ATUALIZACAO ==================== -->
+    <section id="tab-settings" class="tab-pane">
+      <!-- Card de Atualizacao em 1 Clique e Isolamento de Configuracoes Individuais -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Atualizacao do Aplicativo e Isolamento Multi-Usuario de Tokens</div>
+          <div class="btn-group">
+            <button class="btn btn-outline btn-sm" onclick="checkAppUpdate()">Verificar se ha Atualizacao</button>
+            <button class="btn btn-primary btn-sm" onclick="runAppUpdate()">Atualizar Aplicativo Agora (1 Clique)</button>
+          </div>
+        </div>
+
+        <div class="schedule-box">
+          <div class="form-grid">
+            <div>
+              <div style="font-size:12px; color:var(--text-muted);">VERSAO INSTALADA</div>
+              <div style="font-size:15px; font-weight:700;" id="upd-version-text">v2.2.0</div>
+              <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;" id="upd-lastmod-text">-</div>
+            </div>
+            <div>
+              <div style="font-size:12px; color:var(--text-muted);">USUARIO WINDOWS ATUAL</div>
+              <div style="font-size:15px; font-weight:700;" id="upd-user-text">-</div>
+              <div style="font-size:11.5px; color:var(--success); margin-top:2px;">Token e dados 100% isolados por usuario</div>
+            </div>
+            <div style="grid-column: span 2;">
+              <div style="font-size:12px; color:var(--text-muted);">PASTA PRIVADA DE CONFIGURACAO E TOKEN (NUNCA AFETADA POR ATUALIZACOES)</div>
+              <div style="font-family:Consolas,monospace; font-size:12.5px; margin-top:4px;" id="upd-config-path-text">~/.jirabot/config.json</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-bottom:0">
+          <div>
+            <div class="form-group">
+              <label>Fonte de Atualizacao para os Usuarios (Pasta Compartilhada na Rede, OneDrive, Git ou URL .zip)</label>
+              <input type="text" id="cfg-update-source" class="form-control" placeholder="Ex: \\servidor\compartilhamento\JiraBot ou URL .zip">
+              <small style="font-size:11.5px; color:var(--text-muted);">
+                Todos os usuarios apontados para a mesma pasta de rede ou Git podem clicar em "Atualizar Aplicativo Agora" sem precisar receber arquivos manualmente e sem perder seus tokens individuais.
+              </small>
+            </div>
+            <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
+              <input type="checkbox" id="cfg-auto-update">
+              <label for="cfg-auto-update" style="margin:0; cursor:pointer;">Buscar e aplicar atualizacoes automaticamente ao iniciar o JiraBot</label>
+            </div>
+          </div>
+
+          <div>
+            <div class="form-group">
+              <label>Publicar Nova Versao Limpa na Pasta Compartilhada (Uso do Mantenedor)</label>
+              <div style="display:flex; gap:8px;">
+                <input type="text" id="publish-target-dir" class="form-control" placeholder="Ex: \\servidor\compartilhamento\JiraBot" style="flex:1">
+                <button class="btn btn-outline" onclick="publishCleanRelease()">Publicar Codigo Limpo</button>
+              </div>
+              <small style="font-size:11.5px; color:var(--text-muted);">
+                Copia apenas os arquivos .py, .bat e assets atualizados para a pasta compartilhada da equipe (sem incluir jamais .env, tokens, config.json ou relatorios).
+              </small>
+            </div>
+          </div>
+        </div>
+        <div id="update-status-box" style="margin-top:12px; font-size:13px; display:none; padding:10px 14px; border-radius:7px;"></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Credenciais Individuais e Acesso ao Jira REST API</div>
+            <button class="btn btn-outline btn-sm" onclick="testJiraConnection()">Testar Conexao com o Jira</button>
+          </div>
+          <div class="form-group">
+            <label>URL Base do Jira</label>
+            <input type="text" id="cfg-base-url" class="form-control" placeholder="https://sua-empresa.atlassian.net">
+          </div>
+          <div class="form-group">
+            <label>E-mail Corporativo do Jira</label>
+            <input type="email" id="cfg-email" class="form-control" placeholder="usuario@empresa.com.br">
+          </div>
+          <div class="form-group">
+            <label>API Token Pessoal do Jira (<span id="cfg-token-status">Verificando...</span>)</label>
+            <input type="password" id="cfg-api-token" class="form-control" placeholder="Deixe em branco para manter o token salvo atual">
+          </div>
+          <div class="form-group">
+            <label>Ticket Padrao (Default Issue)</label>
+            <input type="text" id="cfg-default-issue" class="form-control" placeholder="Ex: ATIVDIV-32">
+          </div>
+          <div class="form-group">
+            <label>Descricao Padrao de Fallback</label>
+            <input type="text" id="cfg-default-comment" class="form-control">
+          </div>
+          <div id="test-jira-result" style="margin-top: 10px; font-size: 13px; display:none; padding: 10px; border-radius: 6px;"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Comportamento do Bot e Sistema Windows</div>
+          </div>
+          <div class="form-group">
+            <label>Comportamento para Bloqueios Rapidos fora das Janelas (ex: cafe / banheiro)</label>
+            <select id="cfg-lock-mode" class="form-control">
+              <option value="pause">Pausar contagem durante o bloqueio e retomar ao desbloquear (pause)</option>
+              <option value="ignore">Ignorar bloqueios rapidos e manter contagem continua (ignore)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Tempo Minimo para Lancamento (minutos)</label>
+            <input type="number" id="cfg-min-log" class="form-control" min="1" max="120">
+          </div>
+          <div class="form-group" style="flex-direction:row; align-items:center; gap:8px; margin-top: 10px;">
+            <input type="checkbox" id="cfg-notifications">
+            <label for="cfg-notifications" style="margin:0; cursor:pointer;">Exibir notificacoes do Windows (Toast Notifications)</label>
+          </div>
+          <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
+            <input type="checkbox" id="cfg-auto-log">
+            <label for="cfg-auto-log" style="margin:0; cursor:pointer;">Lancar worklog automaticamente ao bloquear na janela de fim de expediente</label>
+          </div>
+          <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
+            <input type="checkbox" id="cfg-autostart">
+            <label for="cfg-autostart" style="margin:0; cursor:pointer;">Iniciar JiraBot automaticamente junto com o Windows (Registro HKCU)</label>
+          </div>
+
+          <div style="margin-top: 20px;">
+            <button class="btn btn-primary" onclick="saveGeneralSettings()">Salvar Todas as Configuracoes</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ==================== MODAL: CRIAR / EDITAR LANCAMENTO DO JIRA ==================== -->
+<div class="modal-backdrop" id="worklog-modal">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <h3 id="wl-modal-title">Novo Lancamento no Jira</h3>
+      <button class="btn btn-outline btn-sm" onclick="closeWorklogModal()">Fechar</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="wl-modal-id">
+      <input type="hidden" id="wl-modal-source-issue">
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Ticket do Lancamento (ex: CONSISABI-427)</label>
+          <input type="text" id="wl-modal-issue" class="form-control" placeholder="Ex: CONSISABI-427">
+          <span id="wl-modal-migrate-hint" style="font-size:11px; color:var(--primary-text); display:none;">
+            Se alterar a chave do ticket, o lancamento sera migrado automaticamente para o novo ticket.
+          </span>
+        </div>
+        <div class="form-group">
+          <label>Data do Lancamento</label>
+          <input type="date" id="wl-modal-date" class="form-control" oninput="recalcModalWorklog()">
+        </div>
+      </div>
+
+      <div class="schedule-box">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:6px;">
+          <strong style="font-size:13px;">Horarios do Lancamento (Inicio, Pausa de Almoco, Retorno e Encerramento)</strong>
+          <label style="font-size:12px; display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="wl-modal-manual-dur-chk" onchange="toggleModalDurationMode()">
+            Informar duracao manualmente sem calcular pelos horarios
+          </label>
+        </div>
+
+        <div class="schedule-grid" id="wl-modal-schedule-inputs">
+          <div class="form-group" style="margin-bottom:0">
+            <label>Horario de Inicio</label>
+            <input type="time" id="wl-modal-start-hm" class="form-control" oninput="recalcModalWorklog()">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Pausa de Almoco</label>
+            <input type="time" id="wl-modal-ls-hm" class="form-control" oninput="recalcModalWorklog()">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Retorno do Almoco</label>
+            <input type="time" id="wl-modal-le-hm" class="form-control" oninput="recalcModalWorklog()">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Encerramento</label>
+            <input type="time" id="wl-modal-end-hm" class="form-control" oninput="recalcModalWorklog()">
+          </div>
+        </div>
+
+        <div class="form-grid" style="margin-top:12px; align-items:center;">
+          <div class="form-group" style="margin-bottom:0">
+            <label>Tempo Liquido Total a Lancar (ex: 06:00 ou 6h 00m)</label>
+            <input type="text" id="wl-modal-duration" class="form-control" placeholder="Ex: 06:00">
+          </div>
+          <div id="wl-modal-calc-summary" style="font-size:12px; color:var(--text-muted); padding-top:14px;">
+            Altere os horarios acima para calcular o tempo liquido automaticamente.
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Descricao / Comentario da Atividade</label>
+        <textarea id="wl-modal-comment" class="form-control" placeholder="Digite a descricao detalhada da atividade para este lancamento..."></textarea>
+      </div>
+      <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
+        <input type="checkbox" id="wl-modal-no-comment">
+        <label for="wl-modal-no-comment" style="margin:0; cursor:pointer;">Lancar SEM descricao (vazio)</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeWorklogModal()">Cancelar</button>
+      <button class="btn btn-primary" id="wl-modal-save-btn" onclick="saveModalWorklog()">Salvar Lancamento no Jira</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: EDICAO EM LOTE DE LANCAMENTOS SELECIONADOS ==================== -->
+<div class="modal-backdrop" id="bulk-edit-modal">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <h3>Editar em Lote (<span id="bulk-edit-count-lbl">0</span> Lancamentos Selecionados)</h3>
+      <button class="btn btn-outline btn-sm" onclick="closeBulkEditModal()">Fechar</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
+        Marque abaixo apenas os campos que voce deseja alterar em todos os lancamentos selecionados:
+      </p>
+
+      <!-- 1. Mudar Ticket em Lote -->
+      <div class="schedule-box">
+        <label style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; cursor:pointer; margin-bottom:8px;">
+          <input type="checkbox" id="bulk-apply-ticket-chk">
+          Mudar o Ticket de todos os lancamentos selecionados (Migrar em Lote)
+        </label>
+        <input type="text" id="bulk-new-ticket" class="form-control" placeholder="Novo Ticket de Destino (ex: CONSISABI-427)">
+      </div>
+
+      <!-- 2. Alterar Horarios em Lote -->
+      <div class="schedule-box">
+        <label style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; cursor:pointer; margin-bottom:10px;">
+          <input type="checkbox" id="bulk-apply-schedule-chk">
+          Alterar Horarios (Inicio, Pausa de Almoco, Retorno e Encerramento) de todos os selecionados
+        </label>
+        <div class="schedule-grid">
+          <div class="form-group" style="margin-bottom:0">
+            <label>Inicio</label>
+            <input type="time" id="bulk-edit-start-hm" class="form-control" value="07:45" oninput="recalcBulkEditModal()">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Pausa Almoco</label>
+            <input type="time" id="bulk-edit-ls-hm" class="form-control" value="12:00" oninput="recalcBulkEditModal()">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Retorno</label>
+            <input type="time" id="bulk-edit-le-hm" class="form-control" value="13:30" oninput="recalcBulkEditModal()">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Encerramento</label>
+            <input type="time" id="bulk-edit-end-hm" class="form-control" value="15:15" oninput="recalcBulkEditModal()">
+          </div>
+        </div>
+        <div id="bulk-edit-calc-lbl" style="font-size:12px; color:var(--text-muted); margin-top:8px;">
+          Tempo liquido resultante: 06:00
+        </div>
+      </div>
+
+      <!-- 3. Alterar Descricao em Lote -->
+      <div class="schedule-box" style="margin-bottom:0">
+        <label style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; cursor:pointer; margin-bottom:8px;">
+          <input type="checkbox" id="bulk-apply-comment-chk">
+          Alterar a Descricao / Comentario de todos os selecionados
+        </label>
+        <textarea id="bulk-new-comment" class="form-control" placeholder="Nova descricao para aplicar aos lancamentos selecionados..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeBulkEditModal()">Cancelar</button>
+      <button class="btn btn-primary" id="bulk-edit-save-btn" onclick="submitBulkEditWorklogs()">Aplicar Alteracoes em Lote no Jira</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: ADICIONAR / EDITAR INTERVALO DE HOJE ==================== -->
+<div class="modal-backdrop" id="interval-modal">
+  <div class="modal-dialog" style="max-width: 500px;">
+    <div class="modal-header">
+      <h3 id="inter-modal-title">Adicionar Intervalo de Trabalho</h3>
+      <button class="btn btn-outline btn-sm" onclick="closeIntervalModal()">Fechar</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="inter-modal-idx" value="-1">
+      <div class="form-group">
+        <label>Ticket do Intervalo</label>
+        <input type="text" id="inter-modal-issue" class="form-control" placeholder="Ex: CONSISABI-427">
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Horario de Inicio (HH:MM)</label>
+          <input type="time" id="inter-modal-start" class="form-control">
+        </div>
+        <div class="form-group">
+          <label>Horario de Fim (HH:MM - vazio se em andamento)</label>
+          <input type="time" id="inter-modal-end" class="form-control">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Descricao / Comentario</label>
+        <input type="text" id="inter-modal-comment" class="form-control">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeIntervalModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveIntervalModal()">Salvar Intervalo</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: LANCAR HORAS DE HOJE AGORA (LOG-NOW) ==================== -->
+<div class="modal-backdrop" id="lognow-modal">
+  <div class="modal-dialog" style="max-width: 520px;">
+    <div class="modal-header">
+      <h3>Lancar Expediente de Hoje no Jira Agora</h3>
+      <button class="btn btn-outline btn-sm" onclick="closeLogNowModal()">Fechar</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
+        Isso encerrara os intervalos em aberto de hoje e enviara imediatamente os apontamentos acumulados de cada ticket para o Jira.
+      </p>
+      <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
+        <input type="checkbox" id="lognow-no-comment">
+        <label for="lognow-no-comment" style="margin:0; cursor:pointer;">Enviar apontamentos SEM nenhuma descricao</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeLogNowModal()">Cancelar</button>
+      <button class="btn btn-success" onclick="confirmLogNow()">Confirmar e Lancar no Jira</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+let appState = null;
+let configData = null;
+let loadedWorklogs = [];
+let selectedWorklogIds = new Set();
+let batchPreviewRows = [];
+let currentWeeklyData = null;
+let scheduleInputsTouched = false;
+
+/* ==================== TEMA (DARK / LIGHT MODE) ==================== */
+function applyTheme(theme) {
+  const clean = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', clean);
+  localStorage.setItem('jirabot_theme', clean);
+  const lbl = document.getElementById('theme-toggle-label');
+  if (lbl) {
+    lbl.textContent = clean === 'dark' ? 'Modo Claro' : 'Modo Escuro';
+  }
+}
+
+async function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  try {
+    await apiCall('/api/theme', 'POST', { theme: next });
+  } catch (e) {
+    // salvo no localStorage mesmo se offline
+  }
+}
+
+// Aplica tema salvo imediatamente ao carregar
+(function initTheme() {
+  const saved = localStorage.getItem('jirabot_theme') || 'dark';
+  applyTheme(saved);
+})();
+
+function showToast(msg, type = 'info') {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => {
+    el.remove();
+  }, 4200);
+}
+
+/* API Call com Retentativa Transparente contra resets de socket */
+async function apiCall(path, method = 'GET', body = null, retries = 2) {
+  const opts = { method, cache: 'no-store' };
+  if (body !== null) {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const resp = await fetch(path, opts);
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        throw new Error(data.error || data.message || `Erro HTTP ${resp.status}`);
+      }
+      return data;
+    } catch (err) {
+      lastErr = err;
+      const isNetworkErr = err instanceof TypeError || String(err.message).includes('Failed to fetch');
+      if (isNetworkErr && attempt < retries) {
+        await new Promise(r => setTimeout(r, 350 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
+function switchTab(tabId, btnEl) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const pane = document.getElementById(tabId);
+  if (pane) pane.classList.add('active');
+  if (btnEl) btnEl.classList.add('active');
+
+  const titles = {
+    'tab-dashboard': 'Painel do Dia e Controle de Expediente',
+    'tab-weekly': 'Visualizacao Semanal (Calendario e Status)',
+    'tab-worklogs': 'Lancamentos do Jira (Worklogs e Multi-Selecao)',
+    'tab-batch': 'Lancamentos em Lote (Multiplos Dias e Semanas)',
+    'tab-profiles': 'Perfis de Turno e Janelas de Horario',
+    'tab-reports': 'Relatorios Consolidados e Banco de Horas',
+    'tab-settings': 'Configuracoes, Isolamento Multi-Usuario e Atualizacao'
+  };
+  document.getElementById('page-title').textContent = titles[tabId] || 'JiraBot Web';
+
+  if (tabId === 'tab-weekly') {
+    const refInput = document.getElementById('weekly-ref-date');
+    if (!refInput.value) refInput.value = new Date().toISOString().slice(0, 10);
+    loadWeeklyView(refInput.value);
+  } else if (tabId === 'tab-worklogs' && loadedWorklogs.length === 0) {
+    loadJiraWorklogs();
+  } else if (tabId === 'tab-batch') {
+    initBatchTabDefaults();
+  } else if (tabId === 'tab-reports') {
+    loadReport(7);
+  } else if (tabId === 'tab-profiles' || tabId === 'tab-settings') {
+    loadConfigData();
+  }
+}
+
+function hmToMinutes(hm) {
+  if (!hm || !hm.includes(':')) return null;
+  const [h, m] = hm.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+function minutesToHM(mins) {
+  const m = Math.max(0, Math.round(mins));
+  const hh = String(Math.floor(m / 60)).padStart(2, '0');
+  const mm = String(m % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function computeScheduleMinutes(startHm, lsHm, leHm, endHm) {
+  const s = hmToMinutes(startHm);
+  if (s === null) return null;
+  const ls = hmToMinutes(lsHm);
+  const le = hmToMinutes(leHm);
+  const e = hmToMinutes(endHm);
+
+  let morning = 0;
+  let lunch = 0;
+  let afternoon = 0;
+
+  if (ls !== null && le !== null) {
+    if (ls < s || le < ls) return { error: 'Verifique a ordem entre Inicio, Pausa de Almoco e Retorno.' };
+    morning = ls - s;
+    lunch = le - ls;
+    if (e !== null) {
+      if (e < le) return { error: 'O encerramento nao pode ser anterior ao retorno do almoco.' };
+      afternoon = e - le;
+    }
+  } else if (ls !== null && le === null && e === null) {
+    if (ls < s) return { error: 'A pausa de almoco nao pode ser anterior ao inicio.' };
+    morning = ls - s;
+  } else if (e !== null) {
+    if (e < s) return { error: 'O encerramento nao pode ser anterior ao inicio.' };
+    morning = e - s;
+  }
+
+  const total = morning + afternoon;
+  return { morning, lunch, afternoon, total };
+}
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* ==================== DASHBOARD ==================== */
+async function loadDashboard(forceScheduleFill = false) {
+  try {
+    const data = await apiCall('/api/status', 'GET', null, 1);
+    appState = data;
+
+    if (data.version) {
+      document.getElementById('sidebar-version-label').textContent = `Gerenciador de Horas v${data.version}`;
+    }
+
+    const dot = document.getElementById('sidebar-dot');
+    const dText = document.getElementById('sidebar-daemon-text');
+    if (data.service.is_running) {
+      dot.className = 'dot online';
+      dText.textContent = `Servico Ativo (PID: ${data.service.pid})`;
+      document.getElementById('stat-daemon-state').textContent = `Ativo (${data.service.pid})`;
+    } else {
+      dot.className = 'dot';
+      dText.textContent = 'Servico Parado';
+      document.getElementById('stat-daemon-state').textContent = 'Parado';
+    }
+    document.getElementById('sidebar-profile-text').textContent = `Perfil: ${data.profile.name} (${data.profile.target_hours}h)`;
+
+    const badge = document.getElementById('top-status-badge');
+    const st = data.today.status;
+    badge.textContent = st;
+    badge.className = 'badge ' + (
+      st === 'RUNNING' ? 'badge-running' :
+      (st === 'PAUSED_LUNCH' || st === 'PAUSED_AWAY') ? 'badge-paused' :
+      st === 'COMPLETED' ? 'badge-completed' : 'badge-idle'
+    );
+
+    document.getElementById('stat-today-time').textContent = data.today.total_formatted;
+    document.getElementById('stat-progress-bar').style.width = `${data.today.progress_percent}%`;
+    document.getElementById('stat-today-meta').textContent = `Meta: ${data.today.target_hours}h (${data.today.progress_percent}%)`;
+
+    document.getElementById('stat-active-ticket').textContent = data.today.target_issue;
+    if (data.today.no_comment) {
+      document.getElementById('stat-active-desc').textContent = '(Configurado para enviar SEM descricao)';
+    } else {
+      document.getElementById('stat-active-desc').textContent = data.today.active_comment || '(Usando descricao padrao do ticket)';
+    }
+
+    document.getElementById('stat-last-event').textContent = `Ultimo: ${data.today.last_event} (${data.today.last_event_time})`;
+    document.getElementById('stat-logged-state').textContent = data.today.is_logged ? 'Enviado ao Jira' : 'Pendente';
+    document.getElementById('stat-queue-count').textContent = `Fila offline: ${data.queue.length} item(ns)`;
+
+    const swIssue = document.getElementById('switch-issue-input');
+    if (!swIssue.value) swIssue.value = data.today.target_issue;
+    const swComm = document.getElementById('switch-comment-input');
+    if (document.activeElement !== swComm && !swComm.value) {
+      swComm.value = data.today.active_comment || '';
+    }
+    document.getElementById('today-no-comment-chk').checked = Boolean(data.today.no_comment);
+
+    if (!scheduleInputsTouched || forceScheduleFill) {
+      document.getElementById('today-start-hm').value = data.today.shift_times.start_hm || '';
+      document.getElementById('today-lunch-start-hm').value = data.today.shift_times.lunch_start_hm || '';
+      document.getElementById('today-lunch-end-hm').value = data.today.shift_times.lunch_end_hm || '';
+      document.getElementById('today-end-hm').value = data.today.shift_times.end_hm || '';
+      previewTodaySchedule(false);
+    }
+
+    const tList = document.getElementById('today-tickets-list');
+    if (data.today.issues_summary.length === 0) {
+      tList.innerHTML = '<div style="font-size:12px; color:var(--text-muted);">Nenhum ticket contabilizado ainda hoje.</div>';
+    } else {
+      tList.innerHTML = data.today.issues_summary.map(item => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border-color); font-size:13px;">
+          <div>
+            <span class="ticket-pill">${escapeHtml(item.issue_key)}</span>
+            <strong style="margin-left:8px;">${item.formatted}</strong>
+            <span style="color:var(--text-muted); margin-left:8px; font-size:12px;">${item.comment ? '"' + escapeHtml(item.comment) + '"' : '(padrao)'}</span>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="quickEditIssueToday('${escapeHtml(item.issue_key)}', '${escapeHtml(item.comment || '').replace(/'/g, "\\'")}')">Editar Descricao</button>
+        </div>
+      `).join('');
+    }
+
+    const iTbody = document.getElementById('today-intervals-tbody');
+    if (data.today.intervals.length === 0) {
+      iTbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">Nenhum intervalo registrado hoje.</td></tr>';
+    } else {
+      iTbody.innerHTML = data.today.intervals.map(inter => `
+        <tr>
+          <td>${inter.index + 1}</td>
+          <td><span class="ticket-pill">${escapeHtml(inter.issue_key)}</span></td>
+          <td><span class="time-pill">${inter.start_hm || '-'}</span></td>
+          <td><span class="time-pill">${inter.end_hm || 'Em andamento'}</span></td>
+          <td><strong>${inter.duration_formatted}</strong></td>
+          <td>${inter.comment ? escapeHtml(inter.comment) : '<span style="color:var(--text-muted);">-</span>'}</td>
+          <td>
+            <div class="btn-group">
+              <button class="btn btn-outline btn-sm" onclick='openIntervalModal(${inter.index}, ${JSON.stringify(inter)})'>Editar</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteInterval(${inter.index})">Excluir</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    const qCard = document.getElementById('offline-queue-card');
+    const qTbody = document.getElementById('offline-queue-tbody');
+    if (data.queue.length > 0) {
+      qCard.style.display = 'block';
+      qTbody.innerHTML = data.queue.map(q => `
+        <tr>
+          <td>${q.date}</td>
+          <td><span class="ticket-pill">${escapeHtml(q.issue_key)}</span></td>
+          <td><strong>${q.time_formatted}</strong></td>
+          <td>${escapeHtml(q.comment || '(Sem descricao)')}</td>
+          <td>Tentativas: ${q.retry_count} ${q.last_error ? '<br><small style="color:var(--danger)">' + escapeHtml(q.last_error) + '</small>' : ''}</td>
+          <td>
+            <button class="btn btn-danger btn-sm" onclick="deleteQueueItem('${q.id}')">Remover da Fila</button>
+          </td>
+        </tr>
+      `).join('');
+    } else {
+      qCard.style.display = 'none';
+    }
+  } catch (err) {
+    console.debug('Polling status:', err);
+  }
+}
+
+function previewTodaySchedule(markTouched = true) {
+  if (markTouched) scheduleInputsTouched = true;
+  const s = document.getElementById('today-start-hm').value;
+  const ls = document.getElementById('today-lunch-start-hm').value;
+  const le = document.getElementById('today-lunch-end-hm').value;
+  const e = document.getElementById('today-end-hm').value;
+  const label = document.getElementById('today-schedule-calc-text');
+
+  const res = computeScheduleMinutes(s, ls, le, e);
+  if (!res) {
+    label.textContent = 'Informe ao menos o Horario de Inicio para calcular o expediente.';
+    return;
+  }
+  if (res.error) {
+    label.innerHTML = `<span style="color:var(--danger); font-weight:600;">${res.error}</span>`;
+    return;
+  }
+  label.innerHTML = `Manha: <strong>${minutesToHM(res.morning)}</strong> | Pausa Almoco: <strong>${minutesToHM(res.lunch)}</strong> | Tarde: <strong>${minutesToHM(res.afternoon)}</strong> | Total Liquido: <strong style="color:var(--primary-text); font-size:14px;">${minutesToHM(res.total)}</strong>`;
+}
+
+function fillTodayDefaultSchedule() {
+  const is8h = appState && appState.profile && appState.profile.name === '8h';
+  document.getElementById('today-start-hm').value = is8h ? '07:42' : '07:45';
+  document.getElementById('today-lunch-start-hm').value = '12:00';
+  document.getElementById('today-lunch-end-hm').value = is8h ? '13:00' : '13:30';
+  document.getElementById('today-end-hm').value = is8h ? '17:42' : '15:15';
+  previewTodaySchedule(true);
+}
+
+async function saveTodaySchedule() {
+  const start_hm = document.getElementById('today-start-hm').value;
+  const lunch_start_hm = document.getElementById('today-lunch-start-hm').value;
+  const lunch_end_hm = document.getElementById('today-lunch-end-hm').value;
+  const end_hm = document.getElementById('today-end-hm').value;
+
+  if (!start_hm) {
+    showToast('Informe o Horario de Inicio.', 'error');
+    return;
+  }
+  try {
+    const res = await apiCall('/api/today/schedule', 'POST', {
+      start_hm, lunch_start_hm, lunch_end_hm, end_hm
+    });
+    scheduleInputsTouched = false;
+    showToast(res.message || 'Horarios de hoje atualizados com sucesso!', 'success');
+    await loadDashboard(true);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function serviceAction(action) {
+  try {
+    const res = await apiCall('/api/service', 'POST', { action });
+    showToast(res.message || 'Acao executada com sucesso!', 'success');
+    await loadDashboard(true);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteQueueItem(itemId) {
+  if (!confirm('Deseja remover este item pendente da fila offline?')) return;
+  try {
+    const res = await apiCall('/api/service', 'POST', { action: 'delete_queue_item', item_id: itemId });
+    showToast(res.message, 'success');
+    await loadDashboard();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function quickEditIssueToday(issueKey, currentComment) {
+  document.getElementById('switch-issue-input').value = issueKey;
+  document.getElementById('switch-comment-input').value = currentComment;
+  document.getElementById('switch-comment-input').focus();
+}
+
+async function submitSwitchOrComment(action) {
+  const issue_key = document.getElementById('switch-issue-input').value.trim().toUpperCase();
+  const comment = document.getElementById('switch-comment-input').value.trim();
+  const no_comment = document.getElementById('today-no-comment-chk').checked;
+  if (!issue_key) {
+    showToast('Informe a chave do ticket.', 'error');
+    return;
+  }
+  try {
+    const res = await apiCall('/api/today/ticket', 'POST', {
+      action, issue_key, comment, no_comment
+    });
+    showToast(res.message, 'success');
+    await loadDashboard();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function toggleTodayNoComment(checked) {
+  try {
+    const res = await apiCall('/api/today/ticket', 'POST', {
+      action: 'toggle_no_comment',
+      no_comment: checked
+    });
+    showToast(res.message, 'success');
+    await loadDashboard();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function submitTransferToday() {
+  const source_issue = document.getElementById('transfer-src-input').value.trim().toUpperCase();
+  const target_issue = document.getElementById('transfer-tgt-input').value.trim().toUpperCase();
+  const time_str = document.getElementById('transfer-time-input').value.trim();
+  if (!source_issue || !target_issue) {
+    showToast('Informe o ticket de origem e o de destino.', 'error');
+    return;
+  }
+  try {
+    const res = await apiCall('/api/today/ticket', 'POST', {
+      action: 'transfer', source_issue, target_issue, time_str
+    });
+    showToast(res.message, 'success');
+    await loadDashboard();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+/* ==================== VISUALIZACAO SEMANAL ==================== */
+async function loadWeeklyView(refDateStr = '') {
+  const tbody = document.getElementById('weekly-table-tbody');
+  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:24px; color:var(--text-muted);">Consultando dados da semana...</td></tr>';
+  const fetchJira = document.getElementById('weekly-fetch-jira-chk').checked ? '1' : '0';
+
+  try {
+    const q = new URLSearchParams({ ref_date: refDateStr || '', fetch_jira: fetchJira });
+    const data = await apiCall('/api/weekly?' + q.toString());
+    currentWeeklyData = data;
+
+    document.getElementById('weekly-ref-date').value = data.ref_date;
+    document.getElementById('wk-range-label').textContent = `${data.monday_br} a ${data.sunday_br}`;
+    document.getElementById('wk-days-logged-sub').textContent = `Dias uteis lancados: ${data.weekdays_logged_count} / 5`;
+    document.getElementById('wk-total-worked').textContent = data.total_week_formatted;
+    document.getElementById('wk-full-target-sub').textContent = `Meta semanal (5 dias): ${data.full_week_target_formatted}`;
+    document.getElementById('wk-target-today').textContent = data.target_until_today_formatted;
+
+    const balEl = document.getElementById('wk-balance');
+    balEl.textContent = data.balance_formatted;
+    balEl.style.color = data.balance_positive ? 'var(--success)' : 'var(--danger)';
+
+    tbody.innerHTML = data.days.map(d => {
+      const sch = d.schedule || {};
+      const rowClass = d.is_today ? 'row-today' : '';
+      const badgeClass = d.status_type === 'logged' ? 'badge-running' :
+                         d.status_type === 'running' ? 'badge-completed' :
+                         d.status_type === 'missing' ? 'badge-danger' : 'badge-idle';
+
+      const ticketsHtml = d.tickets && d.tickets.length > 0
+        ? d.tickets.map(t => `
+            <div style="margin-bottom:4px;">
+              <span class="ticket-pill">${escapeHtml(t.issue_key)}</span>
+              <strong>${t.formatted}</strong>
+              ${t.comment ? `<span style="font-size:11.5px; color:var(--text-muted);"> - "${escapeHtml(t.comment)}"</span>` : ''}
+            </div>
+          `).join('')
+        : (d.is_weekend ? '<span style="color:var(--text-muted);">[Fim de Semana]</span>' : '<span style="color:var(--text-muted);">-</span>');
+
+      const firstWl = (d.tickets && d.tickets.length > 0 && d.tickets[0].id) ? d.tickets[0] : null;
+      const editBtn = firstWl
+        ? `<button class="btn btn-outline btn-sm" onclick='openWorklogModal(${JSON.stringify({
+            id: firstWl.id,
+            issue_key: firstWl.issue_key,
+            date: d.date,
+            time_spent_seconds: firstWl.seconds,
+            comment: firstWl.comment,
+            schedule: firstWl.schedule
+          })})'>Editar</button>`
+        : '';
+
+      return `
+        <tr class="${rowClass}">
+          <td><strong>${d.weekday}</strong> ${d.is_today ? '<span class="badge badge-completed" style="margin-left:4px;">HOJE</span>' : ''}</td>
+          <td><strong>${d.date_br}</strong></td>
+          <td><span class="time-pill">${sch.start_hm || '-'}</span></td>
+          <td><span class="time-pill">${sch.lunch_start_hm || '-'}</span></td>
+          <td><span class="time-pill">${sch.lunch_end_hm || '-'}</span></td>
+          <td><span class="time-pill">${sch.end_hm || '-'}</span></td>
+          <td>${ticketsHtml}</td>
+          <td><strong>${d.total_formatted}</strong></td>
+          <td>${d.target_formatted}</td>
+          <td><span class="badge ${badgeClass}">${d.status_label}</span></td>
+          <td style="text-align:right; white-space:nowrap;">
+            <div class="btn-group" style="justify-content:flex-end;">
+              ${editBtn}
+              <button class="btn btn-primary btn-sm" onclick="openWorklogModalForDate('${d.date}')">+ Lancar no Dia</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:var(--danger); padding:20px;">Erro ao carregar semana: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function navigateWeek(direction) {
+  if (direction === 0) {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    loadWeeklyView(todayIso);
+  } else if (direction < 0 && currentWeeklyData) {
+    loadWeeklyView(currentWeeklyData.prev_monday);
+  } else if (direction > 0 && currentWeeklyData) {
+    loadWeeklyView(currentWeeklyData.next_monday);
+  }
+}
+
+function openWorklogModalForDate(dateStr) {
+  openWorklogModal(null);
+  document.getElementById('wl-modal-date').value = dateStr;
+  recalcModalWorklog();
+}
+
+function openBatchForCurrentWeek() {
+  if (!currentWeeklyData) return;
+  switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3]);
+  document.getElementById('batch-start-date').value = currentWeeklyData.monday;
+  document.getElementById('batch-end-date').value = currentWeeklyData.sunday;
+  generateBatchPreview();
+}
+
+/* ==================== INTERVALS MODAL ==================== */
+function openIntervalModal(idx, inter = null) {
+  document.getElementById('inter-modal-idx').value = idx;
+  document.getElementById('inter-modal-title').textContent = idx >= 0 ? `Editar Intervalo #${idx + 1}` : 'Adicionar Intervalo Manual';
+  document.getElementById('inter-modal-issue').value = inter ? inter.issue_key : (appState ? appState.today.target_issue : '');
+  document.getElementById('inter-modal-start').value = inter ? inter.start_hm : '08:00';
+  document.getElementById('inter-modal-end').value = inter ? inter.end_hm : '12:00';
+  document.getElementById('inter-modal-comment').value = inter ? inter.comment : '';
+  document.getElementById('interval-modal').classList.add('open');
+}
+
+function closeIntervalModal() {
+  document.getElementById('interval-modal').classList.remove('open');
+}
+
+async function saveIntervalModal() {
+  const idx = parseInt(document.getElementById('inter-modal-idx').value, 10);
+  const issue_key = document.getElementById('inter-modal-issue').value.trim().toUpperCase();
+  const start_hm = document.getElementById('inter-modal-start').value;
+  const end_hm = document.getElementById('inter-modal-end').value;
+  const comment = document.getElementById('inter-modal-comment').value.trim();
+
+  if (!start_hm) {
+    showToast('Informe o horario de inicio do intervalo.', 'error');
+    return;
+  }
+  try {
+    const res = await apiCall('/api/today/intervals', 'POST', {
+      action: idx >= 0 ? 'update' : 'add',
+      index: idx,
+      issue_key,
+      start_hm,
+      end_hm,
+      comment
+    });
+    closeIntervalModal();
+    showToast(res.message, 'success');
+    await loadDashboard(true);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteInterval(idx) {
+  if (!confirm(`Deseja realmente excluir o intervalo #${idx + 1} de hoje?`)) return;
+  try {
+    const res = await apiCall('/api/today/intervals', 'POST', {
+      action: 'delete',
+      index: idx
+    });
+    showToast(res.message, 'success');
+    await loadDashboard(true);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+/* ==================== LOG NOW MODAL ==================== */
+function openLogNowModal() {
+  document.getElementById('lognow-no-comment').checked = Boolean(appState && appState.today.no_comment);
+  document.getElementById('lognow-modal').classList.add('open');
+}
+
+function closeLogNowModal() {
+  document.getElementById('lognow-modal').classList.remove('open');
+}
+
+async function confirmLogNow() {
+  const no_comment = document.getElementById('lognow-no-comment').checked;
+  try {
+    const res = await apiCall('/api/today/ticket', 'POST', {
+      action: 'log_now',
+      no_comment
+    });
+    closeLogNowModal();
+    showToast(res.message, 'success');
+    await loadDashboard(true);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+/* ==================== WORKLOGS DO JIRA E MULTI-SELECAO EM LOTE ==================== */
+async function loadJiraWorklogs() {
+  const days = document.getElementById('wl-filter-days').value;
+  const issue = document.getElementById('wl-filter-issue').value.trim().toUpperCase();
+  const tbody = document.getElementById('jira-worklogs-tbody');
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);">Consultando lancamentos no Jira... Aguarde.</td></tr>';
+
+  try {
+    const q = new URLSearchParams({ days });
+    if (issue) q.set('issue_key', issue);
+    const res = await apiCall('/api/worklogs?' + q.toString());
+    loadedWorklogs = res.worklogs || [];
+    selectedWorklogIds.clear();
+    updateBulkBarUI();
+    renderWorklogsTable();
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:var(--danger); padding:20px;">Erro ao carregar lancamentos: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function renderWorklogsTable() {
+  const tbody = document.getElementById('jira-worklogs-tbody');
+  const search = (document.getElementById('wl-search-text').value || '').trim().toLowerCase();
+
+  const filtered = loadedWorklogs.filter(w => {
+    if (!search) return true;
+    return (
+      (w.issue_key || '').toLowerCase().includes(search) ||
+      (w.date || '').toLowerCase().includes(search) ||
+      (w.comment || '').toLowerCase().includes(search) ||
+      (w.summary || '').toLowerCase().includes(search)
+    );
+  });
+
+  document.getElementById('wl-count-label').textContent = filtered.length;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);">Nenhum lancamento encontrado para o filtro selecionado.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(w => {
+    const sch = w.schedule || {};
+    const isChecked = selectedWorklogIds.has(String(w.id)) ? 'checked' : '';
+    const commentHtml = w.comment
+      ? `<span>${escapeHtml(w.comment)}</span>`
+      : `<span style="color:var(--text-muted); font-style:italic;">(Sem descricao)</span>`;
+    return `
+      <tr>
+        <td><input type="checkbox" class="wl-row-chk" value="${w.id}" ${isChecked} onchange="onWorklogRowCheck('${w.id}', this.checked)"></td>
+        <td><strong>${w.date}</strong></td>
+        <td>
+          <span class="ticket-pill" title="${escapeHtml(w.summary || '')}">${escapeHtml(w.issue_key)}</span>
+          ${w.summary ? `<div style="font-size:11px; color:var(--text-muted); max-width:190px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(w.summary)}</div>` : ''}
+        </td>
+        <td><span class="time-pill">${sch.start_hm || '-'}</span></td>
+        <td><span class="time-pill">${sch.lunch_start_hm || '-'}</span></td>
+        <td><span class="time-pill">${sch.lunch_end_hm || '-'}</span></td>
+        <td><span class="time-pill">${sch.end_hm || '-'}</span></td>
+        <td><strong style="color:var(--primary-text);">${w.time_formatted || w.time_spent}</strong></td>
+        <td style="max-width: 280px;">${commentHtml}</td>
+        <td style="text-align:right; white-space:nowrap;">
+          <div class="btn-group" style="justify-content:flex-end;">
+            <button class="btn btn-outline btn-sm" onclick="openEditWorklogById('${w.id}')">Editar / Horarios / Ticket</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteJiraWorklog('${w.issue_key}', '${w.id}', '${w.date}')">Excluir</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function onWorklogRowCheck(wid, checked) {
+  if (checked) {
+    selectedWorklogIds.add(String(wid));
+  } else {
+    selectedWorklogIds.delete(String(wid));
+  }
+  updateBulkBarUI();
+}
+
+function toggleSelectAllWorklogs(checked) {
+  document.querySelectorAll('.wl-row-chk').forEach(chk => {
+    chk.checked = checked;
+    if (checked) selectedWorklogIds.add(String(chk.value));
+    else selectedWorklogIds.delete(String(chk.value));
+  });
+  updateBulkBarUI();
+}
+
+function clearWorklogSelection() {
+  selectedWorklogIds.clear();
+  const selAll = document.getElementById('wl-select-all-chk');
+  if (selAll) selAll.checked = false;
+  document.querySelectorAll('.wl-row-chk').forEach(chk => { chk.checked = false; });
+  updateBulkBarUI();
+}
+
+function updateBulkBarUI() {
+  const bar = document.getElementById('wl-bulk-bar');
+  const count = selectedWorklogIds.size;
+  document.getElementById('wl-selected-count').textContent = count;
+  if (count > 0) bar.classList.add('active');
+  else bar.classList.remove('active');
+}
+
+function openBulkEditModal() {
+  const count = selectedWorklogIds.size;
+  if (count === 0) return;
+  document.getElementById('bulk-edit-count-lbl').textContent = count;
+  document.getElementById('bulk-apply-ticket-chk').checked = false;
+  document.getElementById('bulk-new-ticket').value = '';
+  document.getElementById('bulk-apply-schedule-chk').checked = false;
+  document.getElementById('bulk-apply-comment-chk').checked = false;
+  document.getElementById('bulk-new-comment').value = '';
+  recalcBulkEditModal();
+  document.getElementById('bulk-edit-modal').classList.add('open');
+}
+
+function closeBulkEditModal() {
+  document.getElementById('bulk-edit-modal').classList.remove('open');
+}
+
+function recalcBulkEditModal() {
+  const s = document.getElementById('bulk-edit-start-hm').value;
+  const ls = document.getElementById('bulk-edit-ls-hm').value;
+  const le = document.getElementById('bulk-edit-le-hm').value;
+  const e = document.getElementById('bulk-edit-end-hm').value;
+  const res = computeScheduleMinutes(s, ls, le, e);
+  const lbl = document.getElementById('bulk-edit-calc-lbl');
+  if (!res || res.error) {
+    lbl.textContent = res && res.error ? res.error : 'Informe horarios validos.';
+    return;
+  }
+  lbl.innerHTML = `Tempo liquido resultante para cada lancamento: <strong>${minutesToHM(res.total)}</strong>`;
+}
+
+async function submitBulkEditWorklogs() {
+  const applyTicket = document.getElementById('bulk-apply-ticket-chk').checked;
+  const newTicket = document.getElementById('bulk-new-ticket').value.trim().toUpperCase();
+  const applySchedule = document.getElementById('bulk-apply-schedule-chk').checked;
+  const start_hm = document.getElementById('bulk-edit-start-hm').value;
+  const lunch_start_hm = document.getElementById('bulk-edit-ls-hm').value;
+  const lunch_end_hm = document.getElementById('bulk-edit-le-hm').value;
+  const end_hm = document.getElementById('bulk-edit-end-hm').value;
+  const applyComment = document.getElementById('bulk-apply-comment-chk').checked;
+  const newComment = document.getElementById('bulk-new-comment').value.trim();
+
+  if (!applyTicket && !applySchedule && !applyComment) {
+    showToast('Marque ao menos uma alteracao (Ticket, Horarios ou Descricao).', 'error');
+    return;
+  }
+  if (applyTicket && !newTicket) {
+    showToast('Informe o novo Ticket de destino.', 'error');
+    return;
+  }
+
+  const items = loadedWorklogs.filter(w => selectedWorklogIds.has(String(w.id)));
+  const btn = document.getElementById('bulk-edit-save-btn');
+  btn.disabled = true;
+  btn.textContent = `Processando ${items.length} lancamentos...`;
+
+  try {
+    const res = await apiCall('/api/worklogs/batch-update', 'POST', {
+      items: items.map(w => ({
+        worklog_id: w.id,
+        source_issue: w.issue_key,
+        date_str: w.date,
+        current_seconds: w.time_spent_seconds,
+        current_started: w.started,
+        current_comment: w.comment
+      })),
+      apply_ticket: applyTicket,
+      target_issue: newTicket,
+      apply_schedule: applySchedule,
+      start_hm,
+      lunch_start_hm,
+      lunch_end_hm,
+      end_hm,
+      apply_comment: applyComment,
+      comment: newComment
+    });
+    closeBulkEditModal();
+    showToast(res.message, 'success');
+    await loadJiraWorklogs();
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Aplicar Alteracoes em Lote no Jira';
+  }
+}
+
+async function deleteSelectedWorklogsBulk() {
+  const items = loadedWorklogs.filter(w => selectedWorklogIds.has(String(w.id)));
+  if (items.length === 0) return;
+  if (!confirm(`Confirma a EXCLUSAO em lote de ${items.length} lancamento(s) selecionado(s) no Jira?`)) return;
+
+  try {
+    const res = await apiCall('/api/worklogs/batch-delete', 'POST', {
+      items: items.map(w => ({ worklog_id: w.id, issue_key: w.issue_key }))
+    });
+    showToast(res.message, 'success');
+    await loadJiraWorklogs();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+/* ==================== GERADOR DE LANCAMENTOS EM LOTE (MULTI-DIAS / SEMANAS) ==================== */
+function initBatchTabDefaults() {
+  const sEl = document.getElementById('batch-start-date');
+  const eEl = document.getElementById('batch-end-date');
+  const issEl = document.getElementById('batch-issue-key');
+  if (!sEl.value || !eEl.value) {
+    setBatchPreset('this_week');
+  }
+  if (!issEl.value && appState && appState.today) {
+    issEl.value = appState.today.target_issue || 'ATIVDIV-32';
+  }
+  previewBatchBaseSchedule();
+}
+
+function setBatchPreset(preset) {
+  const today = new Date();
+  const formatIso = d => d.toISOString().slice(0, 10);
+  const dayOfWeek = (today.getDay() + 6) % 7; // Segunda=0 .. Domingo=6
+
+  let start = new Date(today);
+  let end = new Date(today);
+
+  if (preset === 'this_week') {
+    start.setDate(today.getDate() - dayOfWeek);
+  } else if (preset === 'last_week') {
+    start.setDate(today.getDate() - dayOfWeek - 7);
+    end = new Date(start);
+    end.setDate(start.getDate() + 4);
+  } else if (preset === '2_weeks') {
+    start.setDate(today.getDate() - dayOfWeek - 7);
+  } else if (preset === '3_weeks') {
+    start.setDate(today.getDate() - dayOfWeek - 14);
+  } else if (preset === 'month') {
+    start.setDate(today.getDate() - 29);
+  }
+
+  document.getElementById('batch-start-date').value = formatIso(start);
+  document.getElementById('batch-end-date').value = formatIso(end);
+}
+
+function previewBatchBaseSchedule() {
+  const s = document.getElementById('batch-start-hm').value;
+  const ls = document.getElementById('batch-ls-hm').value;
+  const le = document.getElementById('batch-le-hm').value;
+  const e = document.getElementById('batch-end-hm').value;
+  const res = computeScheduleMinutes(s, ls, le, e);
+  const el = document.getElementById('batch-base-calc-text');
+  if (!res || res.error) {
+    el.innerHTML = `<span style="color:var(--danger)">${res ? res.error : 'Horarios invalidos'}</span>`;
+    return;
+  }
+  el.innerHTML = `Tempo Liquido por Dia: <span style="color:var(--primary-text)">${minutesToHM(res.total)}</span>`;
+}
+
+async function generateBatchPreview() {
+  const startDateStr = document.getElementById('batch-start-date').value;
+  const endDateStr = document.getElementById('batch-end-date').value;
+  const issueKey = (document.getElementById('batch-issue-key').value || '').trim().toUpperCase() || 'ATIVDIV-32';
+  const comment = (document.getElementById('batch-comment').value || '').trim();
+  const startHm = document.getElementById('batch-start-hm').value || '07:45';
+  const lsHm = document.getElementById('batch-ls-hm').value || '12:00';
+  const leHm = document.getElementById('batch-le-hm').value || '13:30';
+  const endHm = document.getElementById('batch-end-hm').value || '15:15';
+  const skipExisting = document.getElementById('batch-skip-existing-chk').checked;
+
+  const allowedWeekdays = new Set(
+    Array.from(document.querySelectorAll('.batch-wd-chk:checked')).map(c => parseInt(c.value, 10))
+  );
+
+  if (!startDateStr || !endDateStr || startDateStr > endDateStr) {
+    showToast('Informe um intervalo de datas valido (Data Inicial <= Data Final).', 'error');
+    return;
+  }
+
+  const card = document.getElementById('batch-preview-card');
+  const tbody = document.getElementById('batch-preview-tbody');
+  card.style.display = 'block';
+  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:20px; color:var(--text-muted);">Gerando grade de dias e verificando lancamentos existentes no Jira...</td></tr>';
+
+  let existingByDate = {};
+  if (skipExisting) {
+    try {
+      const res = await apiCall(`/api/worklogs/range?start_date=${startDateStr}&end_date=${endDateStr}`);
+      (res.worklogs || []).forEach(w => {
+        existingByDate[w.date] = (existingByDate[w.date] || 0) + (w.time_spent_seconds || 0);
+      });
+    } catch (e) {
+      console.warn('Falha ao consultar existentes:', e);
+    }
+  }
+
+  const weekdaysNames = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
+  batchPreviewRows = [];
+
+  const cur = new Date(startDateStr + 'T12:00:00');
+  const end = new Date(endDateStr + 'T12:00:00');
+
+  while (cur <= end) {
+    const iso = cur.toISOString().slice(0, 10);
+    const wd = (cur.getDay() + 6) % 7; // Seg=0..Dom=6
+    if (allowedWeekdays.has(wd)) {
+      const existingSec = existingByDate[iso] || 0;
+      const shouldSelect = !(skipExisting && existingSec > 0);
+      batchPreviewRows.push({
+        date: iso,
+        weekday: weekdaysNames[wd],
+        existing_seconds: existingSec,
+        selected: shouldSelect,
+        issue_key: issueKey,
+        start_hm: startHm,
+        lunch_start_hm: lsHm,
+        lunch_end_hm: leHm,
+        end_hm: endHm,
+        comment: comment
+      });
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  renderBatchPreviewTable();
+}
+
+function renderBatchPreviewTable() {
+  const tbody = document.getElementById('batch-preview-tbody');
+  if (batchPreviewRows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:20px; color:var(--text-muted);">Nenhum dia corresponde aos criterios selecionados.</td></tr>';
+    updateBatchSummaryCount();
+    return;
+  }
+
+  tbody.innerHTML = batchPreviewRows.map((r, idx) => {
+    const calc = computeScheduleMinutes(r.start_hm, r.lunch_start_hm, r.lunch_end_hm, r.end_hm);
+    const netStr = (calc && !calc.error) ? minutesToHM(calc.total) : 'Erro';
+    const statusBadge = r.existing_seconds > 0
+      ? `<span class="badge badge-running">Ja possui ${minutesToHM(r.existing_seconds / 60)}</span>`
+      : `<span class="badge badge-idle">Sem lancamento</span>`;
+
+    return `
+      <tr>
+        <td><input type="checkbox" ${r.selected ? 'checked' : ''} onchange="batchPreviewRows[${idx}].selected=this.checked; updateBatchSummaryCount();"></td>
+        <td><strong>${r.date}</strong></td>
+        <td>${r.weekday}</td>
+        <td>${statusBadge}</td>
+        <td><input type="text" class="form-control" style="width:130px; padding:5px 8px;" value="${escapeHtml(r.issue_key)}" oninput="batchPreviewRows[${idx}].issue_key=this.value.toUpperCase()"></td>
+        <td><input type="time" class="form-control" style="padding:5px 6px;" value="${r.start_hm}" oninput="batchPreviewRows[${idx}].start_hm=this.value; updateBatchRowNet(${idx})"></td>
+        <td><input type="time" class="form-control" style="padding:5px 6px;" value="${r.lunch_start_hm}" oninput="batchPreviewRows[${idx}].lunch_start_hm=this.value; updateBatchRowNet(${idx})"></td>
+        <td><input type="time" class="form-control" style="padding:5px 6px;" value="${r.lunch_end_hm}" oninput="batchPreviewRows[${idx}].lunch_end_hm=this.value; updateBatchRowNet(${idx})"></td>
+        <td><input type="time" class="form-control" style="padding:5px 6px;" value="${r.end_hm}" oninput="batchPreviewRows[${idx}].end_hm=this.value; updateBatchRowNet(${idx})"></td>
+        <td><strong id="batch-row-net-${idx}" style="color:var(--primary-text);">${netStr}</strong></td>
+        <td><input type="text" class="form-control" style="min-width:180px; padding:5px 8px;" value="${escapeHtml(r.comment)}" placeholder="Padrao do ticket" oninput="batchPreviewRows[${idx}].comment=this.value"></td>
+      </tr>
+    `;
+  }).join('');
+  updateBatchSummaryCount();
+}
+
+function updateBatchRowNet(idx) {
+  const r = batchPreviewRows[idx];
+  const calc = computeScheduleMinutes(r.start_hm, r.lunch_start_hm, r.lunch_end_hm, r.end_hm);
+  const el = document.getElementById(`batch-row-net-${idx}`);
+  if (el) {
+    el.textContent = (calc && !calc.error) ? minutesToHM(calc.total) : 'Invalido';
+  }
+}
+
+function toggleAllBatchRows(checked) {
+  batchPreviewRows.forEach(r => { r.selected = checked; });
+  renderBatchPreviewTable();
+}
+
+function updateBatchSummaryCount() {
+  const count = batchPreviewRows.filter(r => r.selected).length;
+  document.getElementById('batch-selected-summary').textContent = `${count} de ${batchPreviewRows.length} dia(s) marcado(s) para lancar`;
+}
+
+async function submitBatchWorklogs() {
+  const selected = batchPreviewRows.filter(r => r.selected);
+  if (selected.length === 0) {
+    showToast('Selecione ao menos 1 dia na tabela para lancar.', 'error');
+    return;
+  }
+  const no_comment = document.getElementById('batch-no-comment-chk').checked;
+  if (!confirm(`Confirma o lancamento em lote de ${selected.length} dia(s) diretamente no Jira?`)) return;
+
+  const btn = document.getElementById('batch-submit-btn');
+  btn.disabled = true;
+  btn.textContent = `Enviando ${selected.length} lancamentos ao Jira...`;
+
+  try {
+    const res = await apiCall('/api/worklogs/batch-create', 'POST', {
+      no_comment,
+      entries: selected
+    });
+    showToast(res.message, 'success');
+    await generateBatchPreview();
+    await loadDashboard();
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '2. Lancar Todos os Dias Selecionados no Jira Agora';
+  }
+}
+
+/* ==================== MODAL INDIVIDUAL WORKLOG ==================== */
+function openWorklogModal(worklog = null) {
+  const isEdit = Boolean(worklog && worklog.id);
+  document.getElementById('wl-modal-title').textContent = isEdit
+    ? `Editar Lancamento #${worklog.id} (${worklog.issue_key})`
+    : 'Lancar Novo Worklog no Jira';
+  document.getElementById('wl-modal-id').value = isEdit ? worklog.id : '';
+  document.getElementById('wl-modal-source-issue').value = isEdit ? worklog.issue_key : '';
+  document.getElementById('wl-modal-issue').value = isEdit
+    ? worklog.issue_key
+    : (appState && appState.today ? appState.today.target_issue : 'ATIVDIV-32');
+  document.getElementById('wl-modal-migrate-hint').style.display = isEdit ? 'block' : 'none';
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  document.getElementById('wl-modal-date').value = isEdit ? worklog.date : todayIso;
+
+  const sch = (worklog && worklog.schedule) ? worklog.schedule : {
+    start_hm: '07:45',
+    lunch_start_hm: '12:00',
+    lunch_end_hm: '13:30',
+    end_hm: '15:15'
+  };
+
+  document.getElementById('wl-modal-start-hm').value = sch.start_hm || '07:45';
+  document.getElementById('wl-modal-ls-hm').value = sch.lunch_start_hm || '';
+  document.getElementById('wl-modal-le-hm').value = sch.lunch_end_hm || '';
+  document.getElementById('wl-modal-end-hm').value = sch.end_hm || '';
+
+  document.getElementById('wl-modal-manual-dur-chk').checked = false;
+  toggleModalDurationMode();
+
+  if (isEdit) {
+    document.getElementById('wl-modal-duration').value = worklog.hm_formatted || minutesToHM((worklog.time_spent_seconds || 0) / 60);
+  } else {
+    recalcModalWorklog();
+  }
+
+  document.getElementById('wl-modal-comment').value = isEdit ? (worklog.comment || '') : '';
+  document.getElementById('wl-modal-no-comment').checked = false;
+
+  document.getElementById('worklog-modal').classList.add('open');
+}
+
+function openEditWorklogById(wid) {
+  const found = loadedWorklogs.find(x => String(x.id) === String(wid));
+  if (found) {
+    openWorklogModal(found);
+  }
+}
+
+function closeWorklogModal() {
+  document.getElementById('worklog-modal').classList.remove('open');
+}
+
+function toggleModalDurationMode() {
+  const manual = document.getElementById('wl-modal-manual-dur-chk').checked;
+  const durInput = document.getElementById('wl-modal-duration');
+  durInput.readOnly = !manual;
+  if (!manual) {
+    recalcModalWorklog();
+  }
+}
+
+function recalcModalWorklog() {
+  const manual = document.getElementById('wl-modal-manual-dur-chk').checked;
+  const s = document.getElementById('wl-modal-start-hm').value;
+  const ls = document.getElementById('wl-modal-ls-hm').value;
+  const le = document.getElementById('wl-modal-le-hm').value;
+  const e = document.getElementById('wl-modal-end-hm').value;
+  const summaryEl = document.getElementById('wl-modal-calc-summary');
+
+  const res = computeScheduleMinutes(s, ls, le, e);
+  if (!res) {
+    summaryEl.textContent = 'Preencha inicio e encerramento para calcular automaticamente.';
+    return;
+  }
+  if (res.error) {
+    summaryEl.innerHTML = `<span style="color:var(--danger); font-weight:600;">${res.error}</span>`;
+    return;
+  }
+  if (!manual && res.total > 0) {
+    document.getElementById('wl-modal-duration').value = minutesToHM(res.total);
+  }
+  summaryEl.innerHTML = `Manha: <strong>${minutesToHM(res.morning)}</strong> | Almoco: <strong>${minutesToHM(res.lunch)}</strong> | Tarde: <strong>${minutesToHM(res.afternoon)}</strong> | Liquido: <strong>${minutesToHM(res.total)}</strong>`;
+}
+
+async function saveModalWorklog() {
+  const worklog_id = document.getElementById('wl-modal-id').value.trim();
+  const source_issue = document.getElementById('wl-modal-source-issue').value.trim().toUpperCase();
+  const target_issue = document.getElementById('wl-modal-issue').value.trim().toUpperCase();
+  const date_str = document.getElementById('wl-modal-date').value;
+  const start_hm = document.getElementById('wl-modal-start-hm').value;
+  const lunch_start_hm = document.getElementById('wl-modal-ls-hm').value;
+  const lunch_end_hm = document.getElementById('wl-modal-le-hm').value;
+  const end_hm = document.getElementById('wl-modal-end-hm').value;
+  const manual_duration = document.getElementById('wl-modal-manual-dur-chk').checked;
+  const time_str = document.getElementById('wl-modal-duration').value.trim();
+  const comment = document.getElementById('wl-modal-comment').value.trim();
+  const no_comment = document.getElementById('wl-modal-no-comment').checked;
+
+  if (!target_issue || !date_str) {
+    showToast('Informe o Ticket e a Data do lancamento.', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('wl-modal-save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Salvando no Jira...';
+
+  try {
+    const endpoint = worklog_id ? '/api/worklogs/update' : '/api/worklogs/create';
+    const res = await apiCall(endpoint, 'POST', {
+      worklog_id,
+      source_issue: source_issue || target_issue,
+      target_issue,
+      date_str,
+      start_hm,
+      lunch_start_hm,
+      lunch_end_hm,
+      end_hm,
+      manual_duration,
+      time_str,
+      comment,
+      no_comment
+    });
+    closeWorklogModal();
+    showToast(res.message || 'Lancamento salvo com sucesso!', 'success');
+    if (document.getElementById('tab-worklogs').classList.contains('active')) {
+      await loadJiraWorklogs();
+    }
+    if (document.getElementById('tab-weekly').classList.contains('active')) {
+      await loadWeeklyView(document.getElementById('weekly-ref-date').value);
+    }
+    await loadDashboard();
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Salvar Lancamento no Jira';
+  }
+}
+
+async function deleteJiraWorklog(issueKey, worklogId, dateStr) {
+  if (!confirm(`Confirma a EXCLUSAO permanente do lancamento #${worklogId} do ticket ${issueKey} (${dateStr}) no Jira?`)) {
+    return;
+  }
+  try {
+    const res = await apiCall('/api/worklogs/delete', 'POST', {
+      issue_key: issueKey,
+      worklog_id: worklogId
+    });
+    showToast(res.message, 'success');
+    await loadJiraWorklogs();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+/* ==================== PERFIS, CONFIGURACOES E ATUALIZACAO ==================== */
+async function loadConfigData() {
+  try {
+    const data = await apiCall('/api/config');
+    configData = data;
+
+    document.getElementById('prof-active-select').value = data.active_profile;
+    populateProfileFields(data.active_profile);
+
+    document.getElementById('cfg-base-url').value = data.jira.base_url || '';
+    document.getElementById('cfg-email').value = data.jira.email || '';
+    document.getElementById('cfg-token-status').textContent = data.jira.has_token
+      ? 'Token individual configurado e seguro'
+      : 'Nenhum token salvo';
+    document.getElementById('cfg-api-token').value = '';
+    document.getElementById('cfg-default-issue').value = data.jira.default_issue || '';
+    document.getElementById('cfg-default-comment').value = data.jira.default_comment || '';
+
+    document.getElementById('cfg-lock-mode').value = data.intermediate_lock_mode || 'pause';
+    document.getElementById('cfg-min-log').value = data.min_log_minutes || 15;
+    document.getElementById('cfg-notifications').checked = Boolean(data.notifications_enabled);
+    document.getElementById('cfg-auto-log').checked = Boolean(data.auto_log_on_exit);
+    document.getElementById('cfg-autostart').checked = Boolean(data.autostart_enabled);
+
+    document.getElementById('cfg-update-source').value = data.update_source || '';
+    document.getElementById('cfg-auto-update').checked = Boolean(data.auto_update_on_start);
+
+    if (data.version_info) {
+      document.getElementById('upd-version-text').textContent = `v${data.version_info.version}`;
+      document.getElementById('upd-lastmod-text').textContent = `Ultima modificacao: ${data.version_info.last_modified}`;
+      document.getElementById('upd-user-text').textContent = data.version_info.current_windows_user;
+      document.getElementById('upd-config-path-text').textContent = data.version_info.user_config_file;
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function onProfileSelectChange() {
+  const sel = document.getElementById('prof-active-select').value;
+  populateProfileFields(sel);
+}
+
+function populateProfileFields(profName) {
+  if (!configData || !configData.profiles) return;
+  const p = configData.profiles[profName];
+  if (!p) return;
+  document.getElementById('prof-target-hours').value = p.target_hours;
+  document.getElementById('prof-description').value = p.description || '';
+  document.getElementById('win-entry-start').value = p.entry_window.start;
+  document.getElementById('win-entry-end').value = p.entry_window.end;
+  document.getElementById('win-ls-start').value = p.lunch_start_window.start;
+  document.getElementById('win-ls-end').value = p.lunch_start_window.end;
+  document.getElementById('win-le-start').value = p.lunch_end_window.start;
+  document.getElementById('win-le-end').value = p.lunch_end_window.end;
+  document.getElementById('win-exit-start').value = p.exit_window.start;
+  document.getElementById('win-exit-end').value = p.exit_window.end;
+}
+
+function applyToleranceCalculator() {
+  const calcWin = (hmId, befId, aftId, startOutId, endOutId) => {
+    const hm = document.getElementById(hmId).value;
+    const bef = parseInt(document.getElementById(befId).value || '0', 10);
+    const aft = parseInt(document.getElementById(aftId).value || '0', 10);
+    const mins = hmToMinutes(hm);
+    if (mins !== null) {
+      document.getElementById(startOutId).value = minutesToHM(mins - bef);
+      document.getElementById(endOutId).value = minutesToHM(mins + aft);
+    }
+  };
+  calcWin('calc-entry-hm', 'calc-entry-bef', 'calc-entry-aft', 'win-entry-start', 'win-entry-end');
+  calcWin('calc-ls-hm', 'calc-ls-bef', 'calc-ls-aft', 'win-ls-start', 'win-ls-end');
+  calcWin('calc-le-hm', 'calc-le-bef', 'calc-le-aft', 'win-le-start', 'win-le-end');
+  calcWin('calc-exit-hm', 'calc-exit-bef', 'calc-exit-aft', 'win-exit-start', 'win-exit-end');
+  showToast('Janelas calculadas! Clique em "Salvar Perfil e Janelas" para gravar.', 'info');
+}
+
+async function saveProfileSettings() {
+  const active_profile = document.getElementById('prof-active-select').value;
+  const profile_data = {
+    name: active_profile,
+    target_hours: parseFloat(document.getElementById('prof-target-hours').value || '6.0'),
+    description: document.getElementById('prof-description').value.trim(),
+    entry_window: {
+      start: document.getElementById('win-entry-start').value,
+      end: document.getElementById('win-entry-end').value
+    },
+    lunch_start_window: {
+      start: document.getElementById('win-ls-start').value,
+      end: document.getElementById('win-ls-end').value
+    },
+    lunch_end_window: {
+      start: document.getElementById('win-le-start').value,
+      end: document.getElementById('win-le-end').value
+    },
+    exit_window: {
+      start: document.getElementById('win-exit-start').value,
+      end: document.getElementById('win-exit-end').value
+    }
+  };
+  try {
+    const res = await apiCall('/api/config', 'POST', {
+      action: 'save_profile',
+      active_profile,
+      profile_data
+    });
+    showToast(res.message, 'success');
+    await loadConfigData();
+    await loadDashboard();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function saveGeneralSettings() {
+  const payload = {
+    action: 'save_general',
+    base_url: document.getElementById('cfg-base-url').value.trim(),
+    email: document.getElementById('cfg-email').value.trim(),
+    api_token: document.getElementById('cfg-api-token').value.trim(),
+    default_issue: document.getElementById('cfg-default-issue').value.trim().toUpperCase(),
+    default_comment: document.getElementById('cfg-default-comment').value.trim(),
+    intermediate_lock_mode: document.getElementById('cfg-lock-mode').value,
+    min_log_minutes: parseInt(document.getElementById('cfg-min-log').value || '15', 10),
+    notifications_enabled: document.getElementById('cfg-notifications').checked,
+    auto_log_on_exit: document.getElementById('cfg-auto-log').checked,
+    autostart_enabled: document.getElementById('cfg-autostart').checked,
+    update_source: document.getElementById('cfg-update-source').value.trim(),
+    auto_update_on_start: document.getElementById('cfg-auto-update').checked
+  };
+  try {
+    const res = await apiCall('/api/config', 'POST', payload);
+    showToast(res.message, 'success');
+    await loadConfigData();
+    await loadDashboard();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function checkAppUpdate() {
+  const box = document.getElementById('update-status-box');
+  const src = document.getElementById('cfg-update-source').value.trim();
+  box.style.display = 'block';
+  box.style.background = 'var(--bg-subtle)';
+  box.style.color = 'var(--text-main)';
+  box.textContent = 'Verificando disponibilidade de atualizacao...';
+  try {
+    const res = await apiCall('/api/update', 'POST', { action: 'check', update_source: src });
+    box.style.background = res.has_update ? 'var(--info-bg)' : 'var(--success-bg)';
+    box.style.color = res.has_update ? 'var(--info)' : 'var(--success)';
+    box.textContent = res.message;
+  } catch (err) {
+    box.style.background = 'var(--danger-bg)';
+    box.style.color = 'var(--danger)';
+    box.textContent = err.message;
+  }
+}
+
+async function runAppUpdate() {
+  const box = document.getElementById('update-status-box');
+  const src = document.getElementById('cfg-update-source').value.trim();
+  box.style.display = 'block';
+  box.style.background = 'var(--bg-subtle)';
+  box.style.color = 'var(--text-main)';
+  box.textContent = 'Aplicando atualizacao de codigo (preservando suas configuracoes pessoais)...';
+  try {
+    const res = await apiCall('/api/update', 'POST', { action: 'update', update_source: src });
+    box.style.background = 'var(--success-bg)';
+    box.style.color = 'var(--success)';
+    box.textContent = res.message;
+    showToast('Atualizacao concluida!', 'success');
+    await loadConfigData();
+  } catch (err) {
+    box.style.background = 'var(--danger-bg)';
+    box.style.color = 'var(--danger)';
+    box.textContent = err.message;
+  }
+}
+
+async function publishCleanRelease() {
+  const targetDir = document.getElementById('publish-target-dir').value.trim();
+  const box = document.getElementById('update-status-box');
+  if (!targetDir) {
+    showToast('Informe o caminho da pasta compartilhada de destino.', 'error');
+    return;
+  }
+  box.style.display = 'block';
+  box.style.background = 'var(--bg-subtle)';
+  box.style.color = 'var(--text-main)';
+  box.textContent = 'Publicando arquivos de codigo limpos na pasta compartilhada...';
+  try {
+    const res = await apiCall('/api/update', 'POST', { action: 'publish', target_dir: targetDir });
+    box.style.background = 'var(--success-bg)';
+    box.style.color = 'var(--success)';
+    box.textContent = res.message;
+    showToast('Versao limpa publicada com sucesso!', 'success');
+  } catch (err) {
+    box.style.background = 'var(--danger-bg)';
+    box.style.color = 'var(--danger)';
+    box.textContent = err.message;
+  }
+}
+
+async function testJiraConnection() {
+  const box = document.getElementById('test-jira-result');
+  box.style.display = 'block';
+  box.style.background = 'var(--bg-subtle)';
+  box.style.color = 'var(--text-main)';
+  box.textContent = 'Testando autenticacao com a API REST do Jira...';
+  try {
+    const res = await apiCall('/api/test-jira', 'POST', {});
+    box.style.background = res.success ? 'var(--success-bg)' : 'var(--danger-bg)';
+    box.style.color = res.success ? 'var(--success)' : 'var(--danger)';
+    box.innerText = res.message;
+  } catch (err) {
+    box.style.background = 'var(--danger-bg)';
+    box.style.color = 'var(--danger)';
+    box.textContent = err.message;
+  }
+}
+
+/* ==================== RELATORIOS ==================== */
+async function loadReport(days = 7) {
+  try {
+    const res = await apiCall(`/api/report?days=${days}`);
+    document.getElementById('rep-total-worked').textContent = res.total_period_formatted;
+    document.getElementById('rep-total-target').textContent = res.total_target_formatted;
+    const balEl = document.getElementById('rep-balance');
+    balEl.textContent = res.balance_formatted;
+    balEl.style.color = res.balance_positive ? 'var(--success)' : 'var(--danger)';
+    document.getElementById('rep-days-count').textContent = `${res.days} dias`;
+    document.getElementById('rep-raw-pre').textContent = res.raw_report;
+
+    const tbody = document.getElementById('rep-table-tbody');
+    tbody.innerHTML = res.rows.map(r => {
+      const ticketsHtml = r.tickets.length > 0
+        ? r.tickets.map(t => `<span class="ticket-pill">${escapeHtml(t.issue_key)}</span> <small>(${t.formatted})</small>`).join(' &nbsp; ')
+        : (r.is_weekend ? '<span style="color:var(--text-muted);">[Fim de Semana]</span>' : '-');
+      const badgeClass = r.status_label === 'Enviado'
+        ? 'badge-running'
+        : (r.status_label === 'Pendente' ? 'badge-paused' : 'badge-idle');
+      return `
+        <tr>
+          <td><strong>${r.date}</strong></td>
+          <td>${r.weekday}</td>
+          <td>${ticketsHtml}</td>
+          <td><strong>${r.total_formatted}</strong></td>
+          <td>${r.target_formatted}</td>
+          <td><span class="badge ${badgeClass}">${r.status_label}</span></td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function refreshAll() {
+  await loadDashboard(true);
+  if (document.getElementById('tab-weekly').classList.contains('active')) {
+    await loadWeeklyView(document.getElementById('weekly-ref-date').value);
+  }
+  if (document.getElementById('tab-worklogs').classList.contains('active')) {
+    await loadJiraWorklogs();
+  }
+  showToast('Dados atualizados!', 'info');
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  loadDashboard(true);
+  setInterval(() => {
+    loadDashboard(false);
+  }, 5000);
+});
+</script>
+</body>
+</html>
+"""
+
+
+class JiraBotWebHandler(BaseHTTPRequestHandler):
+    """Handler HTTP para servir a Single-Page Application e os endpoints JSON da API local."""
+
+    def log_message(self, format: str, *args: Any) -> None:
+        logger.debug("%s - %s", self.address_string(), format % args)
+
+    def _send_json(self, data: Dict[str, Any], status_code: int = 200) -> None:
+        payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        try:
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(payload)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            pass
+
+    def _send_html(self, html: str, status_code: int = 200) -> None:
+        payload = html.encode("utf-8")
+        try:
+            self.send_response(status_code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(payload)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            pass
+
+    def _read_json_body(self) -> Dict[str, Any]:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length).decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+    def do_GET(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
+
+        try:
+            if path in ["/", "/index.html"]:
+                self._send_html(HTML_PAGE)
+                return
+
+            if path == "/api/status":
+                self._send_json(build_dashboard_payload())
+                return
+
+            if path == "/api/config":
+                cfg = BotConfig.load()
+                data = cfg.to_dict()
+                # Protecao estrita: nunca expor api_token na resposta HTTP
+                has_token = bool(cfg.jira.get_clean_token())
+                data["jira"]["api_token"] = ""
+                data["jira"]["has_token"] = has_token
+                data["autostart_enabled"] = is_autostart_enabled()
+                data["version_info"] = get_version_info()
+                self._send_json(data)
+                return
+
+            if path == "/api/report":
+                days = int(query.get("days", ["7"])[0])
+                self._send_json(build_report_payload(days=days))
+                return
+
+            if path == "/api/weekly":
+                ref_date = (query.get("ref_date", [""])[0] or "").strip()
+                fetch_jira = (query.get("fetch_jira", ["1"])[0] != "0")
+                self._send_json(build_weekly_payload(ref_date_str=ref_date, fetch_jira=fetch_jira))
+                return
+
+            if path == "/api/worklogs/range":
+                s_date = (query.get("start_date", [""])[0] or "").strip()
+                e_date = (query.get("end_date", [""])[0] or "").strip()
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+                worklogs = client.get_user_worklogs_by_date_range(s_date, e_date)
+                self._send_json({"worklogs": worklogs})
+                return
+
+            if path == "/api/worklogs":
+                days = int(query.get("days", ["14"])[0])
+                issue_filter = (query.get("issue_key", [""])[0] or "").strip().upper()
+
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+
+                if issue_filter:
+                    worklogs = client.get_formatted_issue_worklogs(issue_filter)
+                else:
+                    worklogs = client.get_user_recent_worklogs(days=days)
+
+                is_8h = cfg.active_profile == "8h"
+                def_ls = "12:00"
+                def_le = "13:00" if is_8h else "13:30"
+
+                for w in worklogs:
+                    sec = int(w.get("time_spent_seconds", 0) or 0)
+                    w["time_formatted"] = format_duration(sec)
+                    w["hm_formatted"] = format_hm_from_seconds(sec)
+                    w["schedule"] = state_mgr.get_or_infer_worklog_schedule(
+                        w, default_lunch_start=def_ls, default_lunch_end=def_le
+                    )
+
+                self._send_json({"worklogs": worklogs})
+                return
+
+            self._send_json({"error": "Rota nao encontrada"}, status_code=404)
+        except Exception as e:
+            logger.exception("Erro em GET %s", path)
+            self._send_json({"error": str(e)}, status_code=500)
+
+    def do_POST(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        try:
+            body = self._read_json_body()
+
+            if path == "/api/theme":
+                theme = body.get("theme", "dark")
+                cfg = BotConfig.load()
+                cfg.theme = "light" if theme == "light" else "dark"
+                cfg.save()
+                self._send_json({"success": True, "theme": cfg.theme})
+                return
+
+            if path == "/api/update":
+                action = body.get("action", "check")
+                if action == "check":
+                    res = check_for_updates(body.get("update_source"))
+                    self._send_json(res)
+                    return
+                if action == "update":
+                    res = perform_update(body.get("update_source"))
+                    if not res.get("success"):
+                        self._send_json({"error": res.get("message", "Falha ao atualizar")}, status_code=400)
+                        return
+                    self._send_json(res)
+                    return
+                if action == "publish":
+                    res = publish_clean_release(body.get("target_dir", ""))
+                    if not res.get("success"):
+                        self._send_json({"error": res.get("message", "Falha ao publicar")}, status_code=400)
+                        return
+                    self._send_json(res)
+                    return
+
+            if path == "/api/service":
+                action = body.get("action", "")
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                engine = BotEngine(config=cfg, state_manager=state_mgr)
+
+                if action == "start_daemon":
+                    pid = start_background()
+                    self._send_json({"success": True, "message": f"Servico iniciado em background (PID: {pid})."})
+                elif action == "stop_daemon":
+                    stop_background()
+                    self._send_json({"success": True, "message": "Servico em background encerrado."})
+                elif action == "restart_daemon":
+                    pid = restart_background()
+                    self._send_json({"success": True, "message": f"Servico reiniciado com sucesso (Novo PID: {pid})."})
+                elif action == "manual_start":
+                    engine.manual_start()
+                    self._send_json({"success": True, "message": "Cronometro iniciado/retomado com sucesso."})
+                elif action == "manual_pause":
+                    engine.manual_pause()
+                    self._send_json({"success": True, "message": "Cronometro pausado."})
+                elif action == "simulate_lock":
+                    st = engine.handle_lock()
+                    self._send_json({"success": True, "message": f"Evento LOCK processado. Novo estado: {st.status}."})
+                elif action == "simulate_unlock":
+                    st = engine.handle_unlock()
+                    self._send_json({"success": True, "message": f"Evento UNLOCK processado. Novo estado: {st.status}."})
+                elif action == "test_popup":
+                    show_pre_exit_popup(state_mgr)
+                    self._send_json({"success": True, "message": "Janela grafica de revisao pre-saida disparada."})
+                elif action == "flush_queue":
+                    client = JiraClient(cfg.jira, state_mgr)
+                    count = client.flush_queue()
+                    self._send_json({"success": True, "message": f"{count} item(ns) sincronizado(s) com o Jira."})
+                elif action == "delete_queue_item":
+                    item_id = body.get("item_id", "")
+                    state_mgr.remove_from_queue(item_id)
+                    self._send_json({"success": True, "message": "Item removido da fila offline."})
+                else:
+                    self._send_json({"error": f"Acao desconhecida: {action}"}, status_code=400)
+                return
+
+            if path == "/api/today/schedule":
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                state = state_mgr.load_state()
+                res = state.apply_shift_schedule(
+                    start_hm=body.get("start_hm", ""),
+                    lunch_start_hm=body.get("lunch_start_hm", ""),
+                    lunch_end_hm=body.get("lunch_end_hm", ""),
+                    end_hm=body.get("end_hm", ""),
+                    default_issue=cfg.jira.default_issue,
+                )
+                if not res.get("success"):
+                    self._send_json({"error": res.get("message", "Horario invalido")}, status_code=400)
+                    return
+                state_mgr.save_state(state)
+                dur_str = format_duration(state.get_total_seconds())
+                self._send_json({
+                    "success": True,
+                    "message": f"Horarios do expediente atualizados! Tempo liquido calculado: {dur_str}.",
+                })
+                return
+
+            if path == "/api/today/intervals":
+                action = body.get("action", "")
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                state = state_mgr.load_state()
+                active_issue = (body.get("issue_key") or state.target_issue or cfg.jira.default_issue).strip().upper()
+
+                if action in ["add", "update"]:
+                    st_dt = _parse_hm(state.date_str, body.get("start_hm", ""))
+                    en_dt = _parse_hm(state.date_str, body.get("end_hm", ""))
+                    if not st_dt:
+                        self._send_json({"error": "Horario de inicio invalido."}, status_code=400)
+                        return
+                    if en_dt and en_dt < st_dt:
+                        self._send_json({"error": "Horario de fim nao pode ser anterior ao inicio."}, status_code=400)
+                        return
+
+                    new_inter = TimeInterval(
+                        start=st_dt.isoformat(),
+                        end=en_dt.isoformat() if en_dt else None,
+                        issue_key=active_issue,
+                        comment=(body.get("comment") or "").strip() or None,
+                    )
+                    if action == "add":
+                        state.intervals.append(new_inter)
+                        msg = "Novo intervalo adicionado ao dia de hoje."
+                    else:
+                        idx = int(body.get("index", -1))
+                        if 0 <= idx < len(state.intervals):
+                            state.intervals[idx] = new_inter
+                            msg = f"Intervalo #{idx + 1} atualizado com sucesso."
+                        else:
+                            self._send_json({"error": "Indice de intervalo invalido."}, status_code=400)
+                            return
+
+                    state.intervals.sort(key=lambda x: x.start)
+                    if any(i.end is None for i in state.intervals):
+                        state.status = "RUNNING"
+                    state_mgr.save_state(state)
+                    self._send_json({"success": True, "message": msg})
+                    return
+
+                if action == "delete":
+                    idx = int(body.get("index", -1))
+                    if 0 <= idx < len(state.intervals):
+                        state.intervals.pop(idx)
+                        state_mgr.save_state(state)
+                        self._send_json({"success": True, "message": f"Intervalo #{idx + 1} excluido."})
+                    else:
+                        self._send_json({"error": "Indice de intervalo invalido."}, status_code=400)
+                    return
+
+            if path == "/api/today/ticket":
+                action = body.get("action", "")
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+
+                if action == "switch":
+                    issue_key = (body.get("issue_key") or "").strip().upper()
+                    comment = (body.get("comment") or "").strip()
+                    engine = BotEngine(config=cfg, state_manager=state_mgr)
+                    engine.switch_ticket(issue_key, comment=comment if comment else None)
+                    self._send_json({"success": True, "message": f"Ticket ativo alterado para {issue_key}."})
+                    return
+
+                if action == "set_comment":
+                    issue_key = (body.get("issue_key") or "").strip().upper()
+                    comment = (body.get("comment") or "").strip()
+                    state = state_mgr.load_state()
+                    state.no_comment = bool(body.get("no_comment", False))
+                    if issue_key:
+                        state.set_issue_comment(issue_key, comment)
+                    state_mgr.save_state(state)
+                    self._send_json({"success": True, "message": f"Descricao de {issue_key} atualizada."})
+                    return
+
+                if action == "toggle_no_comment":
+                    state = state_mgr.load_state()
+                    state.no_comment = bool(body.get("no_comment", False))
+                    state_mgr.save_state(state)
+                    msg = "Configurado para enviar SEM descricao." if state.no_comment else "Envio de descricao reativado."
+                    self._send_json({"success": True, "message": msg})
+                    return
+
+                if action == "transfer":
+                    src = (body.get("source_issue") or "").strip().upper()
+                    tgt = (body.get("target_issue") or "").strip().upper()
+                    t_str = (body.get("time_str") or "").strip()
+                    sec = parse_duration_input(t_str) if t_str else None
+                    engine = BotEngine(config=cfg, state_manager=state_mgr)
+                    transferred = engine.transfer_today_hours(source_issue=src, target_issue=tgt, seconds=sec)
+                    if transferred <= 0:
+                        self._send_json({"error": f"Nenhuma hora disponivel em {src} para transferir hoje."}, status_code=400)
+                        return
+                    self._send_json({
+                        "success": True,
+                        "message": f"Transferido {format_duration(transferred)} de {src} para {tgt}.",
+                    })
+                    return
+
+                if action == "log_now":
+                    no_comment = bool(body.get("no_comment", False))
+                    created_ids: List[str] = []
+                    state_before = state_mgr.load_state()
+                    shift_summary = state_before.get_shift_times_summary()
+
+                    def _on_trigger(issue: str, sec: int, start_iso: str, comm: Optional[str] = None) -> bool:
+                        res = client.submit_worklog(
+                            issue_key=issue,
+                            time_spent_seconds=sec,
+                            started_iso=start_iso,
+                            comment="" if comm == "__EMPTY__" else comm,
+                            no_comment=(comm == "__EMPTY__"),
+                        )
+                        if res.get("status") == "success":
+                            wid = str(res.get("worklog_id", ""))
+                            if wid:
+                                created_ids.append(wid)
+                                state_mgr.save_worklog_schedule(wid, shift_summary)
+                            return True
+                        return False
+
+                    engine = BotEngine(config=cfg, state_manager=state_mgr, on_worklog_trigger=_on_trigger)
+                    total_sec = engine.manual_log(no_comment=no_comment)
+                    self._send_json({
+                        "success": True,
+                        "message": f"Lancamento concluido! Total processado: {format_duration(total_sec)}.",
+                        "worklog_ids": created_ids,
+                    })
+                    return
+
+            # Criacao em Lote (Multiplos Dias / Semanas)
+            if path == "/api/worklogs/batch-create":
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+
+                entries = body.get("entries", [])
+                no_comment = bool(body.get("no_comment", False))
+                if not entries:
+                    self._send_json({"error": "Nenhum dia informado no lote."}, status_code=400)
+                    return
+
+                success_count = 0
+                errors: List[str] = []
+                fallback_cache: Dict[str, str] = {}
+
+                for item in entries:
+                    d_str = (item.get("date") or "")[:10]
+                    issue_key = (item.get("issue_key") or cfg.jira.default_issue or "ATIVDIV-32").strip().upper()
+                    start_hm = (item.get("start_hm") or "07:45").strip()
+                    ls_hm = (item.get("lunch_start_hm") or "").strip()
+                    le_hm = (item.get("lunch_end_hm") or "").strip()
+                    end_hm = (item.get("end_hm") or "15:15").strip()
+                    raw_comment = (item.get("comment") or "").strip()
+
+                    calc = calculate_shift_schedule(
+                        date_str=d_str,
+                        start_hm=start_hm,
+                        lunch_start_hm=ls_hm,
+                        lunch_end_hm=le_hm,
+                        end_hm=end_hm,
+                        issue_key=issue_key,
+                        comment=raw_comment,
+                    )
+                    if not calc.get("success") or int(calc.get("total_seconds", 0)) <= 0:
+                        errors.append(f"{d_str}: Horarios invalidos")
+                        continue
+
+                    sec = int(calc["total_seconds"])
+                    started_iso = calc["started_iso"]
+
+                    if no_comment:
+                        final_comment = ""
+                    elif raw_comment:
+                        final_comment = raw_comment
+                    else:
+                        if issue_key not in fallback_cache:
+                            fallback_cache[issue_key] = get_fallback_description(issue_key, client)
+                        final_comment = fallback_cache[issue_key]
+
+                    try:
+                        res = client.submit_worklog(
+                            issue_key=issue_key,
+                            time_spent_seconds=sec,
+                            started_iso=started_iso,
+                            comment=final_comment,
+                            no_comment=no_comment,
+                        )
+                        wid = str(res.get("worklog_id", ""))
+                        if wid:
+                            state_mgr.save_worklog_schedule(wid, {
+                                "start_hm": start_hm,
+                                "lunch_start_hm": ls_hm,
+                                "lunch_end_hm": le_hm,
+                                "end_hm": end_hm,
+                            })
+                        success_count += 1
+                    except Exception as e:
+                        errors.append(f"{d_str} ({issue_key}): {e}")
+
+                if success_count == 0 and errors:
+                    self._send_json({"error": f"Falha ao lancar lote: {'; '.join(errors[:3])}"}, status_code=400)
+                    return
+
+                msg = f"Lote concluido! {success_count} de {len(entries)} dia(s) lancado(s) com sucesso no Jira."
+                if errors:
+                    msg += f" ({len(errors)} falha(s): {'; '.join(errors[:2])})"
+                self._send_json({"success": True, "created_count": success_count, "errors": errors, "message": msg})
+                return
+
+            # Edicao / Migracao em Lote de Worklogs Selecionados
+            if path == "/api/worklogs/batch-update":
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+
+                items = body.get("items", [])
+                apply_ticket = bool(body.get("apply_ticket", False))
+                target_issue = (body.get("target_issue") or "").strip().upper()
+                apply_schedule = bool(body.get("apply_schedule", False))
+                start_hm = (body.get("start_hm") or "07:45").strip()
+                ls_hm = (body.get("lunch_start_hm") or "").strip()
+                le_hm = (body.get("lunch_end_hm") or "").strip()
+                end_hm = (body.get("end_hm") or "15:15").strip()
+                apply_comment = bool(body.get("apply_comment", False))
+                new_comment = (body.get("comment") or "").strip()
+
+                updated_count = 0
+                errors = []
+
+                for it in items:
+                    wid = str(it.get("worklog_id") or "").strip()
+                    src_issue = (it.get("source_issue") or "").strip().upper()
+                    d_str = (it.get("date_str") or date.today().isoformat())[:10]
+                    if not wid or not src_issue:
+                        continue
+
+                    sec_to_use: Optional[int] = None
+                    started_to_use: Optional[str] = None
+                    if apply_schedule:
+                        calc = calculate_shift_schedule(
+                            date_str=d_str,
+                            start_hm=start_hm,
+                            lunch_start_hm=ls_hm,
+                            lunch_end_hm=le_hm,
+                            end_hm=end_hm,
+                            issue_key=target_issue if apply_ticket else src_issue,
+                        )
+                        if not calc.get("success") or int(calc.get("total_seconds", 0)) <= 0:
+                            errors.append(f"#{wid}: Horarios invalidos")
+                            continue
+                        sec_to_use = int(calc["total_seconds"])
+                        started_to_use = calc["started_iso"]
+
+                    comm_to_use: Optional[str] = new_comment if apply_comment else None
+                    dest_issue = target_issue if (apply_ticket and target_issue) else src_issue
+
+                    if dest_issue != src_issue:
+                        mig = client.migrate_worklog(
+                            source_issue=src_issue,
+                            target_issue=dest_issue,
+                            worklog_id=wid,
+                            override_seconds=sec_to_use,
+                            override_started_iso=started_to_use,
+                            override_comment=comm_to_use,
+                        )
+                        if mig.get("success"):
+                            new_id = str(mig.get("new_worklog_id") or wid)
+                            if apply_schedule:
+                                state_mgr.delete_worklog_schedule(wid)
+                                state_mgr.save_worklog_schedule(new_id, {
+                                    "start_hm": start_hm,
+                                    "lunch_start_hm": ls_hm,
+                                    "lunch_end_hm": le_hm,
+                                    "end_hm": end_hm,
+                                })
+                            updated_count += 1
+                        else:
+                            errors.append(f"#{wid}: {mig.get('message')}")
+                    else:
+                        upd = client.update_worklog_full(
+                            issue_key=src_issue,
+                            worklog_id=wid,
+                            time_spent_seconds=sec_to_use,
+                            started_iso=started_to_use,
+                            comment=comm_to_use,
+                        )
+                        if upd.get("success"):
+                            if apply_schedule:
+                                state_mgr.save_worklog_schedule(wid, {
+                                    "start_hm": start_hm,
+                                    "lunch_start_hm": ls_hm,
+                                    "lunch_end_hm": le_hm,
+                                    "end_hm": end_hm,
+                                })
+                            updated_count += 1
+                        else:
+                            errors.append(f"#{wid}: {upd.get('message')}")
+
+                if updated_count == 0 and errors:
+                    self._send_json({"error": f"Falha na edicao em lote: {'; '.join(errors[:3])}"}, status_code=400)
+                    return
+                self._send_json({
+                    "success": True,
+                    "updated_count": updated_count,
+                    "message": f"Edicao em lote concluida! {updated_count} de {len(items)} lancamento(s) atualizado(s).",
+                })
+                return
+
+            # Exclusao em Lote
+            if path == "/api/worklogs/batch-delete":
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+                items = body.get("items", [])
+                deleted_count = 0
+                for it in items:
+                    wid = str(it.get("worklog_id") or "").strip()
+                    iss = (it.get("issue_key") or "").strip().upper()
+                    if wid and iss and client.delete_worklog(iss, wid):
+                        state_mgr.delete_worklog_schedule(wid)
+                        deleted_count += 1
+                self._send_json({
+                    "success": True,
+                    "deleted_count": deleted_count,
+                    "message": f"{deleted_count} de {len(items)} lancamento(s) excluido(s) do Jira com sucesso.",
+                })
+                return
+
+            if path in ["/api/worklogs/create", "/api/worklogs/update"]:
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+
+                worklog_id = (body.get("worklog_id") or "").strip()
+                source_issue = (body.get("source_issue") or "").strip().upper()
+                target_issue = (body.get("target_issue") or "").strip().upper()
+                date_str = (body.get("date_str") or date.today().isoformat())[:10]
+                start_hm = (body.get("start_hm") or "08:00").strip()
+                lunch_start_hm = (body.get("lunch_start_hm") or "").strip()
+                lunch_end_hm = (body.get("lunch_end_hm") or "").strip()
+                end_hm = (body.get("end_hm") or "").strip()
+                manual_duration = bool(body.get("manual_duration", False))
+                time_str = (body.get("time_str") or "").strip()
+                no_comment = bool(body.get("no_comment", False))
+                comment = "" if no_comment else (body.get("comment") or "").strip()
+
+                schedule_meta = {
+                    "start_hm": start_hm,
+                    "lunch_start_hm": lunch_start_hm,
+                    "lunch_end_hm": lunch_end_hm,
+                    "end_hm": end_hm,
+                }
+
+                if not manual_duration and start_hm and end_hm:
+                    calc = calculate_shift_schedule(
+                        date_str=date_str,
+                        start_hm=start_hm,
+                        lunch_start_hm=lunch_start_hm,
+                        lunch_end_hm=lunch_end_hm,
+                        end_hm=end_hm,
+                        issue_key=target_issue,
+                        comment=comment,
+                    )
+                    if not calc.get("success"):
+                        self._send_json({"error": calc.get("message", "Horarios invalidos.")}, status_code=400)
+                        return
+                    total_seconds = int(calc["total_seconds"])
+                    started_iso = calc["started_iso"]
+                else:
+                    total_seconds = parse_duration_input(time_str) or 0
+                    st_dt = _parse_hm(date_str, start_hm or "08:00") or datetime.now()
+                    started_iso = st_dt.isoformat()
+
+                if total_seconds <= 0:
+                    self._send_json({"error": "O tempo total liquido deve ser maior que zero."}, status_code=400)
+                    return
+
+                if path == "/api/worklogs/create":
+                    if not no_comment and not comment:
+                        comment = get_fallback_description(target_issue, client)
+                    res = client.submit_worklog(
+                        issue_key=target_issue,
+                        time_spent_seconds=total_seconds,
+                        started_iso=started_iso,
+                        comment=comment,
+                        no_comment=no_comment,
+                    )
+                    new_id = str(res.get("worklog_id", ""))
+                    if new_id:
+                        state_mgr.save_worklog_schedule(new_id, schedule_meta)
+                    self._send_json({
+                        "success": True,
+                        "worklog_id": new_id,
+                        "message": f"Worklog lancado com sucesso em {target_issue} ({format_duration(total_seconds)})!",
+                    })
+                    return
+
+                if not worklog_id:
+                    self._send_json({"error": "ID do worklog nao informado."}, status_code=400)
+                    return
+
+                if source_issue and target_issue and source_issue != target_issue:
+                    mig = client.migrate_worklog(
+                        source_issue=source_issue,
+                        target_issue=target_issue,
+                        worklog_id=worklog_id,
+                        override_seconds=total_seconds,
+                        override_started_iso=started_iso,
+                        override_comment=comment,
+                    )
+                    if not mig.get("success"):
+                        self._send_json({"error": mig.get("message", "Falha ao migrar ticket.")}, status_code=400)
+                        return
+                    new_id = str(mig.get("new_worklog_id") or worklog_id)
+                    state_mgr.delete_worklog_schedule(worklog_id)
+                    state_mgr.save_worklog_schedule(new_id, schedule_meta)
+                    self._send_json({
+                        "success": True,
+                        "worklog_id": new_id,
+                        "message": mig.get("message", f"Lancamento migrado para {target_issue} e atualizado!"),
+                    })
+                    return
+                else:
+                    upd = client.update_worklog_full(
+                        issue_key=target_issue,
+                        worklog_id=worklog_id,
+                        time_spent_seconds=total_seconds,
+                        started_iso=started_iso,
+                        comment=comment,
+                    )
+                    if not upd.get("success"):
+                        self._send_json({"error": upd.get("message", "Falha ao atualizar worklog.")}, status_code=400)
+                        return
+                    state_mgr.save_worklog_schedule(worklog_id, schedule_meta)
+                    self._send_json({
+                        "success": True,
+                        "worklog_id": worklog_id,
+                        "message": f"Lancamento #{worklog_id} ({target_issue}) atualizado com sucesso!",
+                    })
+                    return
+
+            if path == "/api/worklogs/delete":
+                issue_key = (body.get("issue_key") or "").strip().upper()
+                worklog_id = str(body.get("worklog_id") or "").strip()
+                if not issue_key or not worklog_id:
+                    self._send_json({"error": "Ticket e ID do worklog sao obrigatorios."}, status_code=400)
+                    return
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+                ok = client.delete_worklog(issue_key, worklog_id)
+                if not ok:
+                    self._send_json({"error": f"Nao foi possivel excluir o worklog {worklog_id} no Jira."}, status_code=400)
+                    return
+                state_mgr.delete_worklog_schedule(worklog_id)
+                self._send_json({
+                    "success": True,
+                    "message": f"Lancamento #{worklog_id} excluido de {issue_key} com sucesso.",
+                })
+                return
+
+            if path == "/api/config":
+                action = body.get("action", "")
+                cfg = BotConfig.load()
+
+                if action == "save_profile":
+                    active_prof = body.get("active_profile", cfg.active_profile)
+                    p_data = body.get("profile_data", {})
+                    if p_data:
+                        prof = ShiftProfile.from_dict(p_data)
+                        cfg.profiles[active_prof] = prof
+                    cfg.active_profile = active_prof
+                    cfg.save()
+                    self._send_json({"success": True, "message": f"Perfil '{active_prof}' salvo e ativado com sucesso!"})
+                    return
+
+                if action == "save_general":
+                    if body.get("base_url"):
+                        cfg.jira.base_url = body["base_url"].strip().rstrip("/")
+                    if "email" in body:
+                        cfg.jira.email = body["email"].strip()
+                    if body.get("api_token"):
+                        cfg.jira.api_token = body["api_token"].strip()
+                    if body.get("default_issue"):
+                        cfg.jira.default_issue = body["default_issue"].strip().upper()
+                    if "default_comment" in body:
+                        cfg.jira.default_comment = body["default_comment"].strip()
+                    if body.get("intermediate_lock_mode") in ["pause", "ignore"]:
+                        cfg.intermediate_lock_mode = body["intermediate_lock_mode"]
+                    if "min_log_minutes" in body:
+                        cfg.min_log_minutes = int(body["min_log_minutes"])
+                    if "notifications_enabled" in body:
+                        cfg.notifications_enabled = bool(body["notifications_enabled"])
+                    if "auto_log_on_exit" in body:
+                        cfg.auto_log_on_exit = bool(body["auto_log_on_exit"])
+                    if "update_source" in body:
+                        cfg.update_source = body["update_source"].strip()
+                    if "auto_update_on_start" in body:
+                        cfg.auto_update_on_start = bool(body["auto_update_on_start"])
+
+                    cfg.save()
+
+                    if "autostart_enabled" in body:
+                        from cli import set_windows_autostart
+                        set_windows_autostart(bool(body["autostart_enabled"]))
+
+                    self._send_json({"success": True, "message": "Configuracoes gravadas com sucesso!"})
+                    return
+
+            if path == "/api/test-jira":
+                cfg = BotConfig.load()
+                client = JiraClient(cfg.jira)
+                res = client.test_connection()
+                self._send_json(res)
+                return
+
+            self._send_json({"error": "Rota POST nao encontrada"}, status_code=404)
+        except Exception as e:
+            logger.exception("Erro em POST %s", path)
+            self._send_json({"error": str(e)}, status_code=500)
+
+
+def is_port_in_use(port: int = 8765) -> bool:
+    """Verifica se ja existe um servidor ativo escutando na porta local."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def start_embedded_web_server(port: int = 8765) -> Optional[ReusableThreadingHTTPServer]:
+    """
+    Inicia o servidor HTTP do Painel Web em uma thread daemon embutida (usada pelo daemon.py).
+    Retorna a instancia do servidor ou None se a porta ja estiver em uso.
+    """
+    if is_port_in_use(port):
+        logger.info(f"Servidor Web ja esta ativo na porta {port}.")
+        return None
+    try:
+        server = ReusableThreadingHTTPServer(("127.0.0.1", port), JiraBotWebHandler)
+        t = threading.Thread(target=server.serve_forever, name="JiraBotWebServerThread", daemon=True)
+        t.start()
+        logger.info(f"Servidor Web do JiraBot iniciado em background em http://127.0.0.1:{port}")
+        return server
+    except Exception as e:
+        logger.warning(f"Erro ao iniciar servidor Web embutido na porta {port}: {e}")
+        return None
+
+
+def ensure_background_web_server(port: int = 8765) -> str:
+    """
+    Garante que o servidor do Painel Web esteja rodando de forma persistente em background
+    (mesmo que o usuario feche o terminal) e retorna a URL de acesso.
+    """
+    url = f"http://127.0.0.1:{port}"
+    if is_port_in_use(port):
+        return url
+
+    # Inicia ou reinicia o servico em background (que ja sobe o servidor Web na porta 8765)
+    start_background()
+    for _ in range(15):
+        if is_port_in_use(port):
+            return url
+        time.sleep(0.2)
+
+    # Caso o daemon ja estivesse rodando em versao antiga sem o servidor Web, reinicia-o
+    restart_background()
+    for _ in range(15):
+        if is_port_in_use(port):
+            return url
+        time.sleep(0.2)
+
+    # Fallback: inicia processo pythonw.exe dedicado para o web_panel.py
+    python_exe = sys.executable
+    pythonw = Path(python_exe).parent / "pythonw.exe"
+    exe = str(pythonw) if pythonw.exists() else python_exe
+    script = Path(__file__).resolve()
+    flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+    subprocess.Popen(
+        [exe, str(script), "--standalone", str(port)],
+        creationflags=flags,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+    )
+    time.sleep(0.6)
+    return url
+
+
+def run_web_server(port: int = 8765, open_browser: bool = True, standalone: bool = False) -> None:
+    """
+    Garante o servidor Web ativo em segundo plano e abre o navegador,
+    ou executa em loop standalone quando chamado pelo processo de background.
+    """
+    if standalone:
+        server = ReusableThreadingHTTPServer(("127.0.0.1", port), JiraBotWebHandler)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
+        return
+
+    url = ensure_background_web_server(port=port)
+    print("\n" + "=" * 65)
+    print("          PAINEL WEB INTERATIVO - JIRABOT ATIVO")
+    print("=" * 65)
+    print(f"  Endereco : {url}")
+    print("  Modo     : Persistente em Background (voce pode fechar esta janela)")
+    print("=" * 65 + "\n")
+
+    if open_browser:
+        webbrowser.open(url)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--standalone":
+        p = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
+        run_web_server(port=p, open_browser=False, standalone=True)
+    else:
+        run_web_server()

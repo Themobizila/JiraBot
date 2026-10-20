@@ -1,0 +1,19 @@
+# Ignorar arquivos sensiveis, caches e dados locais de usuarios
+.env
+.env.*
+*.pid
+*.log
+*.tmp
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+config.json
+state.json
+queue.json
+history.json
+worklog_schedules.json
+relatorios/
+backupP/
+backupCore/
