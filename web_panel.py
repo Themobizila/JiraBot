@@ -1631,12 +1631,13 @@ pre.terminal-box {
       </div>
     </section>
 
-    <!-- ==================== TAB 4: LANCAMENTOS EM LOTE (MULTI-DIAS / SEMANAS) ==================== -->
+    <!-- ==================== TAB 4: LANCAMENTOS EM LOTE (MULTI-DIAS / SEMANAS / MULTI-TICKETS) ==================== -->
     <section id="tab-batch" class="tab-pane">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Gerador de Lancamentos em Lote (Multiplos Dias ou Semanas de Uma So Vez)</div>
-          <div class="btn-group">
+          <div class="card-title">Gerador de Lancamentos em Lote (Multiplos Dias, Semanas e Multiplos Tickets)</div>
+          <div class="btn-group" style="align-items:center;">
+            <span style="font-size:11.5px; color:var(--text-muted); margin-right:4px;">Atalhos Opcionais:</span>
             <button class="btn btn-outline btn-sm" onclick="setBatchPreset('this_week')">Esta Semana</button>
             <button class="btn btn-outline btn-sm" onclick="setBatchPreset('last_week')">Semana Passada</button>
             <button class="btn btn-outline btn-sm" onclick="setBatchPreset('2_weeks')">Ultimas 2 Semanas</button>
@@ -1646,30 +1647,39 @@ pre.terminal-box {
         </div>
 
         <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-          Ideal para quando o bot ficou desligado por varios dias ou semanas: escolha o periodo, os horarios base (inicio, pausa de almoco, retorno e encerramento), revise a tabela gerada e envie todos os dias juntos para o Jira.
+          Escolha livremente a <strong>Data Inicial</strong> e a <strong>Data Final</strong> do periodo que deseja lancar, marque os dias da semana desejados (por padrao Segunda a Sexta, pulando Sabado e Domingo) e selecione abaixo como os tickets devem ser distribuidos.
         </p>
 
         <div class="form-grid">
           <div class="form-group">
-            <label>Data Inicial do Periodo</label>
-            <input type="date" id="batch-start-date" class="form-control">
+            <label>Data Inicial do Periodo (Escolha Livre)</label>
+            <input type="date" id="batch-start-date" class="form-control" oninput="onBatchPeriodOrWeekdayChange()" onchange="onBatchPeriodOrWeekdayChange()">
           </div>
           <div class="form-group">
-            <label>Data Final do Periodo</label>
-            <input type="date" id="batch-end-date" class="form-control">
+            <label>Data Final do Periodo (Escolha Livre)</label>
+            <input type="date" id="batch-end-date" class="form-control" oninput="onBatchPeriodOrWeekdayChange()" onchange="onBatchPeriodOrWeekdayChange()">
           </div>
-          <div class="form-group">
-            <label>Ticket Padrao do Lote (ex: ATIVDIV-32)</label>
-            <input type="text" id="batch-issue-key" class="form-control" placeholder="Ex: ATIVDIV-32">
-          </div>
-          <div class="form-group">
-            <label>Descricao Padrao para os Dias do Lote</label>
-            <input type="text" id="batch-comment" class="form-control" placeholder="Opcional (vazio usa padrao do ticket)">
+          <div class="form-group" style="grid-column: span 2;">
+            <label>Como Deseja Lancar os Tickets neste Periodo?</label>
+            <select id="batch-multi-mode" class="form-control" onchange="onBatchMultiModeChange()">
+              <option value="one_per_day">1 Ticket por Dia (Em Ordem Cronologica: 1 linha para cada dia habilitado do periodo, limitado ao total de dias)</option>
+              <option value="split_day">Dividir o Mesmo Dia entre Varios Tickets (Lancar 2 ou mais tickets dentro do mesmo dia e repetir esse padrao em todos os dias)</option>
+            </select>
           </div>
         </div>
 
+        <!-- Quadro Explicativo Detalhado do Modo Selecionado -->
+        <div id="batch-mode-explanation-box" class="schedule-box" style="margin-bottom:14px; border-left: 4px solid var(--primary); padding: 12px 16px;">
+        </div>
+
         <div class="schedule-box">
-          <div style="font-weight:700; font-size:13px; margin-bottom:10px;">Horarios Padrao para Cada Dia do Lote</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+            <div style="font-weight:700; font-size:13px;">Expediente Base de Referencia do Dia</div>
+            <div class="btn-group">
+              <button class="btn btn-outline btn-sm" onclick="setBatchBaseProfile('6h')">Padrao 6h (07:45 - 15:15)</button>
+              <button class="btn btn-outline btn-sm" onclick="setBatchBaseProfile('8h')">Padrao 8h (07:42 - 17:42)</button>
+            </div>
+          </div>
           <div class="schedule-grid">
             <div class="form-group" style="margin-bottom:0">
               <label>Horario de Inicio</label>
@@ -1690,23 +1700,62 @@ pre.terminal-box {
           </div>
 
           <div class="schedule-summary-bar">
-            <div>
-              <strong>Dias da Semana:</strong>
-              <div class="weekday-checks">
-                <label><input type="checkbox" class="batch-wd-chk" value="0" checked> Seg</label>
-                <label><input type="checkbox" class="batch-wd-chk" value="1" checked> Ter</label>
-                <label><input type="checkbox" class="batch-wd-chk" value="2" checked> Qua</label>
-                <label><input type="checkbox" class="batch-wd-chk" value="3" checked> Qui</label>
-                <label><input type="checkbox" class="batch-wd-chk" value="4" checked> Sex</label>
-                <label><input type="checkbox" class="batch-wd-chk" value="5"> Sab</label>
-                <label><input type="checkbox" class="batch-wd-chk" value="6"> Dom</label>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <div>
+                <strong>Dias da Semana Habilitados para Lancamento:</strong>
+                <div class="weekday-checks">
+                  <label><input type="checkbox" class="batch-wd-chk" value="0" checked onchange="onBatchPeriodOrWeekdayChange()"> Seg</label>
+                  <label><input type="checkbox" class="batch-wd-chk" value="1" checked onchange="onBatchPeriodOrWeekdayChange()"> Ter</label>
+                  <label><input type="checkbox" class="batch-wd-chk" value="2" checked onchange="onBatchPeriodOrWeekdayChange()"> Qua</label>
+                  <label><input type="checkbox" class="batch-wd-chk" value="3" checked onchange="onBatchPeriodOrWeekdayChange()"> Qui</label>
+                  <label><input type="checkbox" class="batch-wd-chk" value="4" checked onchange="onBatchPeriodOrWeekdayChange()"> Sex</label>
+                  <label><input type="checkbox" class="batch-wd-chk" value="5" onchange="onBatchPeriodOrWeekdayChange()"> Sab</label>
+                  <label><input type="checkbox" class="batch-wd-chk" value="6" onchange="onBatchPeriodOrWeekdayChange()"> Dom</label>
+                </div>
               </div>
+              <div id="batch-period-days-info" style="font-size:12.5px; color:var(--primary-text); font-weight:600;"></div>
             </div>
-            <div id="batch-base-calc-text" style="font-weight:600;">Tempo Liquido por Dia: 06:00</div>
+            <div id="batch-base-calc-text" style="font-weight:600;">Tempo Liquido Base: 06:00</div>
           </div>
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <!-- Lista Dinamica de Tickets do Lote -->
+        <div class="schedule-box" style="margin-top:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div>
+              <div style="font-weight:700; font-size:13.5px;" id="batch-tickets-section-title">Tickets Configurados para o Lote (<span id="batch-tickets-count-lbl">1</span>)</div>
+              <div style="font-size:12px; color:var(--text-muted);" id="batch-tickets-section-subtitle"></div>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-primary btn-sm" id="batch-add-ticket-btn" onclick="addBatchTemplateTicket()">+ Adicionar Ticket</button>
+              <button class="btn btn-outline btn-sm" id="batch-copy-first-btn" onclick="copyFirstTicketToAllBatchTemplates()" title="Copia o codigo e a descricao do Ticket #1 para todas as linhas abaixo">Repetir Ticket #1 em Todos</button>
+              <button class="btn btn-outline btn-sm" id="batch-split-eq-btn" onclick="autoSplitBatchTicketsEqual()" title="Divide o tempo liquido do dia igualmente entre todos os tickets listados">Dividir Horas Iguais no Dia</button>
+              <button class="btn btn-outline btn-sm" id="batch-split-ma-btn" onclick="autoSplitBatchTicketsMorningAfternoon()" title="1o ticket de manha (ate o almoco) e demais tickets a tarde">Dividir Manha / Tarde</button>
+              <button class="btn btn-outline btn-sm" onclick="syncBatchTicketsWithBaseSchedule()" title="Copia o expediente base completo para todos os tickets">Aplicar Horario Base em Todos</button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th style="min-width:155px;" id="batch-tpl-col-order-hdr">Ordem / Dia Correspondente</th>
+                  <th>Ticket (Ex: CONSISABI-427)</th>
+                  <th>Inicio</th>
+                  <th>Pausa Almoco</th>
+                  <th>Retorno</th>
+                  <th>Encerramento</th>
+                  <th>Liquido</th>
+                  <th>Descricao / Comentario deste Ticket</th>
+                  <th style="text-align:right;">Acao</th>
+                </tr>
+              </thead>
+              <tbody id="batch-template-tickets-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-top:14px;">
           <div style="display:flex; flex-direction:column; gap:6px;">
             <label style="font-size:13px; display:flex; align-items:center; gap:8px; cursor:pointer;">
               <input type="checkbox" id="batch-skip-existing-chk" checked>
@@ -1718,7 +1767,7 @@ pre.terminal-box {
             </label>
           </div>
           <div class="btn-group">
-            <button class="btn btn-primary" onclick="generateBatchPreview()">1. Gerar Grade de Dias do Periodo</button>
+            <button class="btn btn-primary" onclick="generateBatchPreview()">1. Validar no Jira e Gerar Pre-Visualizacao de Envio</button>
           </div>
         </div>
       </div>
@@ -1726,13 +1775,28 @@ pre.terminal-box {
       <!-- Grade Editavel de Pre-Visualizacao do Lote -->
       <div class="card" id="batch-preview-card" style="display:none;">
         <div class="card-header">
-          <div class="card-title">Revisao Dia a Dia do Lote (<span id="batch-selected-summary">0 dias selecionados</span>)</div>
+          <div class="card-title">Revisao Dia a Dia do Lote (<span id="batch-selected-summary">0 selecionados</span>)</div>
           <div class="btn-group">
             <button class="btn btn-outline btn-sm" onclick="toggleAllBatchRows(true)">Marcar Todos</button>
             <button class="btn btn-outline btn-sm" onclick="toggleAllBatchRows(false)">Desmarcar Todos</button>
-            <button class="btn btn-success" id="batch-submit-btn" onclick="submitBatchWorklogs()">2. Lancar Todos os Dias Selecionados no Jira Agora</button>
+            <button class="btn btn-success" id="batch-submit-btn" onclick="submitBatchWorklogs()">2. Lancar Todos os Selecionados no Jira Agora</button>
           </div>
         </div>
+
+        <!-- Barra de Aplicacao Rapida de Ticket / Descricao nas Linhas Marcadas -->
+        <div class="schedule-box" style="margin-bottom:14px; padding:10px 14px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+            <div style="font-size:12.5px; font-weight:600; color:var(--text-muted);">
+              Alterar Rapido nas Linhas Marcadas Abaixo:
+            </div>
+            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; flex:1; justify-content:flex-end;">
+              <input type="text" id="batch-quick-issue" class="form-control" style="width:160px; padding:6px 10px;" placeholder="Novo Ticket (ex: PROJ-10)">
+              <input type="text" id="batch-quick-comment" class="form-control" style="width:240px; padding:6px 10px;" placeholder="Nova Descricao (opcional)">
+              <button class="btn btn-outline btn-sm" onclick="applyQuickFillToBatchRows()">Aplicar nas Linhas Marcadas</button>
+            </div>
+          </div>
+        </div>
+
         <div class="table-responsive">
           <table>
             <thead>
@@ -1748,6 +1812,7 @@ pre.terminal-box {
                 <th>Encerramento</th>
                 <th>Liquido</th>
                 <th>Descricao</th>
+                <th style="text-align:right;">Acoes no Dia</th>
               </tr>
             </thead>
             <tbody id="batch-preview-tbody"></tbody>
@@ -2406,6 +2471,12 @@ function computeScheduleMinutes(startHm, lsHm, leHm, endHm) {
   let lunch = 0;
   let afternoon = 0;
 
+  // Se o intervalo [s, e] termina antes do almoco ou comeca apos o retorno do almoco, ignora a pausa
+  if (ls !== null && le !== null && e !== null && e >= s && ls <= le && (e <= ls || s >= le)) {
+    morning = e - s;
+    return { morning, lunch: 0, afternoon: 0, total: morning };
+  }
+
   if (ls !== null && le !== null) {
     if (ls < s || le < ls) return { error: 'Verifique a ordem entre Inicio, Pausa de Almoco e Retorno.' };
     morning = ls - s;
@@ -2787,6 +2858,7 @@ function openBatchForCurrentWeek() {
   switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3]);
   document.getElementById('batch-start-date').value = currentWeeklyData.monday;
   document.getElementById('batch-end-date').value = currentWeeklyData.sunday;
+  onBatchPeriodOrWeekdayChange();
   generateBatchPreview();
 }
 
@@ -3081,18 +3153,474 @@ async function deleteSelectedWorklogsBulk() {
   }
 }
 
-/* ==================== GERADOR DE LANCAMENTOS EM LOTE (MULTI-DIAS / SEMANAS) ==================== */
-function initBatchTabDefaults() {
-  const sEl = document.getElementById('batch-start-date');
-  const eEl = document.getElementById('batch-end-date');
-  const issEl = document.getElementById('batch-issue-key');
-  if (!sEl.value || !eEl.value) {
-    setBatchPreset('this_week');
+/* ==================== GERADOR DE LANCAMENTOS EM LOTE (MULTI-DIAS / SEMANAS / MULTI-TICKETS) ==================== */
+let batchTemplateTickets = [];
+
+function formatDateBrFromIso(isoStr) {
+  if (!isoStr || isoStr.length < 10) return isoStr || '';
+  const [y, m, d] = isoStr.slice(0, 10).split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function getBatchActiveDaysInfo() {
+  const startDateStr = document.getElementById('batch-start-date').value;
+  const endDateStr = document.getElementById('batch-end-date').value;
+  const allowedWeekdays = new Set(
+    Array.from(document.querySelectorAll('.batch-wd-chk:checked')).map(c => parseInt(c.value, 10))
+  );
+  const weekdaysNames = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
+
+  if (!startDateStr || !endDateStr || startDateStr > endDateStr) {
+    return { valid: false, calendarDays: 0, skippedDays: 0, activeDays: [] };
   }
-  if (!issEl.value && appState && appState.today) {
-    issEl.value = appState.today.target_issue || 'ATIVDIV-32';
+
+  const cur = new Date(startDateStr + 'T12:00:00');
+  const end = new Date(endDateStr + 'T12:00:00');
+  let calendarDays = 0;
+  let skippedDays = 0;
+  const activeDays = [];
+
+  // Limite de seguranca de 180 dias para evitar loops acidentais em datas invalidas
+  while (cur <= end && calendarDays < 180) {
+    calendarDays++;
+    const iso = cur.toISOString().slice(0, 10);
+    const wd = (cur.getDay() + 6) % 7; // Seg=0..Dom=6
+    if (allowedWeekdays.has(wd)) {
+      activeDays.push({
+        date: iso,
+        date_br: formatDateBrFromIso(iso),
+        weekday: weekdaysNames[wd],
+        wd_index: wd
+      });
+    } else {
+      skippedDays++;
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  return { valid: true, calendarDays, skippedDays, activeDays };
+}
+
+function initBatchTabDefaults() {
+  previewBatchBaseSchedule();
+  onBatchPeriodOrWeekdayChange();
+}
+
+function onBatchPeriodOrWeekdayChange() {
+  const mode = document.getElementById('batch-multi-mode').value || 'one_per_day';
+  const info = getBatchActiveDaysInfo();
+  const infoEl = document.getElementById('batch-period-days-info');
+
+  if (!info.valid) {
+    if (infoEl) {
+      infoEl.innerHTML = `<span style="color:var(--text-muted);">Escolha a <strong>Data Inicial</strong> e a <strong>Data Final</strong> acima para calcular os dias habilitados do periodo (ou clique em um dos atalhos opcionais).</span>`;
+    }
+  } else {
+    if (infoEl) {
+      infoEl.innerHTML = `Periodo selecionado: <strong>${info.calendarDays} dia(s) corrido(s)</strong> | <strong>${info.activeDays.length} dia(s) habilitado(s)</strong> para lancamento (${info.skippedDays} dia(s) pulado(s) pelo seletor Seg-Dom).`;
+    }
+  }
+
+  if (mode === 'one_per_day') {
+    syncTicketsToActiveDays(info);
+  } else if (batchTemplateTickets.length === 0) {
+    const defaultIssue = (appState && appState.today && appState.today.target_issue) ? appState.today.target_issue : 'ATIVDIV-32';
+    batchTemplateTickets.push({
+      issue_key: defaultIssue,
+      start_hm: document.getElementById('batch-start-hm').value || '07:45',
+      lunch_start_hm: document.getElementById('batch-ls-hm').value || '12:00',
+      lunch_end_hm: document.getElementById('batch-le-hm').value || '13:30',
+      end_hm: document.getElementById('batch-end-hm').value || '15:15',
+      comment: ''
+    });
+  }
+
+  updateBatchModeExplanation(info);
+  renderBatchTemplateTickets(info);
+}
+
+function syncTicketsToActiveDays(infoObj = null) {
+  const info = infoObj || getBatchActiveDaysInfo();
+  const defaultIssue = (appState && appState.today && appState.today.target_issue) ? appState.today.target_issue : 'ATIVDIV-32';
+  const baseStart = document.getElementById('batch-start-hm').value || '07:45';
+  const baseLs = document.getElementById('batch-ls-hm').value || '12:00';
+  const baseLe = document.getElementById('batch-le-hm').value || '13:30';
+  const baseEnd = document.getElementById('batch-end-hm').value || '15:15';
+
+  if (!info.valid || info.activeDays.length === 0) {
+    if (batchTemplateTickets.length === 0) {
+      batchTemplateTickets = [{
+        issue_key: defaultIssue,
+        start_hm: baseStart,
+        lunch_start_hm: baseLs,
+        lunch_end_hm: baseLe,
+        end_hm: baseEnd,
+        comment: ''
+      }];
+    } else if (batchTemplateTickets.length > 1) {
+      batchTemplateTickets = batchTemplateTickets.slice(0, 1);
+    }
+    return;
+  }
+
+  const targetCount = info.activeDays.length;
+  const refIssue = (batchTemplateTickets.length > 0 && batchTemplateTickets[batchTemplateTickets.length - 1].issue_key)
+    ? batchTemplateTickets[batchTemplateTickets.length - 1].issue_key
+    : defaultIssue;
+  const refComment = (batchTemplateTickets.length > 0)
+    ? (batchTemplateTickets[batchTemplateTickets.length - 1].comment || '')
+    : '';
+
+  // Se o periodo aumentou (ex: de 2 dias para 14 dias -> 10 dias uteis), adiciona automaticamente os tickets faltantes
+  while (batchTemplateTickets.length < targetCount) {
+    batchTemplateTickets.push({
+      issue_key: refIssue,
+      start_hm: baseStart,
+      lunch_start_hm: baseLs,
+      lunch_end_hm: baseLe,
+      end_hm: baseEnd,
+      comment: refComment
+    });
+  }
+
+  // Se o periodo diminuiu, limita estritamente ao total de dias habilitados no periodo
+  if (batchTemplateTickets.length > targetCount) {
+    batchTemplateTickets = batchTemplateTickets.slice(0, targetCount);
+  }
+}
+
+function updateBatchModeExplanation(infoObj = null) {
+  const info = infoObj || getBatchActiveDaysInfo();
+  const mode = document.getElementById('batch-multi-mode').value || 'one_per_day';
+  const box = document.getElementById('batch-mode-explanation-box');
+  const secTitle = document.getElementById('batch-tickets-section-title');
+  const secSub = document.getElementById('batch-tickets-section-subtitle');
+  const colHdr = document.getElementById('batch-tpl-col-order-hdr');
+  const addBtn = document.getElementById('batch-add-ticket-btn');
+  const splitEqBtn = document.getElementById('batch-split-eq-btn');
+  const splitMaBtn = document.getElementById('batch-split-ma-btn');
+  const activeCount = info.valid ? info.activeDays.length : 0;
+
+  if (mode === 'one_per_day') {
+    if (box) {
+      box.innerHTML = `
+        <div style="font-weight:700; font-size:13px; color:var(--primary-text); margin-bottom:4px;">
+          Como funciona o modo "1 Ticket por Dia (Em Ordem Cronologica)":
+        </div>
+        <div style="font-size:12.5px; color:var(--text-main); line-height:1.5;">
+          1. O sistema calcula automaticamente quantos dias serao lancados no periodo que voce escolheu, descontando os dias da semana desmarcados (por exemplo: um periodo de <strong>14 dias corridos</strong> com Sabado e Domingo desmarcados gera exatamente <strong>10 dias uteis/tickets</strong>).<br>
+          2. A tabela abaixo cria <strong>automaticamente 1 linha para cada dia habilitado, em ordem cronologica</strong>: o <strong>Ticket #1</strong> sera lancado no <strong>1o dia util</strong> do periodo, o <strong>Ticket #2</strong> no <strong>2o dia util</strong>, e assim sucessivamente ate o ultimo dia.<br>
+          3. A quantidade de tickets fica <strong>estritamente limitada ao total de dias habilitados (${activeCount} dia(s) neste momento)</strong>.
+        </div>
+      `;
+    }
+    if (secTitle) {
+      secTitle.innerHTML = `Tickets por Dia do Periodo (<span id="batch-tickets-count-lbl">${batchTemplateTickets.length}</span> de ${activeCount || batchTemplateTickets.length} dia(s) habilitado(s))`;
+    }
+    if (secSub) {
+      secSub.textContent = info.valid
+        ? `As ${activeCount} linha(s) abaixo foram ajustadas automaticamente para os ${activeCount} dia(s) habilitados do periodo escolhido (em ordem do 1o ao ultimo dia).`
+        : `Escolha a Data Inicial e a Data Final acima para que o sistema gere automaticamente 1 linha para cada dia util do periodo.`;
+    }
+    if (colHdr) colHdr.textContent = 'Ordem / Data do Dia';
+    if (splitEqBtn) splitEqBtn.style.display = 'none';
+    if (splitMaBtn) splitMaBtn.style.display = 'none';
+    if (addBtn) {
+      const maxReached = !info.valid || batchTemplateTickets.length >= activeCount;
+      addBtn.disabled = maxReached;
+      addBtn.textContent = maxReached
+        ? `Limite de ${activeCount || 1} Ticket(s) para ${activeCount || 1} Dia(s)`
+        : `+ Adicionar Ticket (${batchTemplateTickets.length}/${activeCount})`;
+    }
+  } else {
+    if (box) {
+      box.innerHTML = `
+        <div style="font-weight:700; font-size:13px; color:var(--primary-text); margin-bottom:4px;">
+          Como funciona o modo "Dividir o Mesmo Dia entre Varios Tickets":
+        </div>
+        <div style="font-size:12.5px; color:var(--text-main); line-height:1.5;">
+          1. Use esta opcao quando voce trabalha em <strong>2 ou mais tickets diferentes dentro do mesmo dia</strong> (por exemplo: 3h pela manha no <code>TICKET-A</code> e 3h a tarde no <code>TICKET-B</code>) e quer repetir essa mesma divisao diaria em todos os <strong>${activeCount} dia(s) habilitados</strong> do periodo.<br>
+          2. Na tabela abaixo voce cadastra apenas os tickets que compoem <strong>1 dia de trabalho</strong> e pode clicar em <strong>Dividir Horas Iguais no Dia</strong> ou <strong>Dividir Manha / Tarde</strong> para repartir o horario sem sobreposicao.
+        </div>
+      `;
+    }
+    if (secTitle) {
+      secTitle.innerHTML = `Tickets que Dividem Cada Dia de Trabalho (<span id="batch-tickets-count-lbl">${batchTemplateTickets.length}</span> ticket(s) por dia)`;
+    }
+    if (secSub) {
+      secSub.textContent = `Todos os ${batchTemplateTickets.length} ticket(s) abaixo serao lancados dentro de cada um dos ${activeCount} dia(s) habilitados do periodo.`;
+    }
+    if (colHdr) colHdr.textContent = 'Ordem no Dia';
+    if (splitEqBtn) splitEqBtn.style.display = 'inline-flex';
+    if (splitMaBtn) splitMaBtn.style.display = 'inline-flex';
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '+ Adicionar Outro Ticket no Mesmo Dia';
+    }
+  }
+}
+
+function copyFirstTicketToAllBatchTemplates() {
+  if (batchTemplateTickets.length === 0) return;
+  const firstIssue = (batchTemplateTickets[0].issue_key || '').trim().toUpperCase();
+  const firstComment = batchTemplateTickets[0].comment || '';
+  if (!firstIssue) {
+    showToast('Informe primeiro o codigo do Ticket #1.', 'error');
+    return;
+  }
+  batchTemplateTickets.forEach(t => {
+    t.issue_key = firstIssue;
+    if (firstComment) t.comment = firstComment;
+  });
+  renderBatchTemplateTickets();
+  showToast(`Ticket ${firstIssue} copiado para todas as ${batchTemplateTickets.length} linhas!`, 'success');
+}
+
+function setBatchBaseProfile(mode) {
+  if (mode === '8h') {
+    document.getElementById('batch-start-hm').value = '07:42';
+    document.getElementById('batch-ls-hm').value = '12:00';
+    document.getElementById('batch-le-hm').value = '13:00';
+    document.getElementById('batch-end-hm').value = '17:42';
+  } else {
+    document.getElementById('batch-start-hm').value = '07:45';
+    document.getElementById('batch-ls-hm').value = '12:00';
+    document.getElementById('batch-le-hm').value = '13:30';
+    document.getElementById('batch-end-hm').value = '15:15';
   }
   previewBatchBaseSchedule();
+  const distMode = document.getElementById('batch-multi-mode').value;
+  if (distMode === 'split_day' && batchTemplateTickets.length > 1) {
+    autoSplitBatchTicketsEqual();
+  } else {
+    syncBatchTicketsWithBaseSchedule();
+  }
+}
+
+function renderBatchTemplateTickets(infoObj = null) {
+  const tbody = document.getElementById('batch-template-tickets-tbody');
+  const info = infoObj || getBatchActiveDaysInfo();
+  const mode = document.getElementById('batch-multi-mode').value || 'one_per_day';
+  updateBatchModeExplanation(info);
+  if (!tbody) return;
+
+  tbody.innerHTML = batchTemplateTickets.map((t, idx) => {
+    const calc = computeScheduleMinutes(t.start_hm, t.lunch_start_hm, t.lunch_end_hm, t.end_hm);
+    const netStr = (calc && !calc.error) ? minutesToHM(calc.total) : 'Invalido';
+    const disableDel = batchTemplateTickets.length <= 1 ? 'disabled' : '';
+
+    let orderCellHtml = `<strong>#${idx + 1}</strong>`;
+    if (mode === 'one_per_day' && info.valid && info.activeDays[idx]) {
+      const dObj = info.activeDays[idx];
+      orderCellHtml = `
+        <div>
+          <strong>Dia #${idx + 1}</strong>
+          <span class="badge badge-completed" style="margin-left:6px;">${dObj.weekday}, ${dObj.date_br}</span>
+        </div>
+      `;
+    } else if (mode === 'split_day') {
+      orderCellHtml = `<strong>Parte #${idx + 1} do Dia</strong>`;
+    }
+
+    return `
+      <tr>
+        <td style="white-space:nowrap;">${orderCellHtml}</td>
+        <td>
+          <input type="text" class="form-control" style="width:145px; padding:6px 8px;" value="${escapeHtml(t.issue_key)}" placeholder="Ex: CONSISABI-427" oninput="batchTemplateTickets[${idx}].issue_key=this.value.toUpperCase()">
+        </td>
+        <td>
+          <input type="time" class="form-control" style="padding:6px 6px;" value="${t.start_hm}" oninput="batchTemplateTickets[${idx}].start_hm=this.value; updateBatchTemplateRowNet(${idx})">
+        </td>
+        <td>
+          <input type="time" class="form-control" style="padding:6px 6px;" value="${t.lunch_start_hm}" oninput="batchTemplateTickets[${idx}].lunch_start_hm=this.value; updateBatchTemplateRowNet(${idx})">
+        </td>
+        <td>
+          <input type="time" class="form-control" style="padding:6px 6px;" value="${t.lunch_end_hm}" oninput="batchTemplateTickets[${idx}].lunch_end_hm=this.value; updateBatchTemplateRowNet(${idx})">
+        </td>
+        <td>
+          <input type="time" class="form-control" style="padding:6px 6px;" value="${t.end_hm}" oninput="batchTemplateTickets[${idx}].end_hm=this.value; updateBatchTemplateRowNet(${idx})">
+        </td>
+        <td>
+          <strong id="batch-tpl-net-${idx}" style="color:var(--primary-text);">${netStr}</strong>
+        </td>
+        <td>
+          <input type="text" class="form-control" style="min-width:200px; padding:6px 8px;" value="${escapeHtml(t.comment)}" placeholder="Opcional (vazio usa padrao do ticket)" oninput="batchTemplateTickets[${idx}].comment=this.value">
+        </td>
+        <td style="text-align:right;">
+          <button class="btn btn-danger btn-sm" ${disableDel} onclick="removeBatchTemplateTicket(${idx})">Remover</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function updateBatchTemplateRowNet(idx) {
+  const t = batchTemplateTickets[idx];
+  const calc = computeScheduleMinutes(t.start_hm, t.lunch_start_hm, t.lunch_end_hm, t.end_hm);
+  const el = document.getElementById(`batch-tpl-net-${idx}`);
+  if (el) {
+    el.textContent = (calc && !calc.error) ? minutesToHM(calc.total) : 'Invalido';
+  }
+}
+
+function addBatchTemplateTicket() {
+  const mode = document.getElementById('batch-multi-mode').value || 'one_per_day';
+  const info = getBatchActiveDaysInfo();
+  if (mode === 'one_per_day') {
+    if (!info.valid || info.activeDays.length === 0) {
+      showToast('Escolha primeiro a Data Inicial e a Data Final do periodo.', 'error');
+      return;
+    }
+    if (batchTemplateTickets.length >= info.activeDays.length) {
+      showToast(`Limite atingido: o periodo possui ${info.activeDays.length} dia(s) habilitado(s), portanto o maximo no modo 1 Ticket por Dia e ${info.activeDays.length}.`, 'error');
+      return;
+    }
+  }
+
+  const defaultIssue = (appState && appState.today && appState.today.target_issue) ? appState.today.target_issue : 'ATIVDIV-32';
+  batchTemplateTickets.push({
+    issue_key: defaultIssue,
+    start_hm: document.getElementById('batch-start-hm').value || '07:45',
+    lunch_start_hm: document.getElementById('batch-ls-hm').value || '12:00',
+    lunch_end_hm: document.getElementById('batch-le-hm').value || '13:30',
+    end_hm: document.getElementById('batch-end-hm').value || '15:15',
+    comment: ''
+  });
+  if (mode === 'split_day') {
+    autoSplitBatchTicketsEqual();
+  } else {
+    renderBatchTemplateTickets(info);
+  }
+}
+
+function removeBatchTemplateTicket(idx) {
+  if (batchTemplateTickets.length <= 1) return;
+  batchTemplateTickets.splice(idx, 1);
+  const mode = document.getElementById('batch-multi-mode').value;
+  if (mode === 'split_day') {
+    autoSplitBatchTicketsEqual();
+  } else {
+    renderBatchTemplateTickets();
+  }
+}
+
+function onBatchMultiModeChange() {
+  const mode = document.getElementById('batch-multi-mode').value;
+  const info = getBatchActiveDaysInfo();
+  if (mode === 'one_per_day') {
+    syncTicketsToActiveDays(info);
+    syncBatchTicketsWithBaseSchedule();
+  } else if (mode === 'split_day') {
+    // Ao mudar para dividir o mesmo dia, se havia 10 linhas dos 10 dias, reduz para os 2 primeiros tickets para dividir o dia
+    if (batchTemplateTickets.length > 2) {
+      batchTemplateTickets = batchTemplateTickets.slice(0, 2);
+    }
+    if (batchTemplateTickets.length > 1) {
+      autoSplitBatchTicketsEqual();
+    } else {
+      renderBatchTemplateTickets(info);
+    }
+  }
+}
+
+function syncBatchTicketsWithBaseSchedule() {
+  const s = document.getElementById('batch-start-hm').value || '07:45';
+  const ls = document.getElementById('batch-ls-hm').value || '12:00';
+  const le = document.getElementById('batch-le-hm').value || '13:30';
+  const e = document.getElementById('batch-end-hm').value || '15:15';
+  batchTemplateTickets.forEach(t => {
+    t.start_hm = s;
+    t.lunch_start_hm = ls;
+    t.lunch_end_hm = le;
+    t.end_hm = e;
+  });
+  renderBatchTemplateTickets();
+}
+
+function autoSplitBatchTicketsEqual() {
+  const sHm = document.getElementById('batch-start-hm').value || '07:45';
+  const lsHm = document.getElementById('batch-ls-hm').value || '12:00';
+  const leHm = document.getElementById('batch-le-hm').value || '13:30';
+  const eHm = document.getElementById('batch-end-hm').value || '15:15';
+
+  const s = hmToMinutes(sHm);
+  const ls = hmToMinutes(lsHm);
+  const le = hmToMinutes(leHm);
+  const e = hmToMinutes(eHm);
+  const n = batchTemplateTickets.length;
+
+  if (n <= 1 || s === null || e === null) {
+    syncBatchTicketsWithBaseSchedule();
+    return;
+  }
+
+  const hasLunch = (ls !== null && le !== null && ls >= s && le >= ls && e >= le);
+  const morningMins = hasLunch ? (ls - s) : (e - s);
+  const afternoonMins = hasLunch ? (e - le) : 0;
+  const totalNet = morningMins + afternoonMins;
+
+  if (totalNet <= 0) {
+    syncBatchTicketsWithBaseSchedule();
+    return;
+  }
+
+  const netOffsetToClock = (offset, isEndBoundary) => {
+    if (!hasLunch) return s + offset;
+    if (offset < morningMins) return s + offset;
+    if (offset === morningMins) return isEndBoundary ? ls : le;
+    return le + (offset - morningMins);
+  };
+
+  for (let i = 0; i < n; i++) {
+    const wStart = Math.round((i * totalNet) / n);
+    const wEnd = Math.round(((i + 1) * totalNet) / n);
+    const clockStart = netOffsetToClock(wStart, false);
+    const clockEnd = netOffsetToClock(wEnd, true);
+
+    batchTemplateTickets[i].start_hm = minutesToHM(clockStart);
+    batchTemplateTickets[i].end_hm = minutesToHM(clockEnd);
+    if (hasLunch && wStart < morningMins && wEnd > morningMins) {
+      batchTemplateTickets[i].lunch_start_hm = lsHm;
+      batchTemplateTickets[i].lunch_end_hm = leHm;
+    } else {
+      batchTemplateTickets[i].lunch_start_hm = '';
+      batchTemplateTickets[i].lunch_end_hm = '';
+    }
+  }
+  renderBatchTemplateTickets();
+}
+
+function autoSplitBatchTicketsMorningAfternoon() {
+  const sHm = document.getElementById('batch-start-hm').value || '07:45';
+  const lsHm = document.getElementById('batch-ls-hm').value || '12:00';
+  const leHm = document.getElementById('batch-le-hm').value || '13:30';
+  const eHm = document.getElementById('batch-end-hm').value || '15:15';
+  const n = batchTemplateTickets.length;
+
+  if (n <= 1) {
+    syncBatchTicketsWithBaseSchedule();
+    return;
+  }
+
+  batchTemplateTickets[0].start_hm = sHm;
+  batchTemplateTickets[0].lunch_start_hm = '';
+  batchTemplateTickets[0].lunch_end_hm = '';
+  batchTemplateTickets[0].end_hm = lsHm;
+
+  const le = hmToMinutes(leHm) || 810;
+  const e = hmToMinutes(eHm) || 915;
+  const aftTotal = Math.max(0, e - le);
+  const rem = n - 1;
+
+  for (let j = 0; j < rem; j++) {
+    const st = le + Math.round((j * aftTotal) / rem);
+    const en = le + Math.round(((j + 1) * aftTotal) / rem);
+    batchTemplateTickets[j + 1].start_hm = minutesToHM(st);
+    batchTemplateTickets[j + 1].lunch_start_hm = '';
+    batchTemplateTickets[j + 1].lunch_end_hm = '';
+    batchTemplateTickets[j + 1].end_hm = minutesToHM(en);
+  }
+  renderBatchTemplateTickets();
 }
 
 function setBatchPreset(preset) {
@@ -3119,6 +3647,7 @@ function setBatchPreset(preset) {
 
   document.getElementById('batch-start-date').value = formatIso(start);
   document.getElementById('batch-end-date').value = formatIso(end);
+  onBatchPeriodOrWeekdayChange();
 }
 
 function previewBatchBaseSchedule() {
@@ -3132,33 +3661,31 @@ function previewBatchBaseSchedule() {
     el.innerHTML = `<span style="color:var(--danger)">${res ? res.error : 'Horarios invalidos'}</span>`;
     return;
   }
-  el.innerHTML = `Tempo Liquido por Dia: <span style="color:var(--primary-text)">${minutesToHM(res.total)}</span>`;
+  el.innerHTML = `Tempo Liquido Base: <span style="color:var(--primary-text)">${minutesToHM(res.total)}</span>`;
 }
 
 async function generateBatchPreview() {
   const startDateStr = document.getElementById('batch-start-date').value;
   const endDateStr = document.getElementById('batch-end-date').value;
-  const issueKey = (document.getElementById('batch-issue-key').value || '').trim().toUpperCase() || 'ATIVDIV-32';
-  const comment = (document.getElementById('batch-comment').value || '').trim();
-  const startHm = document.getElementById('batch-start-hm').value || '07:45';
-  const lsHm = document.getElementById('batch-ls-hm').value || '12:00';
-  const leHm = document.getElementById('batch-le-hm').value || '13:30';
-  const endHm = document.getElementById('batch-end-hm').value || '15:15';
+  const multiMode = document.getElementById('batch-multi-mode').value || 'one_per_day';
   const skipExisting = document.getElementById('batch-skip-existing-chk').checked;
+  const info = getBatchActiveDaysInfo();
 
-  const allowedWeekdays = new Set(
-    Array.from(document.querySelectorAll('.batch-wd-chk:checked')).map(c => parseInt(c.value, 10))
-  );
+  if (!info.valid || info.activeDays.length === 0) {
+    showToast('Escolha uma Data Inicial e uma Data Final validas com pelo menos 1 dia da semana habilitado.', 'error');
+    return;
+  }
 
-  if (!startDateStr || !endDateStr || startDateStr > endDateStr) {
-    showToast('Informe um intervalo de datas valido (Data Inicial <= Data Final).', 'error');
+  const validTickets = batchTemplateTickets.filter(t => (t.issue_key || '').trim().length > 0);
+  if (validTickets.length === 0) {
+    showToast('Informe ao menos 1 Ticket na lista de Tickets.', 'error');
     return;
   }
 
   const card = document.getElementById('batch-preview-card');
   const tbody = document.getElementById('batch-preview-tbody');
   card.style.display = 'block';
-  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:20px; color:var(--text-muted);">Gerando grade de dias e verificando lancamentos existentes no Jira...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; padding:20px; color:var(--text-muted);">Validando dias no Jira e montando a grade de envio...</td></tr>';
 
   let existingByDate = {};
   if (skipExisting) {
@@ -3172,33 +3699,48 @@ async function generateBatchPreview() {
     }
   }
 
-  const weekdaysNames = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
   batchPreviewRows = [];
 
-  const cur = new Date(startDateStr + 'T12:00:00');
-  const end = new Date(endDateStr + 'T12:00:00');
+  info.activeDays.forEach((dObj, dayIdx) => {
+    const iso = dObj.date;
+    const existingSec = existingByDate[iso] || 0;
+    const shouldSelect = !(skipExisting && existingSec > 0);
 
-  while (cur <= end) {
-    const iso = cur.toISOString().slice(0, 10);
-    const wd = (cur.getDay() + 6) % 7; // Seg=0..Dom=6
-    if (allowedWeekdays.has(wd)) {
-      const existingSec = existingByDate[iso] || 0;
-      const shouldSelect = !(skipExisting && existingSec > 0);
-      batchPreviewRows.push({
-        date: iso,
-        weekday: weekdaysNames[wd],
-        existing_seconds: existingSec,
-        selected: shouldSelect,
-        issue_key: issueKey,
-        start_hm: startHm,
-        lunch_start_hm: lsHm,
-        lunch_end_hm: leHm,
-        end_hm: endHm,
-        comment: comment
+    if (multiMode === 'one_per_day') {
+      // Ordem cronologica estrita: Ticket #1 para o 1o dia habilitado, Ticket #2 para o 2o dia, ate o ultimo dia
+      if (dayIdx < validTickets.length) {
+        const tpl = validTickets[dayIdx];
+        batchPreviewRows.push({
+          date: iso,
+          weekday: dObj.weekday,
+          existing_seconds: existingSec,
+          selected: shouldSelect,
+          issue_key: tpl.issue_key.trim().toUpperCase(),
+          start_hm: tpl.start_hm,
+          lunch_start_hm: tpl.lunch_start_hm,
+          lunch_end_hm: tpl.lunch_end_hm,
+          end_hm: tpl.end_hm,
+          comment: tpl.comment || ''
+        });
+      }
+    } else {
+      // split_day: divide cada dia habilitado entre os tickets configurados
+      validTickets.forEach(tpl => {
+        batchPreviewRows.push({
+          date: iso,
+          weekday: dObj.weekday,
+          existing_seconds: existingSec,
+          selected: shouldSelect,
+          issue_key: tpl.issue_key.trim().toUpperCase(),
+          start_hm: tpl.start_hm,
+          lunch_start_hm: tpl.lunch_start_hm,
+          lunch_end_hm: tpl.lunch_end_hm,
+          end_hm: tpl.end_hm,
+          comment: tpl.comment || ''
+        });
       });
     }
-    cur.setDate(cur.getDate() + 1);
-  }
+  });
 
   renderBatchPreviewTable();
 }
@@ -3206,7 +3748,7 @@ async function generateBatchPreview() {
 function renderBatchPreviewTable() {
   const tbody = document.getElementById('batch-preview-tbody');
   if (batchPreviewRows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:20px; color:var(--text-muted);">Nenhum dia corresponde aos criterios selecionados.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; padding:20px; color:var(--text-muted);">Nenhum dia corresponde aos criterios selecionados.</td></tr>';
     updateBatchSummaryCount();
     return;
   }
@@ -3230,11 +3772,93 @@ function renderBatchPreviewTable() {
         <td><input type="time" class="form-control" style="padding:5px 6px;" value="${r.lunch_end_hm}" oninput="batchPreviewRows[${idx}].lunch_end_hm=this.value; updateBatchRowNet(${idx})"></td>
         <td><input type="time" class="form-control" style="padding:5px 6px;" value="${r.end_hm}" oninput="batchPreviewRows[${idx}].end_hm=this.value; updateBatchRowNet(${idx})"></td>
         <td><strong id="batch-row-net-${idx}" style="color:var(--primary-text);">${netStr}</strong></td>
-        <td><input type="text" class="form-control" style="min-width:180px; padding:5px 8px;" value="${escapeHtml(r.comment)}" placeholder="Padrao do ticket" oninput="batchPreviewRows[${idx}].comment=this.value"></td>
+        <td><input type="text" class="form-control" style="min-width:170px; padding:5px 8px;" value="${escapeHtml(r.comment)}" placeholder="Padrao do ticket" oninput="batchPreviewRows[${idx}].comment=this.value"></td>
+        <td style="text-align:right; white-space:nowrap;">
+          <div class="btn-group" style="justify-content:flex-end;">
+            <button class="btn btn-outline btn-sm" onclick="addTicketRowForDay(${idx})" title="Adicionar outro ticket para esta mesma data">+ Ticket no Dia</button>
+            <button class="btn btn-danger btn-sm" onclick="removeBatchPreviewRow(${idx})" title="Remover esta linha do lote">Remover</button>
+          </div>
+        </td>
       </tr>
     `;
   }).join('');
   updateBatchSummaryCount();
+}
+
+function addTicketRowForDay(idx) {
+  const curRow = batchPreviewRows[idx];
+  if (!curRow) return;
+
+  let newStart = curRow.start_hm;
+  let newLs = '';
+  let newLe = '';
+  let newEnd = curRow.end_hm;
+
+  // Se a linha atual tem almoco preenchido, divide automaticamente em Manha (linha atual) e Tarde (nova linha)
+  const s = hmToMinutes(curRow.start_hm);
+  const ls = hmToMinutes(curRow.lunch_start_hm);
+  const le = hmToMinutes(curRow.lunch_end_hm);
+  const e = hmToMinutes(curRow.end_hm);
+
+  if (s !== null && ls !== null && le !== null && e !== null && ls > s && e > le) {
+    curRow.end_hm = curRow.lunch_start_hm;
+    curRow.lunch_start_hm = '';
+    curRow.lunch_end_hm = '';
+    newStart = minutesToHM(le);
+    newEnd = minutesToHM(e);
+  } else if (s !== null && e !== null && e > s) {
+    const mid = Math.round((s + e) / 2);
+    curRow.end_hm = minutesToHM(mid);
+    curRow.lunch_start_hm = '';
+    curRow.lunch_end_hm = '';
+    newStart = minutesToHM(mid);
+    newEnd = minutesToHM(e);
+  }
+
+  const newRow = {
+    date: curRow.date,
+    weekday: curRow.weekday,
+    existing_seconds: curRow.existing_seconds,
+    selected: curRow.selected,
+    issue_key: curRow.issue_key,
+    start_hm: newStart,
+    lunch_start_hm: newLs,
+    lunch_end_hm: newLe,
+    end_hm: newEnd,
+    comment: curRow.comment
+  };
+
+  batchPreviewRows.splice(idx + 1, 0, newRow);
+  renderBatchPreviewTable();
+  showToast(`Novo ticket adicionado para o dia ${curRow.date}. Informe a chave do segundo ticket!`, 'info');
+}
+
+function removeBatchPreviewRow(idx) {
+  batchPreviewRows.splice(idx, 1);
+  renderBatchPreviewTable();
+}
+
+function applyQuickFillToBatchRows() {
+  const newIssue = (document.getElementById('batch-quick-issue').value || '').trim().toUpperCase();
+  const newComm = (document.getElementById('batch-quick-comment').value || '').trim();
+  if (!newIssue && !newComm) {
+    showToast('Informe um Ticket ou uma Descricao para aplicar nas linhas marcadas.', 'error');
+    return;
+  }
+  let count = 0;
+  batchPreviewRows.forEach(r => {
+    if (r.selected) {
+      if (newIssue) r.issue_key = newIssue;
+      if (newComm) r.comment = newComm;
+      count++;
+    }
+  });
+  if (count === 0) {
+    showToast('Nenhuma linha esta marcada na tabela.', 'error');
+    return;
+  }
+  renderBatchPreviewTable();
+  showToast(`Alteracao aplicada em ${count} linha(s) marcada(s)!`, 'success');
 }
 
 function updateBatchRowNet(idx) {
@@ -3252,18 +3876,23 @@ function toggleAllBatchRows(checked) {
 }
 
 function updateBatchSummaryCount() {
-  const count = batchPreviewRows.filter(r => r.selected).length;
-  document.getElementById('batch-selected-summary').textContent = `${count} de ${batchPreviewRows.length} dia(s) marcado(s) para lancar`;
+  const selectedRows = batchPreviewRows.filter(r => r.selected);
+  const distinctDays = new Set(selectedRows.map(r => r.date)).size;
+  const distinctTickets = new Set(selectedRows.map(r => r.issue_key)).size;
+  document.getElementById('batch-selected-summary').textContent =
+    `${selectedRows.length} lancamento(s) marcado(s) em ${distinctDays} dia(s) (${distinctTickets} ticket(s))`;
 }
 
 async function submitBatchWorklogs() {
   const selected = batchPreviewRows.filter(r => r.selected);
   if (selected.length === 0) {
-    showToast('Selecione ao menos 1 dia na tabela para lancar.', 'error');
+    showToast('Selecione ao menos 1 lancamento na tabela para enviar.', 'error');
     return;
   }
+  const distinctDays = new Set(selected.map(r => r.date)).size;
+  const distinctTickets = Array.from(new Set(selected.map(r => r.issue_key))).join(', ');
   const no_comment = document.getElementById('batch-no-comment-chk').checked;
-  if (!confirm(`Confirma o lancamento em lote de ${selected.length} dia(s) diretamente no Jira?`)) return;
+  if (!confirm(`Confirma o lancamento em lote de ${selected.length} apontamento(s) (${distinctDays} dia(s) | Tickets: ${distinctTickets}) diretamente no Jira?`)) return;
 
   const btn = document.getElementById('batch-submit-btn');
   btn.disabled = true;
@@ -3281,9 +3910,10 @@ async function submitBatchWorklogs() {
     showToast(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = '2. Lancar Todos os Dias Selecionados no Jira Agora';
+    btn.textContent = '2. Lancar Todos os Selecionados no Jira Agora';
   }
 }
+
 
 /* ==================== MODAL INDIVIDUAL WORKLOG ==================== */
 function openWorklogModal(worklog = null) {
@@ -4075,7 +4705,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     })
                     return
 
-            # Criacao em Lote (Multiplos Dias / Semanas)
+            # Criacao em Lote (Multiplos Dias / Semanas / Multiplos Tickets)
             if path == "/api/worklogs/batch-create":
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
@@ -4084,10 +4714,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 entries = body.get("entries", [])
                 no_comment = bool(body.get("no_comment", False))
                 if not entries:
-                    self._send_json({"error": "Nenhum dia informado no lote."}, status_code=400)
+                    self._send_json({"error": "Nenhum lancamento informado no lote."}, status_code=400)
                     return
 
                 success_count = 0
+                days_launched: set[str] = set()
+                tickets_launched: List[str] = []
                 errors: List[str] = []
                 fallback_cache: Dict[str, str] = {}
 
@@ -4100,6 +4732,16 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     end_hm = (item.get("end_hm") or "15:15").strip()
                     raw_comment = (item.get("comment") or "").strip()
 
+                    # Se o intervalo [start_hm, end_hm] ocorre inteiramente antes ou depois do almoco, ignora o almoco
+                    st_dt_chk = _parse_hm(d_str, start_hm)
+                    ls_dt_chk = _parse_hm(d_str, ls_hm)
+                    le_dt_chk = _parse_hm(d_str, le_hm)
+                    en_dt_chk = _parse_hm(d_str, end_hm)
+                    if st_dt_chk and ls_dt_chk and le_dt_chk and en_dt_chk and en_dt_chk >= st_dt_chk and ls_dt_chk <= le_dt_chk:
+                        if en_dt_chk <= ls_dt_chk or st_dt_chk >= le_dt_chk:
+                            ls_hm = ""
+                            le_hm = ""
+
                     calc = calculate_shift_schedule(
                         date_str=d_str,
                         start_hm=start_hm,
@@ -4110,7 +4752,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         comment=raw_comment,
                     )
                     if not calc.get("success") or int(calc.get("total_seconds", 0)) <= 0:
-                        errors.append(f"{d_str}: Horarios invalidos")
+                        errors.append(f"{d_str} ({issue_key}): Horarios invalidos")
                         continue
 
                     sec = int(calc["total_seconds"])
@@ -4142,6 +4784,9 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                                 "end_hm": end_hm,
                             })
                         success_count += 1
+                        days_launched.add(d_str)
+                        if issue_key not in tickets_launched:
+                            tickets_launched.append(issue_key)
                     except Exception as e:
                         errors.append(f"{d_str} ({issue_key}): {e}")
 
@@ -4149,10 +4794,21 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"Falha ao lancar lote: {'; '.join(errors[:3])}"}, status_code=400)
                     return
 
-                msg = f"Lote concluido! {success_count} de {len(entries)} dia(s) lancado(s) com sucesso no Jira."
+                tickets_str = ", ".join(tickets_launched) if tickets_launched else "-"
+                msg = (
+                    f"Lote concluido! {success_count} de {len(entries)} apontamento(s) lancado(s) com sucesso "
+                    f"em {len(days_launched)} dia(s) (Tickets: {tickets_str})."
+                )
                 if errors:
                     msg += f" ({len(errors)} falha(s): {'; '.join(errors[:2])})"
-                self._send_json({"success": True, "created_count": success_count, "errors": errors, "message": msg})
+                self._send_json({
+                    "success": True,
+                    "created_count": success_count,
+                    "days_count": len(days_launched),
+                    "tickets": tickets_launched,
+                    "errors": errors,
+                    "message": msg,
+                })
                 return
 
             # Edicao / Migracao em Lote de Worklogs Selecionados

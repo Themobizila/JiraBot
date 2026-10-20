@@ -392,8 +392,38 @@ class TestWebPanelAndShiftSchedule(unittest.TestCase):
         self.assertTrue(monday_day["is_logged"])
         self.assertEqual(len(monday_day["tickets"]), 1)
 
+    def test_multi_ticket_batch_schedule_split(self):
+        """Testa o calculo de multiplos tickets no mesmo dia (ex: Ticket 1 = 3h e Ticket 2 = 3h)."""
+        from storage import calculate_shift_schedule
+
+        # Ticket 1: 07:45 as 10:45 (sem pausa de almoco = 3h = 10800s)
+        c1 = calculate_shift_schedule(
+            date_str="2026-10-20",
+            start_hm="07:45",
+            lunch_start_hm="",
+            lunch_end_hm="",
+            end_hm="10:45",
+            issue_key="CONSISABI-427",
+        )
+        self.assertTrue(c1.get("success"))
+        self.assertEqual(c1.get("total_seconds"), 10800)
+
+        # Ticket 2: 10:45 as 15:15 com pausa de almoco 12:00 as 13:30 (1h15m + 1h45m = 3h = 10800s)
+        c2 = calculate_shift_schedule(
+            date_str="2026-10-20",
+            start_hm="10:45",
+            lunch_start_hm="12:00",
+            lunch_end_hm="13:30",
+            end_hm="15:15",
+            issue_key="ATIVDIV-32",
+        )
+        self.assertTrue(c2.get("success"))
+        self.assertEqual(c2.get("total_seconds"), 10800)
+        self.assertEqual(c1["total_seconds"] + c2["total_seconds"], 21600)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
