@@ -58,6 +58,51 @@ class TestTimeWindowAndCustom(unittest.TestCase):
         self.assertEqual(prof.exit_window.start_str, "17:27")
         self.assertEqual(prof.exit_window.end_str, "17:57")
 
+    def test_profile_calculator_persists_after_reload(self):
+        test_dir = Path(tempfile.mkdtemp())
+        try:
+            with patch("config.get_default_config_dir", return_value=test_dir):
+                cfg = BotConfig(notifications_enabled=False)
+                prof = ShiftProfile.from_dict({
+                    "name": "custom",
+                    "target_hours": 6,
+                    "entry_window": {"start": "07:40", "end": "07:50"},
+                    "lunch_start_window": {"start": "11:55", "end": "12:05"},
+                    "lunch_end_window": {"start": "13:25", "end": "13:35"},
+                    "exit_window": {"start": "15:10", "end": "15:20"},
+                    "calculator": {
+                        "entry_hm": "07:45", "entry_before": 5, "entry_after": 5,
+                        "lunch_start_hm": "12:00", "lunch_start_before": 5, "lunch_start_after": 5,
+                        "lunch_end_hm": "13:30", "lunch_end_before": 5, "lunch_end_after": 5,
+                        "exit_hm": "15:15", "exit_before": 5, "exit_after": 5,
+                        "chave_invalida": "ignorar",
+                    },
+                })
+                cfg.profiles["custom"] = prof
+                cfg.active_profile = "custom"
+                cfg.save()
+
+                reloaded = BotConfig.load().profiles["custom"]
+                self.assertEqual(reloaded.calculator["exit_hm"], "15:15")
+                self.assertEqual(reloaded.calculator["entry_before"], 5)
+                self.assertEqual(reloaded.calculator["exit_after"], 5)
+                self.assertNotIn("chave_invalida", reloaded.calculator)
+                self.assertEqual(reloaded.exit_window.start_str, "15:10")
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
+
+    def test_profile_without_calculator_is_backward_compatible(self):
+        prof = ShiftProfile.from_dict({
+            "name": "6h_0745",
+            "target_hours": 6,
+            "entry_window": {"start": "07:25", "end": "08:05"},
+            "lunch_start_window": {"start": "11:40", "end": "12:20"},
+            "lunch_end_window": {"start": "13:20", "end": "13:40"},
+            "exit_window": {"start": "15:15", "end": "15:45"},
+        })
+        self.assertEqual(prof.calculator, {})
+        self.assertNotIn("calculator", prof.to_dict())
+
 
 class TestStorageAndDuration(unittest.TestCase):
     def setUp(self):
@@ -137,6 +182,43 @@ class TestEngineStateMachine(unittest.TestCase):
         worked = self.engine.state.get_all_issues_worked()
         self.assertIn("DEFAULT-1", worked)
         self.assertIn("CONSISABI-390", worked)
+
+    def test_shutdown_6h_logs_immediately(self):
+        self.config.active_profile = "6h_0745"
+        # 1. Entrada as 07:45
+        self.engine.handle_unlock(now=datetime(2026, 10, 20, 7, 45, 0))
+        # 2. Pausa almoco as 12:00 (4h15m)
+        self.engine.handle_lock(now=datetime(2026, 10, 20, 12, 0, 0))
+        # 3. Retorno almoco as 13:30
+        self.engine.handle_unlock(now=datetime(2026, 10, 20, 13, 30, 0))
+        # 4. Usuario desliga o PC direto as 15:15 (sem Win+L), completando 6h00m (21600s)
+        state = self.engine.handle_shutdown(now=datetime(2026, 10, 20, 15, 15, 0))
+
+        self.assertEqual(state.status, "COMPLETED")
+        self.assertEqual(state.last_event, "COMPLETED_EXIT_SHUTDOWN")
+        self.assertEqual(state.get_total_seconds(), 21600)
+        self.assertTrue(state.is_logged)
+        self.mock_worklog_trigger.assert_called_once()
+        args = self.mock_worklog_trigger.call_args[0]
+        self.assertEqual(args[0], "DEFAULT-1")
+        self.assertEqual(args[1], 21600)
+
+    def test_shutdown_6h_offline_queues_exact_6h(self):
+        self.config.active_profile = "6h_0745"
+        # Simula rede ja desconectada pelo Windows durante o desligamento
+        self.mock_worklog_trigger.return_value = False
+
+        self.engine.handle_unlock(now=datetime(2026, 10, 20, 7, 45, 0))
+        self.engine.handle_lock(now=datetime(2026, 10, 20, 12, 0, 0))
+        self.engine.handle_unlock(now=datetime(2026, 10, 20, 13, 30, 0))
+        state = self.engine.handle_shutdown(now=datetime(2026, 10, 20, 15, 15, 0))
+
+        self.assertEqual(state.status, "COMPLETED")
+        self.assertEqual(state.get_total_seconds(), 21600)
+        queue = self.state_mgr.load_queue()
+        self.assertEqual(len(queue), 1)
+        self.assertEqual(queue[0].issue_key, "DEFAULT-1")
+        self.assertEqual(queue[0].time_spent_seconds, 21600)
 
 
 class TestHistoricalWorklogs(unittest.TestCase):

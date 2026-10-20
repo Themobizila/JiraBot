@@ -1919,53 +1919,53 @@ pre.terminal-box {
             <div class="form-grid">
               <div class="form-group">
                 <label>Entrada Alvo</label>
-                <input type="time" id="calc-entry-hm" class="form-control" value="07:45">
+                <input type="time" id="calc-entry-hm" class="form-control" value="07:45" oninput="applyToleranceCalculator(true)">
               </div>
               <div class="form-group">
                 <label>Folga Antes / Depois (min)</label>
                 <div style="display:flex; gap:6px;">
-                  <input type="number" id="calc-entry-bef" class="form-control" value="20" style="width:50%">
-                  <input type="number" id="calc-entry-aft" class="form-control" value="20" style="width:50%">
+                  <input type="number" id="calc-entry-bef" class="form-control" value="20" style="width:50%" oninput="applyToleranceCalculator(true)">
+                  <input type="number" id="calc-entry-aft" class="form-control" value="20" style="width:50%" oninput="applyToleranceCalculator(true)">
                 </div>
               </div>
 
               <div class="form-group">
                 <label>Saída Almoço Alvo</label>
-                <input type="time" id="calc-ls-hm" class="form-control" value="12:00">
+                <input type="time" id="calc-ls-hm" class="form-control" value="12:00" oninput="applyToleranceCalculator(true)">
               </div>
               <div class="form-group">
                 <label>Folga Antes / Depois (min)</label>
                 <div style="display:flex; gap:6px;">
-                  <input type="number" id="calc-ls-bef" class="form-control" value="20" style="width:50%">
-                  <input type="number" id="calc-ls-aft" class="form-control" value="20" style="width:50%">
+                  <input type="number" id="calc-ls-bef" class="form-control" value="20" style="width:50%" oninput="applyToleranceCalculator(true)">
+                  <input type="number" id="calc-ls-aft" class="form-control" value="20" style="width:50%" oninput="applyToleranceCalculator(true)">
                 </div>
               </div>
 
               <div class="form-group">
                 <label>Retorno Almoço Alvo</label>
-                <input type="time" id="calc-le-hm" class="form-control" value="13:30">
+                <input type="time" id="calc-le-hm" class="form-control" value="13:30" oninput="applyToleranceCalculator(true)">
               </div>
               <div class="form-group">
                 <label>Folga Antes / Depois (min)</label>
                 <div style="display:flex; gap:6px;">
-                  <input type="number" id="calc-le-bef" class="form-control" value="10" style="width:50%">
-                  <input type="number" id="calc-le-aft" class="form-control" value="10" style="width:50%">
+                  <input type="number" id="calc-le-bef" class="form-control" value="10" style="width:50%" oninput="applyToleranceCalculator(true)">
+                  <input type="number" id="calc-le-aft" class="form-control" value="10" style="width:50%" oninput="applyToleranceCalculator(true)">
                 </div>
               </div>
 
               <div class="form-group">
                 <label>Encerramento Alvo</label>
-                <input type="time" id="calc-exit-hm" class="form-control" value="15:30">
+                <input type="time" id="calc-exit-hm" class="form-control" value="15:30" oninput="applyToleranceCalculator(true)">
               </div>
               <div class="form-group">
                 <label>Folga Antes / Depois (min)</label>
                 <div style="display:flex; gap:6px;">
-                  <input type="number" id="calc-exit-bef" class="form-control" value="15" style="width:50%">
-                  <input type="number" id="calc-exit-aft" class="form-control" value="30" style="width:50%">
+                  <input type="number" id="calc-exit-bef" class="form-control" value="15" style="width:50%" oninput="applyToleranceCalculator(true)">
+                  <input type="number" id="calc-exit-aft" class="form-control" value="30" style="width:50%" oninput="applyToleranceCalculator(true)">
                 </div>
               </div>
             </div>
-            <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="applyToleranceCalculator()">Calcular e Preencher Janelas ao Lado</button>
+            <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="applyToleranceCalculator(false)">Calcular e Preencher Janelas ao Lado</button>
           </div>
         </div>
       </div>
@@ -4165,9 +4165,53 @@ function populateProfileFields(profName) {
   document.getElementById('win-le-end').value = p.lunch_end_window.end;
   document.getElementById('win-exit-start').value = p.exit_window.start;
   document.getElementById('win-exit-end').value = p.exit_window.end;
+  populateCalculatorFields(p);
 }
 
-function applyToleranceCalculator() {
+// Mapeamento entre os campos da Calculadora de Janelas e as chaves salvas no perfil
+const CALC_FIELD_MAP = [
+  { hm: 'calc-entry-hm', bef: 'calc-entry-bef', aft: 'calc-entry-aft', key: 'entry', win: 'entry_window' },
+  { hm: 'calc-ls-hm', bef: 'calc-ls-bef', aft: 'calc-ls-aft', key: 'lunch_start', win: 'lunch_start_window' },
+  { hm: 'calc-le-hm', bef: 'calc-le-bef', aft: 'calc-le-aft', key: 'lunch_end', win: 'lunch_end_window' },
+  { hm: 'calc-exit-hm', bef: 'calc-exit-bef', aft: 'calc-exit-aft', key: 'exit', win: 'exit_window' }
+];
+
+function populateCalculatorFields(p) {
+  const calc = p.calculator || {};
+  CALC_FIELD_MAP.forEach(f => {
+    const savedHm = calc[`${f.key}_hm`];
+    const savedBef = calc[`${f.key}_before`];
+    const savedAft = calc[`${f.key}_after`];
+    if (savedHm) {
+      document.getElementById(f.hm).value = savedHm;
+      if (savedBef !== undefined && savedBef !== null) document.getElementById(f.bef).value = savedBef;
+      if (savedAft !== undefined && savedAft !== null) document.getElementById(f.aft).value = savedAft;
+      return;
+    }
+    // Perfil sem calculadora salva: deriva alvo (ponto medio) e folgas (metade da largura) da janela salva
+    const w = p[f.win] || {};
+    const s = hmToMinutes(w.start);
+    const e = hmToMinutes(w.end);
+    if (s !== null && e !== null && e >= s) {
+      const half = Math.floor((e - s) / 2);
+      document.getElementById(f.hm).value = minutesToHM(s + half);
+      document.getElementById(f.bef).value = half;
+      document.getElementById(f.aft).value = (e - s) - half;
+    }
+  });
+}
+
+function collectCalculatorFields() {
+  const calc = {};
+  CALC_FIELD_MAP.forEach(f => {
+    calc[`${f.key}_hm`] = document.getElementById(f.hm).value;
+    calc[`${f.key}_before`] = parseInt(document.getElementById(f.bef).value || '0', 10);
+    calc[`${f.key}_after`] = parseInt(document.getElementById(f.aft).value || '0', 10);
+  });
+  return calc;
+}
+
+function applyToleranceCalculator(silent = false) {
   const calcWin = (hmId, befId, aftId, startOutId, endOutId) => {
     const hm = document.getElementById(hmId).value;
     const bef = parseInt(document.getElementById(befId).value || '0', 10);
@@ -4182,7 +4226,9 @@ function applyToleranceCalculator() {
   calcWin('calc-ls-hm', 'calc-ls-bef', 'calc-ls-aft', 'win-ls-start', 'win-ls-end');
   calcWin('calc-le-hm', 'calc-le-bef', 'calc-le-aft', 'win-le-start', 'win-le-end');
   calcWin('calc-exit-hm', 'calc-exit-bef', 'calc-exit-aft', 'win-exit-start', 'win-exit-end');
-  showToast('Janelas calculadas! Clique em "Salvar Perfil e Janelas" para gravar.', 'info');
+  if (!silent) {
+    showToast('Janelas calculadas! Clique em "Salvar Perfil e Janelas" para gravar.', 'info');
+  }
 }
 
 async function saveProfileSettings() {
@@ -4206,7 +4252,8 @@ async function saveProfileSettings() {
     exit_window: {
       start: document.getElementById('win-exit-start').value,
       end: document.getElementById('win-exit-end').value
-    }
+    },
+    calculator: collectCalculatorFields()
   };
   try {
     const res = await apiCall('/api/config', 'POST', {

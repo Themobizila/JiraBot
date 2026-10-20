@@ -66,6 +66,36 @@ def build_window(target_hm: str, tolerance_minutes_before: int = 15, tolerance_m
         return TimeWindow(target_hm, target_hm)
 
 
+CALCULATOR_HM_KEYS = ("entry_hm", "lunch_start_hm", "lunch_end_hm", "exit_hm")
+CALCULATOR_MIN_KEYS = (
+    "entry_before", "entry_after",
+    "lunch_start_before", "lunch_start_after",
+    "lunch_end_before", "lunch_end_after",
+    "exit_before", "exit_after",
+)
+
+
+def sanitize_calculator(raw: Any) -> Dict[str, Any]:
+    """Filtra os parametros da Calculadora de Janelas: apenas chaves conhecidas, HH:MM valido e folgas 0-240 min."""
+    if not isinstance(raw, dict):
+        return {}
+    clean: Dict[str, Any] = {}
+    for key in CALCULATOR_HM_KEYS:
+        val = str(raw.get(key) or "").strip()
+        try:
+            datetime.strptime(val, "%H:%M")
+            clean[key] = val
+        except ValueError:
+            continue
+    for key in CALCULATOR_MIN_KEYS:
+        try:
+            num = int(raw.get(key))
+        except (TypeError, ValueError):
+            continue
+        clean[key] = max(0, min(240, num))
+    return clean
+
+
 @dataclass
 class ShiftProfile:
     """Perfil de turno de trabalho com janelas para cada momento do dia."""
@@ -76,9 +106,10 @@ class ShiftProfile:
     lunch_end_window: TimeWindow
     exit_window: TimeWindow
     description: str = ""
+    calculator: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "name": self.name,
             "target_hours": self.target_hours,
             "entry_window": self.entry_window.to_dict(),
@@ -87,6 +118,9 @@ class ShiftProfile:
             "exit_window": self.exit_window.to_dict(),
             "description": self.description,
         }
+        if self.calculator:
+            data["calculator"] = dict(self.calculator)
+        return data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> ShiftProfile:
@@ -98,6 +132,7 @@ class ShiftProfile:
             lunch_end_window=TimeWindow.from_dict(data.get("lunch_end_window", {})),
             exit_window=TimeWindow.from_dict(data.get("exit_window", {})),
             description=data.get("description", ""),
+            calculator=sanitize_calculator(data.get("calculator")),
         )
 
 

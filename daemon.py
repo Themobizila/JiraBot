@@ -120,6 +120,7 @@ class JiraBotService:
         self.watcher = SessionWatcher(
             on_lock=self.engine.handle_lock,
             on_unlock=self.engine.handle_unlock,
+            on_shutdown=self.engine.handle_shutdown,
         )
 
         self.enable_tray = enable_tray
@@ -188,6 +189,22 @@ class JiraBotService:
                 logger.debug(f"Falha ao verificar auto-update na inicializacao: {e}")
 
         try:
+            self.engine.refresh_state()
+            if (
+                self.engine.state.status == "COMPLETED"
+                and not self.engine.state.is_logged
+                and self.config.auto_log_on_exit
+                and self.engine.state.get_total_seconds() > 0
+            ):
+                logger.info("Expediente de hoje ja concluido (ex: desligamento do PC) e pendente de envio. Sincronizando...")
+                self.engine._trigger_worklog_all_issues()
+            elif (
+                self.engine.state.status == "PAUSED_AWAY"
+                and self.engine.state.last_event == "PAUSED_SHUTDOWN"
+            ):
+                logger.info("Retomando contagem apos reinicializacao do sistema no meio do expediente...")
+                self.engine.handle_unlock()
+
             self.jira_client.flush_queue()
         except Exception as e:
             logger.debug(f"Erro ao sincronizar fila inicial: {e}")

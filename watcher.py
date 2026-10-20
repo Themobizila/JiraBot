@@ -15,6 +15,8 @@ logger = logging.getLogger("JiraBot.Watcher")
 
 # Constantes Win32
 WM_WTSSESSION_CHANGE = 0x02B1
+WM_QUERYENDSESSION = 0x0011
+WM_ENDSESSION = 0x0016
 WM_DESTROY = 0x0002
 WM_CLOSE = 0x0010
 
@@ -58,21 +60,39 @@ class WNDCLASSW(ctypes.Structure):
 
 class SessionWatcher:
     """
-    Listener em background de eventos de sessao do Windows (Lock/Unlock)
-    utilizando a API WTSRegisterSessionNotification nativa.
+    Listener em background de eventos de sessao do Windows (Lock, Unlock, Logoff e Shutdown)
+    utilizando a API WTSRegisterSessionNotification e mensagens de janela Win32 nativas.
     """
 
     def __init__(
         self,
         on_lock: Optional[Callable[[], None]] = None,
         on_unlock: Optional[Callable[[], None]] = None,
+        on_shutdown: Optional[Callable[[], None]] = None,
     ):
         self.on_lock = on_lock
         self.on_unlock = on_unlock
+        self.on_shutdown = on_shutdown
         self._hwnd: Optional[wintypes.HWND] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
+        self._last_shutdown_ts: float = 0.0
         self._wnd_proc_ref: Optional[WNDPROC] = None  # Manter referencia viva para o GC do Python
+
+    def _trigger_shutdown_once(self, source_event: str) -> None:
+        """Executa o callback de desligamento/logoff com protecao contra disparos duplicados no mesmo evento."""
+        now_ts = time.time()
+        if (now_ts - self._last_shutdown_ts) < 5.0:
+            logger.debug(f"Evento {source_event} ignorado (desligamento ja processado ha menos de 5s).")
+            return
+        self._last_shutdown_ts = now_ts
+        logger.info(f"Evento de encerramento do sistema detectado ({source_event}). Acionando fechamento seguro...")
+        callback = self.on_shutdown or self.on_lock
+        if callback:
+            try:
+                callback()
+            except Exception as e:
+                logger.error(f"Erro no callback de desligamento ({source_event}): {e}")
 
     def _wnd_proc(self, hwnd: wintypes.HWND, msg: int, wparam: int, lparam: int) -> int:
         if msg == WM_WTSSESSION_CHANGE:
@@ -84,12 +104,24 @@ class SessionWatcher:
                     except Exception as e:
                         logger.error(f"Erro no callback on_lock: {e}")
             elif wparam == WTS_SESSION_UNLOCK:
+                self._last_shutdown_ts = 0.0
                 logger.info("Evento detectado: Desbloqueio de tela (WTS_SESSION_UNLOCK)")
                 if self.on_unlock:
                     try:
                         self.on_unlock()
                     except Exception as e:
                         logger.error(f"Erro no callback on_unlock: {e}")
+            elif wparam == WTS_SESSION_LOGOFF:
+                self._trigger_shutdown_once("WTS_SESSION_LOGOFF")
+            return 0
+
+        elif msg == WM_QUERYENDSESSION:
+            self._trigger_shutdown_once("WM_QUERYENDSESSION")
+            return 1
+
+        elif msg == WM_ENDSESSION:
+            if wparam != 0:
+                self._trigger_shutdown_once("WM_ENDSESSION")
             return 0
 
         elif msg == WM_DESTROY:

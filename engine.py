@@ -265,6 +265,67 @@ class BotEngine:
 
         return self.state
 
+    def handle_shutdown(self, now: Optional[datetime] = None) -> DailyState:
+        """
+        Processa o evento de desligamento, reinicializacao ou logoff do Windows
+        (WM_QUERYENDSESSION, WM_ENDSESSION ou WTS_SESSION_LOGOFF).
+        Garante que o intervalo em aberto seja fechado imediatamente em disco e,
+        caso o expediente tenha sido concluido, envia (ou enfileira com seguranca)
+        o worklog no Jira antes do encerramento do sistema.
+        """
+        now = now or datetime.now()
+        current_time = now.time()
+        now_iso = now.isoformat()
+        profile = self.get_profile()
+
+        self.refresh_state()
+        logger.info(f"Processando SHUTDOWN/LOGOFF as {now.strftime('%H:%M:%S')}. Estado atual: {self.state.status}")
+
+        was_running = (self.state.status == "RUNNING")
+        if was_running:
+            if self.state.intervals and self.state.intervals[-1].end is None:
+                self.state.intervals[-1].end = now_iso
+                if not self.state.intervals[-1].issue_key:
+                    self.state.intervals[-1].issue_key = self.get_active_issue()
+
+        total_seconds = self.state.get_total_seconds()
+        target_seconds = int(profile.target_hours * 3600)
+
+        is_exit_condition = (
+            profile.exit_window.contains(current_time)
+            or (current_time >= profile.exit_window.start_time and total_seconds >= int(target_seconds * 0.85))
+            or (total_seconds >= target_seconds and target_seconds > 0)
+        )
+
+        if self.state.status in ("RUNNING", "PAUSED_AWAY", "PAUSED_LUNCH") and is_exit_condition and total_seconds > 0:
+            self.state.status = "COMPLETED"
+            self.state.last_event = "COMPLETED_EXIT_SHUTDOWN"
+            self.state.last_event_time = now_iso
+            # Persiste imediatamente em disco antes de qualquer chamada de rede
+            self.state_manager.save_state(self.state)
+
+            total_str = format_duration(total_seconds)
+            logger.info(f"Fim de expediente por desligamento do PC as {now.strftime('%H:%M')}. Total: {total_str}")
+
+            if self.config.auto_log_on_exit and not self.state.is_logged:
+                self._trigger_worklog_all_issues()
+
+        elif was_running:
+            if profile.lunch_start_window.contains(current_time):
+                self.state.status = "PAUSED_LUNCH"
+                self.state.last_event = "PAUSED_LUNCH_SHUTDOWN"
+                self.state.last_event_time = now_iso
+                self.state_manager.save_state(self.state)
+                logger.info(f"Pausa de almoco registrada por desligamento do PC as {now.strftime('%H:%M')}.")
+            else:
+                self.state.status = "PAUSED_AWAY"
+                self.state.last_event = "PAUSED_SHUTDOWN"
+                self.state.last_event_time = now_iso
+                self.state_manager.save_state(self.state)
+                logger.info(f"Cronometro pausado e salvo por desligamento/reinicializacao as {now.strftime('%H:%M')}.")
+
+        return self.state
+
     def check_scheduled_transitions(self, now: Optional[datetime] = None) -> DailyState:
         """
         Verificacao periodica executada pelo daemon:
