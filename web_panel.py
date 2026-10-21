@@ -26,12 +26,14 @@ import urllib.parse
 import webbrowser
 import winreg
 
+from analytics import get_analytics, normalize_days
 from config import BotConfig, ShiftProfile
 from daemon import get_status, restart_background, start_background, stop_background
 from engine import BotEngine, format_duration
 from history import WEEKDAYS_PT, generate_report
 from jira_client import JiraClient
 from review_dialog import get_fallback_description, show_pre_exit_popup
+from web_assets import ANALYTICS_JS, EARLY_JS, LOGO_SVG, THEME_CSS, UI_FX_JS
 from storage import (
     DailyState,
     DaySummary,
@@ -519,773 +521,77 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0a0907">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="shortcut icon" href="/favicon.svg">
 <title>JiraBot Web - Painel de Controle, Lote e Lançamentos</title>
 <style>
-:root {
-  --bg-body: #f1f5f9;
-  --bg-sidebar: #0f172a;
-  --bg-sidebar-hover: #1e293b;
-  --bg-card: #ffffff;
-  --bg-subtle: #f8fafc;
-  --bg-input: #ffffff;
-  --bg-input-readonly: #f1f5f9;
-  --text-main: #0f172a;
-  --text-secondary: #334155;
-  --text-muted: #64748b;
-  --border-color: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --primary: #0052cc;
-  --primary-hover: #0747a6;
-  --primary-light: #deebff;
-  --primary-text: #0052cc;
-  --success: #059669;
-  --success-bg: #d1fae5;
-  --warning: #d97706;
-  --warning-bg: #fef3c7;
-  --danger: #dc2626;
-  --danger-bg: #fee2e2;
-  --info: #2563eb;
-  --info-bg: #dbeafe;
-  --radius: 10px;
-  --shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
-}
-
-[data-theme="dark"] {
-  --bg-body: #0b1120;
-  --bg-sidebar: #070b14;
-  --bg-sidebar-hover: #1e293b;
-  --bg-card: #111827;
-  --bg-subtle: #1e293b;
-  --bg-input: #0f172a;
-  --bg-input-readonly: #1e293b;
-  --text-main: #f1f5f9;
-  --text-secondary: #cbd5e1;
-  --text-muted: #94a3b8;
-  --border-color: #1f2937;
-  --border-strong: #334155;
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --primary-light: rgba(59, 130, 246, 0.18);
-  --primary-text: #60a5fa;
-  --success: #10b981;
-  --success-bg: rgba(16, 185, 129, 0.18);
-  --warning: #f59e0b;
-  --warning-bg: rgba(245, 158, 11, 0.18);
-  --danger: #ef4444;
-  --danger-bg: rgba(239, 68, 68, 0.18);
-  --info: #60a5fa;
-  --info-bg: rgba(96, 165, 250, 0.18);
-  --shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-}
-
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-body {
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
-  background-color: var(--bg-body);
-  color: var(--text-main);
-  display: flex;
-  min-height: 100vh;
-  overflow-x: hidden;
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-/* Sidebar */
-.sidebar {
-  width: 270px;
-  background-color: var(--bg-sidebar);
-  color: #f8fafc;
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  position: fixed;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 100;
-  border-right: 1px solid var(--border-color);
-}
-
-.brand {
-  padding: 20px;
-  border-bottom: 1px solid #1e293b;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.brand-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #0052cc, #3b82f6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 17px;
-  color: #fff;
-  flex-shrink: 0;
-}
-
-.brand-text h1 {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-}
-
-.brand-text span {
-  font-size: 11px;
-  color: #94a3b8;
-  display: block;
-  margin-top: 2px;
-}
-
-.nav-menu {
-  padding: 14px 12px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  overflow-y: auto;
-}
-
-.nav-btn {
-  width: 100%;
-  background: transparent;
-  border: none;
-  color: #cbd5e1;
-  padding: 11px 14px;
-  border-radius: 8px;
-  text-align: left;
-  font-size: 13.5px;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  transition: all 0.15s ease;
-}
-
-.nav-btn svg {
-  width: 18px;
-  height: 18px;
-  stroke: currentColor;
-  flex-shrink: 0;
-}
-
-.nav-btn:hover {
-  background-color: var(--bg-sidebar-hover);
-  color: #ffffff;
-}
-
-.nav-btn.active {
-  background-color: var(--primary);
-  color: #ffffff;
-  font-weight: 600;
-}
-
-.sidebar-footer {
-  padding: 15px 18px;
-  border-top: 1px solid #1e293b;
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-.daemon-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 5px;
-  font-weight: 600;
-  color: #e2e8f0;
-}
-
-.dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background-color: #ef4444;
-}
-
-.dot.online {
-  background-color: #10b981;
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
-}
-
-/* Main Content */
-.main-wrapper {
-  margin-left: 270px;
-  width: calc(100% - 270px);
-  max-width: calc(100% - 270px);
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.topbar {
-  background: var(--bg-card);
-  border-bottom: 1px solid var(--border-color);
-  padding: 12px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.topbar-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-
-.topbar-title {
-  font-size: 16.5px;
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
-  white-space: nowrap;
-  line-height: 1.2;
-  flex-shrink: 0;
-}
-
-.badge-running { background: var(--success-bg); color: var(--success); }
-.badge-paused { background: var(--warning-bg); color: var(--warning); }
-.badge-completed { background: var(--info-bg); color: var(--info); }
-.badge-idle { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--border-strong); }
-.badge-danger { background: var(--danger-bg); color: var(--danger); }
-
-.content {
-  padding: 22px 24px;
-  width: 100%;
-  max-width: 1560px;
-}
-
-.tab-pane {
-  display: none;
-}
-
-.tab-pane.active {
-  display: block;
-}
-
-/* Grid & Cards */
-.grid-4 {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-.grid-2 {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-  gap: 20px;
-  margin-bottom: 20px;
-}
-
-.card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  padding: 20px;
-  box-shadow: var(--shadow);
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-color);
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.card-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-main);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.stat-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  padding: 16px 18px;
-  box-shadow: var(--shadow);
-}
-
-.stat-label {
-  font-size: 11.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
-}
-
-.stat-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-.stat-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 6px;
-}
-
-.progress-bar-wrap {
-  width: 100%;
-  height: 8px;
-  background: var(--bg-subtle);
-  border-radius: 99px;
-  overflow: hidden;
-  margin-top: 10px;
-}
-
-.progress-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--primary), var(--success));
-  transition: width 0.3s ease;
-}
-
-/* Buttons */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 8px 14px;
-  border-radius: 7px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.15s ease;
-  text-decoration: none;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.btn svg {
-  width: 15px;
-  height: 15px;
-  stroke: currentColor;
-  flex-shrink: 0;
-}
-
-.btn-primary {
-  background-color: var(--primary);
-  color: #ffffff;
-}
-.btn-primary:hover {
-  background-color: var(--primary-hover);
-}
-
-.btn-success {
-  background-color: var(--success);
-  color: #ffffff;
-}
-.btn-success:hover {
-  filter: brightness(0.92);
-}
-
-.btn-warning {
-  background-color: var(--warning);
-  color: #ffffff;
-}
-.btn-warning:hover {
-  filter: brightness(0.92);
-}
-
-.btn-danger {
-  background-color: var(--danger);
-  color: #ffffff;
-}
-.btn-danger:hover {
-  filter: brightness(0.92);
-}
-
-.btn-outline {
-  background-color: var(--bg-card);
-  border-color: var(--border-strong);
-  color: var(--text-secondary);
-}
-.btn-outline:hover {
-  background-color: var(--bg-subtle);
-}
-
-.btn-sm {
-  padding: 5px 10px;
-  font-size: 12px;
-}
-
-.btn-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-td .btn-group {
-  flex-wrap: nowrap;
-  white-space: nowrap;
-}
-
-/* Forms */
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 14px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin-bottom: 12px;
-}
-
-.form-group label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.form-control {
-  padding: 8px 11px;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  font-size: 13px;
-  font-family: inherit;
-  color: var(--text-main);
-  background: var(--bg-input);
-  transition: border-color 0.15s;
-}
-
-.form-control:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
-}
-
-.form-control[readonly] {
-  background: var(--bg-input-readonly);
-}
-
-textarea.form-control {
-  resize: vertical;
-  min-height: 68px;
-}
-
-/* Schedule Box */
-.schedule-box {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 14px;
-}
-
-.schedule-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-
-@media (max-width: 900px) {
-  .schedule-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.schedule-summary-bar {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--border-strong);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 13px;
-}
-
-/* Tables */
-.table-responsive {
-  width: 100%;
-  overflow-x: auto;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-th {
-  background-color: var(--bg-subtle);
-  color: var(--text-secondary);
-  font-weight: 600;
-  text-align: left;
-  padding: 10px 12px;
-  border-bottom: 2px solid var(--border-color);
-  white-space: nowrap;
-}
-
-td {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-color);
-  vertical-align: middle;
-}
-
-tr:hover td {
-  background-color: var(--bg-subtle);
-}
-
-tr.row-today td {
-  background-color: var(--primary-light);
-}
-
-.ticket-pill {
-  display: inline-block;
-  padding: 3px 8px;
-  background-color: var(--primary-light);
-  color: var(--primary-text);
-  border-radius: 5px;
-  font-weight: 700;
-  font-size: 12px;
-  font-family: Consolas, monospace;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.time-pill {
-  display: inline-block;
-  padding: 2px 7px;
-  background-color: var(--bg-subtle);
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  font-family: Consolas, monospace;
-  font-size: 12px;
-  color: var(--text-main);
-  white-space: nowrap;
-}
-
-/* Bulk Action Bar */
-.bulk-bar {
-  background: var(--primary-light);
-  border: 1px solid var(--primary);
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-  display: none;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.bulk-bar.active {
-  display: flex;
-}
-
-/* Modal */
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(7, 11, 20, 0.72);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-  padding: 20px;
-}
-
-.modal-backdrop.open {
-  display: flex;
-}
-
-.modal-dialog {
-  background: var(--bg-card);
-  color: var(--text-main);
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  width: 100%;
-  max-width: 700px;
-  max-height: 92vh;
-  overflow-y: auto;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.45);
-  display: flex;
-  flex-direction: column;
-}
-
-.modal-header {
-  padding: 16px 22px;
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.modal-header h3 {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.modal-body {
-  padding: 20px 22px;
-}
-
-.modal-footer {
-  padding: 14px 22px;
-  border-top: 1px solid var(--border-color);
-  background: var(--bg-subtle);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-/* Toast Notification */
-#toast-container {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 300;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.toast {
-  background: #0f172a;
-  color: #ffffff;
-  padding: 12px 18px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.35);
-  border-left: 4px solid var(--primary);
-  min-width: 280px;
-  max-width: 460px;
-}
-
-.toast.success { border-left-color: #10b981; }
-.toast.error { border-left-color: #ef4444; }
-
-pre.terminal-box {
-  background: #070b14;
-  color: #e2e8f0;
-  border: 1px solid var(--border-strong);
-  padding: 16px;
-  border-radius: 8px;
-  font-family: Consolas, monospace;
-  font-size: 12px;
-  overflow-x: auto;
-  line-height: 1.5;
-}
-
-.weekday-checks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 8px 0;
-}
-
-.weekday-checks label {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 13px;
-  cursor: pointer;
-}
+/*__THEME_CSS__*/
 </style>
+<script>
+/*__EARLY_JS__*/
+</script>
 </head>
 <body>
 
+<canvas id="fx-canvas" aria-hidden="true"></canvas>
+<div class="fx-spot" aria-hidden="true"></div>
+<div id="sidebar-backdrop" onclick="closeMobileSidebar()"></div>
+
 <!-- Sidebar -->
-<aside class="sidebar">
+<aside class="sidebar" id="app-sidebar">
   <div class="brand">
-    <div class="brand-icon">JB</div>
+    <div class="brand-logo">__LOGO_SVG__</div>
     <div class="brand-text">
-      <h1>JiraBot Web</h1>
+      <h1>JiraBot</h1>
       <span id="sidebar-version-label">Gerenciador de Horas v2.2.0</span>
     </div>
   </div>
 
   <nav class="nav-menu">
-    <button class="nav-btn active" onclick="switchTab('tab-dashboard', this)">
+    <button class="nav-btn active" data-tab="tab-dashboard" title="Painel do Dia e Horários" onclick="switchTab('tab-dashboard', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-      Painel do Dia e Horários
+      <span class="nav-label">Painel do Dia e Horários</span>
     </button>
-    <button class="nav-btn" onclick="switchTab('tab-weekly', this)">
+    <button class="nav-btn" data-tab="tab-analytics" title="Dashboard Analítico" onclick="switchTab('tab-analytics', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>
+      <span class="nav-label">Dashboard Analítico</span>
+    </button>
+    <button class="nav-btn" data-tab="tab-weekly" title="Visualização Semanal" onclick="switchTab('tab-weekly', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      Visualização Semanal
+      <span class="nav-label">Visualização Semanal</span>
     </button>
-    <button class="nav-btn" onclick="switchTab('tab-worklogs', this)">
+    <button class="nav-btn" data-tab="tab-worklogs" title="Lançamentos do Jira" onclick="switchTab('tab-worklogs', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-      Lançamentos do Jira
+      <span class="nav-label">Lançamentos do Jira</span>
     </button>
-    <button class="nav-btn" onclick="switchTab('tab-batch', this)">
+    <button class="nav-btn" data-tab="tab-batch" title="Lançamentos em Lote" onclick="switchTab('tab-batch', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-      Lançamentos em Lote
+      <span class="nav-label">Lançamentos em Lote</span>
     </button>
-    <button class="nav-btn" onclick="switchTab('tab-profiles', this)">
+    <button class="nav-btn" data-tab="tab-profiles" title="Perfis de Turno e Janelas" onclick="switchTab('tab-profiles', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      Perfis de Turno e Janelas
+      <span class="nav-label">Perfis de Turno e Janelas</span>
     </button>
-    <button class="nav-btn" onclick="switchTab('tab-reports', this)">
+    <button class="nav-btn" data-tab="tab-reports" title="Relatórios e Banco de Horas" onclick="switchTab('tab-reports', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-      Relatórios e Banco de Horas
-    </button>
-    <button class="nav-btn" onclick="switchTab('tab-settings', this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      Configurações e Atualização
+      <span class="nav-label">Relatórios e Banco de Horas</span>
     </button>
   </nav>
+
+  <div class="nav-bottom">
+  <button class="nav-btn" data-tab="tab-settings" title="Configurações e Atualização" onclick="switchTab('tab-settings', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <span class="nav-label">Configurações e Atualização</span>
+  </button>
+  </div>
 
   <div class="sidebar-footer">
     <div class="daemon-pill">
       <span id="sidebar-dot" class="dot"></span>
-      <span id="sidebar-daemon-text">Verificando serviço...</span>
+      <span id="sidebar-daemon-text" class="footer-text">Verificando serviço...</span>
     </div>
-    <div id="sidebar-profile-text">Perfil: -</div>
+    <div id="sidebar-profile-text" class="footer-text">Perfil: -</div>
   </div>
 </aside>
 
@@ -1293,16 +599,24 @@ pre.terminal-box {
 <div class="main-wrapper">
   <header class="topbar">
     <div class="topbar-left">
+      <button class="hamburger is-open" id="hamburger-btn" onclick="toggleSidebar()" aria-label="Recolher ou expandir o menu lateral" aria-expanded="true" title="Recolher ou expandir o menu lateral">
+        <span class="hb-bar"></span><span class="hb-bar"></span><span class="hb-bar"></span>
+      </button>
       <div class="topbar-title" id="page-title">Painel do Dia e Controle de Expediente</div>
       <span id="top-status-badge" class="badge badge-idle">CARREGANDO</span>
     </div>
     <div class="topbar-right">
+      <button class="btn btn-outline btn-sm fx-btn" id="fx-toggle-btn" onclick="toggleFx()" aria-pressed="false" title="Pausar animações e efeitos visuais">
+        <svg class="fx-ico-pause" viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="8" y1="5" x2="8" y2="19"/><line x1="16" y1="5" x2="16" y2="19"/></svg>
+        <svg class="fx-ico-play" viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="7 4 20 12 7 20 7 4"/></svg>
+        <span id="fx-toggle-label">Pausar Efeitos</span>
+      </button>
       <button class="btn btn-outline btn-sm" id="theme-toggle-btn" onclick="toggleTheme()">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         <span id="theme-toggle-label">Modo Claro</span>
       </button>
       <button class="btn btn-outline btn-sm" onclick="refreshAll()">Atualizar Dados</button>
-      <button class="btn btn-outline btn-sm" onclick="switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3])">Lançar em Lote</button>
+      <button class="btn btn-outline btn-sm" onclick="switchTab('tab-batch')">Lançar em Lote</button>
       <button class="btn btn-primary btn-sm" onclick="openWorklogModal()">+ Novo Lançamento no Jira</button>
     </div>
   </header>
@@ -1478,6 +792,100 @@ pre.terminal-box {
       </div>
     </section>
 
+    <!-- ==================== TAB: DASHBOARD ANALITICO ==================== -->
+    <section id="tab-analytics" class="tab-pane">
+      <div class="card">
+        <div class="card-header" style="margin-bottom:0; padding-bottom:0; border-bottom:none;">
+          <div>
+            <div class="card-title">Dashboard Analítico dos Seus Lançamentos</div>
+            <div class="section-hint" id="an-subtitle">Indicadores calculados a partir dos worklogs reais que você lançou no Jira.</div>
+          </div>
+          <div class="an-controls">
+            <div class="seg" role="group" aria-label="Período de análise">
+              <button class="seg-btn" data-days="30" onclick="setAnalyticsPeriod(30)">30 dias</button>
+              <button class="seg-btn" data-days="60" onclick="setAnalyticsPeriod(60)">60 dias</button>
+              <button class="seg-btn" data-days="90" onclick="setAnalyticsPeriod(90)">90 dias</button>
+              <button class="seg-btn" data-days="180" onclick="setAnalyticsPeriod(180)">180 dias</button>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="loadAnalytics(true)">Atualizar do Jira</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="an-state"></div>
+
+      <div id="an-content" style="display:none;">
+        <div class="grid-kpi">
+          <div class="stat-card">
+            <div class="stat-label">Horas Lançadas no Período</div>
+            <div class="stat-value" id="an-kpi-hours">-</div>
+            <div class="stat-sub" id="an-kpi-hours-sub"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Tickets Trabalhados</div>
+            <div class="stat-value" id="an-kpi-tickets">-</div>
+            <div class="stat-sub" id="an-kpi-tickets-sub"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Finalizados por Mim no Jira</div>
+            <div class="stat-value" id="an-kpi-done">-</div>
+            <div class="stat-sub" id="an-kpi-done-sub"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Média de Finalizados por Semana</div>
+            <div class="stat-value" id="an-kpi-done-avg">-</div>
+            <div class="stat-sub" id="an-kpi-done-avg-sub"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Tempo Médio por Ticket</div>
+            <div class="stat-value" id="an-kpi-avg">-</div>
+            <div class="stat-sub" id="an-kpi-avg-sub"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Tempo Médio por Ticket Finalizado</div>
+            <div class="stat-value" id="an-kpi-avg-done">-</div>
+            <div class="stat-sub" id="an-kpi-avg-done-sub"></div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card" style="margin-bottom:0;">
+            <div class="card-header"><div class="card-title">Tipos de Ticket com Mais Tempo</div></div>
+            <div id="an-bars-time"></div>
+          </div>
+          <div class="card" style="margin-bottom:0;">
+            <div class="card-header"><div class="card-title">Tipos de Ticket com Mais Lançamentos</div></div>
+            <div id="an-bars-count"></div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card" style="margin-bottom:0;">
+            <div class="card-header"><div class="card-title">Lançamentos Com x Sem Descrição</div></div>
+            <div id="an-desc"></div>
+          </div>
+          <div class="card" style="margin-bottom:0;">
+            <div class="card-header"><div class="card-title">Tickets com Mais Tempo no Período</div></div>
+            <div id="an-top"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Evolução dos Tickets ao Longo do Período</div>
+          </div>
+          <div class="chart-controls">
+            <div class="chips" id="an-chips"></div>
+            <div class="seg" role="group" aria-label="Granularidade do gráfico">
+              <button class="seg-btn" data-gran="day" onclick="setAnalyticsGranularity('day')">Diário</button>
+              <button class="seg-btn" data-gran="week" onclick="setAnalyticsGranularity('week')">Semanal</button>
+            </div>
+          </div>
+          <div id="an-chart"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- ==================== TAB 2: VISUALIZACAO SEMANAL ==================== -->
     <section id="tab-weekly" class="tab-pane">
       <div class="card">
@@ -1558,7 +966,7 @@ pre.terminal-box {
         <div class="card-header">
           <div class="card-title">Gerenciador de Todos os Lançamentos do Jira (Worklogs)</div>
           <div class="btn-group">
-            <button class="btn btn-outline" onclick="switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3])">Lançamento Multi-Dias / Semanas em Lote</button>
+            <button class="btn btn-outline" onclick="switchTab('tab-batch')">Lançamento Multi-Dias / Semanas em Lote</button>
             <button class="btn btn-primary" onclick="openWorklogModal()">+ Lançar Novo Worklog no Jira</button>
           </div>
         </div>
@@ -2441,10 +1849,14 @@ function switchTab(tabId, btnEl) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   const pane = document.getElementById(tabId);
   if (pane) pane.classList.add('active');
-  if (btnEl) btnEl.classList.add('active');
+  const navBtn = btnEl || document.querySelector('.nav-btn[data-tab="' + tabId + '"]');
+  if (navBtn) navBtn.classList.add('active');
+  if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
+  window.scrollTo({ top: 0, behavior: 'auto' });
 
   const titles = {
     'tab-dashboard': 'Painel do Dia e Controle de Expediente',
+    'tab-analytics': 'Dashboard Analítico (Tickets, Tipos e Evolução)',
     'tab-weekly': 'Visualização Semanal (Calendário e Status)',
     'tab-worklogs': 'Lançamentos do Jira (Worklogs e Multi-Seleção)',
     'tab-batch': 'Lançamentos em Lote (Múltiplos Dias e Semanas)',
@@ -2464,6 +1876,8 @@ function switchTab(tabId, btnEl) {
     initBatchTabDefaults();
   } else if (tabId === 'tab-reports') {
     loadReport(7);
+  } else if (tabId === 'tab-analytics') {
+    loadAnalytics(false);
   } else if (tabId === 'tab-profiles' || tabId === 'tab-settings') {
     loadConfigData();
   }
@@ -2890,7 +2304,7 @@ function openWorklogModalForDate(dateStr) {
 
 function openBatchForCurrentWeek() {
   if (!currentWeeklyData) return;
-  switchTab('tab-batch', document.querySelectorAll('.nav-btn')[3]);
+  switchTab('tab-batch');
   document.getElementById('batch-start-date').value = currentWeeklyData.monday;
   document.getElementById('batch-end-date').value = currentWeeklyData.sunday;
   onBatchPeriodOrWeekdayChange();
@@ -4430,10 +3844,22 @@ window.addEventListener('DOMContentLoaded', () => {
     loadDashboard(false);
   }, 5000);
 });
+
+/*__UI_FX_JS__*/
+
+/*__ANALYTICS_JS__*/
 </script>
 </body>
 </html>
 """
+
+HTML_PAGE = (
+    HTML_PAGE.replace("/*__THEME_CSS__*/", THEME_CSS)
+    .replace("/*__EARLY_JS__*/", EARLY_JS)
+    .replace("/*__UI_FX_JS__*/", UI_FX_JS)
+    .replace("/*__ANALYTICS_JS__*/", ANALYTICS_JS)
+    .replace("__LOGO_SVG__", LOGO_SVG)
+)
 
 
 class JiraBotWebHandler(BaseHTTPRequestHandler):
@@ -4468,6 +3894,19 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
             pass
 
+    def _send_svg(self, svg: str) -> None:
+        payload = svg.encode("utf-8")
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(payload)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            pass
+
     def _read_json_body(self) -> Dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length <= 0:
@@ -4483,6 +3922,16 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
         try:
             if path in ["/", "/index.html"]:
                 self._send_html(HTML_PAGE)
+                return
+
+            if path in ["/favicon.svg", "/favicon.ico", "/logo.svg"]:
+                self._send_svg(LOGO_SVG)
+                return
+
+            if path == "/api/analytics":
+                days = normalize_days((query.get("days", ["30"])[0] or "30"))
+                force = (query.get("refresh", ["0"])[0] == "1")
+                self._send_json(get_analytics(days=days, force=force))
                 return
 
             if path == "/api/status":

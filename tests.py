@@ -422,30 +422,34 @@ class TestWebPanelAndShiftSchedule(unittest.TestCase):
 
         release_dir = Path(tempfile.mkdtemp())
         target_dir = Path(tempfile.mkdtemp())
+        mock_cfg_dir = Path(tempfile.mkdtemp())
         try:
-            # 1. Publica release limpa a partir do projeto atual
-            pub = publish_clean_release(str(release_dir))
-            self.assertTrue(pub.get("success"))
-            self.assertTrue((release_dir / "web_panel.py").exists())
-            self.assertTrue((release_dir / "updater.py").exists())
-            # Garante que nenhum arquivo sensivel ou de estado foi exportado
-            self.assertFalse((release_dir / ".env").exists())
-            self.assertFalse((release_dir / "config.json").exists())
-            self.assertFalse((release_dir / "state.json").exists())
+            with patch("config.get_default_config_dir", return_value=mock_cfg_dir), \
+                 patch("updater.get_default_config_dir", return_value=mock_cfg_dir):
+                # 1. Publica release limpa a partir do projeto atual
+                pub = publish_clean_release(str(release_dir))
+                self.assertTrue(pub.get("success"))
+                self.assertTrue((release_dir / "web_panel.py").exists())
+                self.assertTrue((release_dir / "updater.py").exists())
+                # Garante que nenhum arquivo sensivel ou de estado foi exportado
+                self.assertFalse((release_dir / ".env").exists())
+                self.assertFalse((release_dir / "config.json").exists())
+                self.assertFalse((release_dir / "state.json").exists())
 
-            # 2. Cria um arquivo pessoal simulado na pasta de destino e verifica que o updater nao toca nele
-            (release_dir / "config.json").write_text('{"leak": true}', encoding="utf-8")
-            chk = check_for_updates(str(release_dir))
-            self.assertTrue(chk.get("success"))
+                # 2. Cria um arquivo pessoal simulado na pasta de destino e verifica que o updater nao toca nele
+                (release_dir / "config.json").write_text('{"leak": true}', encoding="utf-8")
+                chk = check_for_updates(str(release_dir))
+                self.assertTrue(chk.get("success"))
 
-            with patch("updater.APP_DIR", target_dir):
-                res = perform_update(str(release_dir))
-                self.assertTrue(res.get("success"))
-                self.assertTrue((target_dir / "web_panel.py").exists())
-                self.assertFalse((target_dir / "config.json").exists())
+                with patch("updater.APP_DIR", target_dir):
+                    res = perform_update(str(release_dir))
+                    self.assertTrue(res.get("success"))
+                    self.assertTrue((target_dir / "web_panel.py").exists())
+                    self.assertFalse((target_dir / "config.json").exists())
         finally:
             shutil.rmtree(release_dir, ignore_errors=True)
             shutil.rmtree(target_dir, ignore_errors=True)
+            shutil.rmtree(mock_cfg_dir, ignore_errors=True)
 
     @patch("jira_client.JiraClient.get_user_worklogs_by_date_range")
     def test_build_weekly_payload(self, mock_range):
@@ -502,6 +506,98 @@ class TestWebPanelAndShiftSchedule(unittest.TestCase):
         self.assertTrue(c2.get("success"))
         self.assertEqual(c2.get("total_seconds"), 10800)
         self.assertEqual(c1["total_seconds"] + c2["total_seconds"], 21600)
+
+
+class TestAnalyticsAndRedesign(unittest.TestCase):
+    def test_build_analytics_aggregation(self):
+        from datetime import date
+        from analytics import build_analytics, format_hm
+
+        issues = {
+            "PROJ-1": {
+                "summary": "Tarefa 1",
+                "issue_type": "Bug",
+                "status": "Concluído",
+                "status_category": "done",
+                "completed_date": "2026-10-20",
+                "completed_by_me": True,
+            },
+            "PROJ-2": {
+                "summary": "Tarefa 2",
+                "issue_type": "Melhoria",
+                "status": "Em Andamento",
+                "status_category": "indeterminate",
+                "completed_date": "",
+                "completed_by_me": False,
+            },
+            "PROJ-3": {
+                "summary": "Tarefa 3",
+                "issue_type": "Bug",
+                "status": "Concluído",
+                "status_category": "done",
+                "completed_date": "2026-10-21",
+                "completed_by_me": False,  # Finalizado por outra pessoa
+            },
+        }
+
+        worklogs = [
+            {"issue_key": "PROJ-1", "date": "2026-10-19", "time_spent_seconds": 7200, "comment": "Ajuste do bug"},
+            {"issue_key": "PROJ-1", "date": "2026-10-20", "time_spent_seconds": 3600, "comment": ""},
+            {"issue_key": "PROJ-2", "date": "2026-10-20", "time_spent_seconds": 10800, "comment": "Desenvolvimento"},
+            {"issue_key": "PROJ-3", "date": "2026-10-21", "time_spent_seconds": 3600, "comment": ""},
+        ]
+
+        res = build_analytics(issues, worklogs, days=7, today=date(2026, 10, 21))
+        self.assertTrue(res["available"])
+        self.assertEqual(res["totals"]["seconds"], 25200)  # 7h = 25200s
+        self.assertEqual(res["totals"]["worklogs"], 4)
+        self.assertEqual(res["totals"]["tickets"], 3)
+
+        # Tipos de ticket por tempo: Bug tem 14400s (4h), Melhoria tem 10800s (3h)
+        self.assertEqual(res["by_type_time"][0]["type"], "Bug")
+        self.assertEqual(res["by_type_time"][0]["seconds"], 14400)
+        self.assertEqual(res["by_type_time"][1]["type"], "Melhoria")
+        self.assertEqual(res["by_type_time"][1]["seconds"], 10800)
+
+        # Tipos de ticket por lancamentos: Bug tem 3 lancamentos, Melhoria tem 1
+        self.assertEqual(res["by_type_count"][0]["type"], "Bug")
+        self.assertEqual(res["by_type_count"][0]["worklogs"], 3)
+
+        # Descricao dos lancamentos: 2 com descricao, 2 sem descricao (50% cada)
+        desc = res["description"]
+        self.assertEqual(desc["worklogs_with"], 2)
+        self.assertEqual(desc["worklogs_without"], 2)
+        self.assertEqual(desc["worklogs_with_pct"], 50.0)
+        self.assertEqual(desc["worklogs_without_pct"], 50.0)
+
+        # Apenas PROJ-1 foi concluido pelo usuario (PROJ-3 foi finalizado por outro)
+        comp = res["completion"]
+        self.assertEqual(comp["total"], 1)
+        self.assertEqual(comp["keys"], ["PROJ-1"])
+
+        # Tempo medio por ticket: 25200 / 3 = 8400s (2h 20m)
+        self.assertEqual(res["time_per_ticket"]["avg_seconds"], 8400)
+
+        # Evolucao: 7 dias retornados
+        self.assertEqual(len(res["evolution"]), 7)
+
+    def test_web_panel_redesign_assets_injected(self):
+        from web_panel import HTML_PAGE
+
+        # Confirma que todos os marcadores foram substituidos e nao ha sobras
+        self.assertNotIn("/*__THEME_CSS__*/", HTML_PAGE)
+        self.assertNotIn("/*__EARLY_JS__*/", HTML_PAGE)
+        self.assertNotIn("/*__UI_FX_JS__*/", HTML_PAGE)
+        self.assertNotIn("/*__ANALYTICS_JS__*/", HTML_PAGE)
+        self.assertNotIn("__LOGO_SVG__", HTML_PAGE)
+
+        # Confirma a presenca dos novos elementos exigidos
+        self.assertIn('id="hamburger-btn"', HTML_PAGE)
+        self.assertIn('id="fx-toggle-btn"', HTML_PAGE)
+        self.assertIn('id="tab-analytics"', HTML_PAGE)
+        self.assertIn('class="brand-logo"', HTML_PAGE)
+        self.assertIn('href="/favicon.svg"', HTML_PAGE)
+        self.assertIn('data-tab="tab-settings"', HTML_PAGE)
 
 
 if __name__ == "__main__":

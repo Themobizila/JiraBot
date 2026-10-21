@@ -28,7 +28,7 @@ APP_VERSION = "2.2.0"
 APP_DIR = Path(__file__).parent.resolve()
 
 # Lista branca estrita de extensoes e arquivos de codigo permitidos em atualizacoes/publicacoes
-ALLOWED_CODE_EXTENSIONS = {".py", ".bat", ".ico", ".png"}
+ALLOWED_CODE_EXTENSIONS = {".py", ".bat", ".ico", ".png", ".svg"}
 ALLOWED_DOC_FILES = {"requirements.txt", "README.md", ".gitignore"}
 FORBIDDEN_NAMES = {".env", "config.json", "state.json", "queue.json", "history.json", "worklog_schedules.json", "jirabot.pid", "jirabot.log"}
 FORBIDDEN_DIRS = {"relatorios", "backupP", "backupCore", "__pycache__", ".git", ".venv", "venv"}
@@ -196,6 +196,23 @@ def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
         cfg.update_source = src
         cfg.save()
 
+    dirty_files = set()
+    if (APP_DIR / ".git").exists():
+        try:
+            status_res = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(APP_DIR),
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            for line in (status_res.stdout or "").splitlines():
+                if len(line) >= 4:
+                    dirty_files.add(line[3:].strip().replace("/", "\\"))
+                    dirty_files.add(line[3:].strip().replace("\\", "/"))
+        except Exception:
+            pass
+
     # Modo 1: Pasta Compartilhada na Rede / Diretorio Local (OneDrive, SharePoint, SMB)
     if src and not src.startswith(("http://", "https://", "git@")):
         src_path = Path(src)
@@ -204,6 +221,9 @@ def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
 
         updated_files: List[str] = []
         for rel in list_local_app_files(src_path):
+            if str(rel) in dirty_files or rel.name in dirty_files:
+                logger.info(f"Pulando {rel} na atualizacao para preservar alteracoes locais nao commitadas.")
+                continue
             remote_f = src_path / rel
             local_f = APP_DIR / rel
             if not local_f.exists() or _file_sha256(remote_f) != _file_sha256(local_f):
@@ -244,6 +264,9 @@ def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
                     root_dir = sub_items[0]
 
                 for rel in list_local_app_files(root_dir):
+                    if str(rel) in dirty_files or rel.name in dirty_files:
+                        logger.info(f"Pulando {rel} na atualizacao para preservar alteracoes locais nao commitadas.")
+                        continue
                     remote_f = root_dir / rel
                     local_f = APP_DIR / rel
                     if not local_f.exists() or _file_sha256(remote_f) != _file_sha256(local_f):

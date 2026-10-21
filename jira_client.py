@@ -7,7 +7,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.request
 import urllib.error
@@ -673,3 +673,137 @@ class JiraClient:
         results.sort(key=lambda x: x.get("started", ""), reverse=True)
         return results
 
+
+    def get_user_analytics_data(self, days: int = 90) -> Dict[str, Any]:
+        """
+        Coleta os dados necessarios para o Dashboard Analitico: chamados em que o usuario lancou horas
+        nos ultimos N dias (com tipo, status e historico de transicoes) e os worklogs do proprio usuario.
+
+        Retorna {"issues": {chave: metadados}, "worklogs": [..]}. Levanta excecao se a consulta principal falhar.
+        """
+        import urllib.parse
+        from concurrent.futures import ThreadPoolExecutor
+
+        base_url = self.config.get_clean_base_url()
+        headers = self._get_auth_headers()
+        days = max(1, int(days))
+        cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
+
+        me: Dict[str, Any] = {}
+        try:
+            req = urllib.request.Request(f"{base_url}/rest/api/2/myself", headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                me = json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            logger.warning(f"Nao foi possivel obter perfil do usuario para analise: {e}")
+
+        my_ids = {str(v) for v in (me.get("accountId"), me.get("name"), me.get("key")) if v}
+
+        def is_mine(author: Optional[Dict[str, Any]]) -> bool:
+            if not my_ids:
+                return True
+            author = author or {}
+            return any(str(author.get(k)) in my_ids for k in ("accountId", "name", "key") if author.get(k))
+
+        jql = f"worklogAuthor = currentUser() AND worklogDate >= -{days}d"
+        fields = "key,summary,issuetype,status,resolution,resolutiondate,assignee,created"
+
+        def fetch_issues(with_changelog: bool) -> List[Dict[str, Any]]:
+            found: List[Dict[str, Any]] = []
+            page_token = ""
+            for _ in range(6):
+                url = (
+                    f"{base_url}/rest/api/2/search/jql?jql={urllib.parse.quote(jql)}"
+                    f"&maxResults=100&fields={fields}"
+                )
+                if with_changelog:
+                    url += "&expand=changelog"
+                if page_token:
+                    url += f"&nextPageToken={urllib.parse.quote(page_token)}"
+                req = urllib.request.Request(url, headers=headers, method="GET")
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                found.extend(data.get("issues", []))
+                page_token = data.get("nextPageToken") or ""
+                if not page_token or data.get("isLast"):
+                    break
+            return found
+
+        try:
+            raw_issues = fetch_issues(with_changelog=True)
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 422):
+                raw_issues = fetch_issues(with_changelog=False)
+            else:
+                raise
+
+        issues_meta: Dict[str, Dict[str, Any]] = {}
+        for issue in raw_issues:
+            key = str(issue.get("key") or "").upper()
+            if not key:
+                continue
+            f = issue.get("fields", {}) or {}
+            status = f.get("status") or {}
+            status_name = status.get("name") or ""
+            category = ((status.get("statusCategory") or {}).get("key")) or ""
+
+            completed_date = ""
+            completed_by_me = False
+            if category == "done":
+                histories = ((issue.get("changelog") or {}).get("histories")) or []
+                last_hist = None
+                for hist in sorted(histories, key=lambda h: h.get("created", "")):
+                    for item in hist.get("items", []) or []:
+                        if item.get("field") == "status" and item.get("toString") == status_name:
+                            last_hist = hist
+                if last_hist:
+                    completed_date = str(last_hist.get("created") or "")[:10]
+                    completed_by_me = is_mine(last_hist.get("author"))
+                else:
+                    completed_date = str(f.get("resolutiondate") or "")[:10]
+                    assignee = f.get("assignee")
+                    completed_by_me = bool(assignee) and is_mine(assignee)
+
+            issues_meta[key] = {
+                "summary": f.get("summary") or "",
+                "issue_type": (f.get("issuetype") or {}).get("name") or "Sem tipo",
+                "status": status_name,
+                "status_category": category,
+                "completed_date": completed_date,
+                "completed_by_me": completed_by_me,
+            }
+
+        def fetch_worklogs(key: str) -> List[Dict[str, Any]]:
+            rows: List[Dict[str, Any]] = []
+            try:
+                w_req = urllib.request.Request(
+                    f"{base_url}/rest/api/2/issue/{key}/worklog", headers=headers, method="GET"
+                )
+                with urllib.request.urlopen(w_req, timeout=15) as w_resp:
+                    w_data = json.loads(w_resp.read().decode("utf-8"))
+                for w in w_data.get("worklogs", []):
+                    started = w.get("started", "")
+                    if not started or not is_mine(w.get("author")):
+                        continue
+                    day_str = started[:10]
+                    if day_str < cutoff:
+                        continue
+                    rows.append({
+                        "id": str(w.get("id")),
+                        "issue_key": key,
+                        "date": day_str,
+                        "time_spent_seconds": int(w.get("timeSpentSeconds", 0) or 0),
+                        "comment": w.get("comment", "") or "",
+                    })
+            except Exception as e:
+                logger.warning(f"Erro ao obter worklogs de {key} para analise: {e}")
+            return rows
+
+        worklogs: List[Dict[str, Any]] = []
+        keys = list(issues_meta.keys())
+        if keys:
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                for chunk in pool.map(fetch_worklogs, keys):
+                    worklogs.extend(chunk)
+
+        return {"issues": issues_meta, "worklogs": worklogs}
