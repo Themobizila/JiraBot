@@ -595,9 +595,72 @@ class TestAnalyticsAndRedesign(unittest.TestCase):
         self.assertIn('id="hamburger-btn"', HTML_PAGE)
         self.assertIn('id="fx-toggle-btn"', HTML_PAGE)
         self.assertIn('id="tab-analytics"', HTML_PAGE)
+        self.assertIn('id="an-start-date"', HTML_PAGE)
+        self.assertIn('id="an-end-date"', HTML_PAGE)
         self.assertIn('class="brand-logo"', HTML_PAGE)
         self.assertIn('href="/favicon.svg"', HTML_PAGE)
         self.assertIn('data-tab="tab-settings"', HTML_PAGE)
+
+    def test_build_analytics_single_day(self):
+        from analytics import build_analytics
+
+        issues = {
+            "PROJ-1": {
+                "summary": "Tarefa do dia",
+                "issue_type": "Bug",
+                "status": "Concluído",
+                "status_category": "done",
+                "completed_date": "2026-10-21",
+                "completed_by_me": True,
+            }
+        }
+        worklogs = [
+            {"issue_key": "PROJ-1", "date": "2026-10-20", "time_spent_seconds": 3600, "comment": "Ontem"},
+            {"issue_key": "PROJ-1", "date": "2026-10-21", "time_spent_seconds": 7200, "comment": "Hoje"},
+        ]
+
+        # Filtra apenas o dia 21/10/2026 (dia unitario)
+        res = build_analytics(issues, worklogs, start_date="2026-10-21", end_date="2026-10-21")
+        self.assertTrue(res["available"])
+        self.assertEqual(res["period_days"], 1)
+        self.assertEqual(res["start_date"], "2026-10-21")
+        self.assertEqual(res["end_date"], "2026-10-21")
+        self.assertEqual(res["totals"]["seconds"], 7200)  # Apenas as 2h do dia 21
+        self.assertEqual(res["totals"]["worklogs"], 1)
+        self.assertEqual(len(res["evolution"]), 1)
+        self.assertEqual(res["completion"]["total"], 1)
+
+    def test_build_analytics_custom_range_across_months(self):
+        from analytics import build_analytics
+
+        issues = {
+            "PROJ-1": {
+                "summary": "Tarefa longa",
+                "issue_type": "Melhoria",
+                "status": "Concluído",
+                "status_category": "done",
+                "completed_date": "2026-10-15",
+                "completed_by_me": True,
+            }
+        }
+        worklogs = [
+            {"issue_key": "PROJ-1", "date": "2026-07-31", "time_spent_seconds": 3600, "comment": "Julho fora"},
+            {"issue_key": "PROJ-1", "date": "2026-08-10", "time_spent_seconds": 7200, "comment": "Agosto dentro"},
+            {"issue_key": "PROJ-1", "date": "2026-09-15", "time_spent_seconds": 10800, "comment": "Setembro dentro"},
+            {"issue_key": "PROJ-1", "date": "2026-10-20", "time_spent_seconds": 14400, "comment": "Outubro dentro"},
+            {"issue_key": "PROJ-1", "date": "2026-10-25", "time_spent_seconds": 3600, "comment": "Futuro fora"},
+        ]
+
+        # Intervalo livre de 01/08/2026 a 21/10/2026 (82 dias cruzando 3 meses)
+        res = build_analytics(issues, worklogs, start_date="2026-08-01", end_date="2026-10-21")
+        self.assertTrue(res["available"])
+        self.assertEqual(res["period_days"], 82)
+        self.assertEqual(res["start_date"], "2026-08-01")
+        self.assertEqual(res["end_date"], "2026-10-21")
+        # Deve somar Agosto (7200) + Setembro (10800) + Outubro (14400) = 32400s (9h)
+        self.assertEqual(res["totals"]["seconds"], 32400)
+        self.assertEqual(res["totals"]["worklogs"], 3)
+        self.assertEqual(len(res["evolution"]), 82)
 
 
 if __name__ == "__main__":

@@ -56,6 +56,8 @@ def build_analytics(
     worklogs: List[Dict[str, Any]],
     days: int = 30,
     today: Optional[date] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Agrega os lancamentos do usuario em indicadores para o dashboard.
@@ -64,10 +66,24 @@ def build_analytics(
     worklogs: lista de {issue_key, date (YYYY-MM-DD), time_spent_seconds, comment}
     """
     today = today or date.today()
-    days = max(1, int(days))
-    start = today - timedelta(days=days - 1)
-    start_str = start.isoformat()
-    end_str = today.isoformat()
+    if start_date and end_date:
+        try:
+            start_dt = date.fromisoformat(str(start_date)[:10])
+            end_dt = date.fromisoformat(str(end_date)[:10])
+        except (ValueError, TypeError):
+            start_dt = today - timedelta(days=max(1, int(days)) - 1)
+            end_dt = today
+        if start_dt > end_dt:
+            start_dt, end_dt = end_dt, start_dt
+        start_str = start_dt.isoformat()
+        end_str = end_dt.isoformat()
+        days = max(1, (end_dt - start_dt).days + 1)
+    else:
+        days = max(1, int(days))
+        start_dt = today - timedelta(days=days - 1)
+        end_dt = today
+        start_str = start_dt.isoformat()
+        end_str = today.isoformat()
 
     entries: List[Dict[str, Any]] = []
     for w in worklogs:
@@ -175,8 +191,8 @@ def build_analytics(
         completed_by_day[done_day].append(key)
         completed_keys.append(key)
     completed_total = len(completed_keys)
-    weeks = days / 7.0
-    months = days / 30.4375
+    weeks = max(days / 7.0, 1.0 / 7.0)
+    months = max(days / 30.4375, 1.0 / 30.4375)
     completed_seconds = sum(seconds_by_ticket[k] for k in completed_keys)
 
     # ---- Evolucao diaria ----
@@ -190,8 +206,8 @@ def build_analytics(
 
     evolution: List[Dict[str, Any]] = []
     cumulative = 0
-    cursor = start
-    while cursor <= today:
+    cursor = start_dt
+    while cursor <= end_dt:
         ds = cursor.isoformat()
         done_today = len(completed_by_day.get(ds, []))
         cumulative += done_today
@@ -266,17 +282,43 @@ def build_analytics(
     }
 
 
-def get_analytics(days: int = 30, force: bool = False) -> Dict[str, Any]:
+def get_analytics(
+    days: int = 30,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    force: bool = False,
+) -> Dict[str, Any]:
     """Coleta os dados no Jira e devolve o payload do dashboard (com cache de alguns minutos)."""
     from config import BotConfig
     from jira_client import JiraClient
     from storage import StateManager
 
-    days = normalize_days(days)
+    today = date.today()
+    if start_date and end_date:
+        try:
+            s_dt = date.fromisoformat(str(start_date)[:10])
+            e_dt = date.fromisoformat(str(end_date)[:10])
+            if s_dt > e_dt:
+                s_dt, e_dt = e_dt, s_dt
+            s_str = s_dt.isoformat()
+            e_str = e_dt.isoformat()
+            d_count = max(1, (e_dt - s_dt).days + 1)
+        except Exception:
+            days = normalize_days(days)
+            s_str = (today - timedelta(days=days - 1)).isoformat()
+            e_str = today.isoformat()
+            d_count = days
+    else:
+        days = normalize_days(days)
+        s_str = (today - timedelta(days=days - 1)).isoformat()
+        e_str = today.isoformat()
+        d_count = days
+
+    cache_key = f"{s_str}_{e_str}"
     now_ts = time.time()
 
     with _cache_lock:
-        cached = _cache.get(days)
+        cached = _cache.get(cache_key)
         if cached and not force and (now_ts - cached["ts"]) < ANALYTICS_CACHE_TTL_SECONDS:
             return cached["payload"]
 
@@ -284,23 +326,34 @@ def get_analytics(days: int = 30, force: bool = False) -> Dict[str, Any]:
     if not cfg.jira.get_clean_base_url() or not cfg.jira.get_clean_token():
         return {
             "available": False,
-            "period_days": days,
+            "period_days": d_count,
+            "start_date": s_str,
+            "end_date": e_str,
             "message": "Jira não configurado. Informe a URL e o token na aba Configurações para ver o dashboard.",
         }
 
     client = JiraClient(cfg.jira, StateManager())
     try:
-        data = client.get_user_analytics_data(days)
+        data = client.get_user_analytics_data(days=d_count, start_date=s_str, end_date=e_str)
     except Exception as exc:
         logger.warning("Falha ao coletar dados analiticos do Jira: %s", exc)
         return {
             "available": False,
-            "period_days": days,
+            "period_days": d_count,
+            "start_date": s_str,
+            "end_date": e_str,
             "message": f"Não foi possível consultar o Jira agora: {exc}",
         }
 
-    payload = build_analytics(data.get("issues", {}), data.get("worklogs", []), days=days)
+    payload = build_analytics(
+        data.get("issues", {}),
+        data.get("worklogs", []),
+        days=d_count,
+        today=today,
+        start_date=s_str,
+        end_date=e_str,
+    )
     payload["generated_at"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     with _cache_lock:
-        _cache[days] = {"ts": now_ts, "payload": payload}
+        _cache[cache_key] = {"ts": now_ts, "payload": payload}
     return payload

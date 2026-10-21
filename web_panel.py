@@ -801,13 +801,22 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <div class="section-hint" id="an-subtitle">Indicadores calculados a partir dos worklogs reais que você lançou no Jira.</div>
           </div>
           <div class="an-controls">
-            <div class="seg" role="group" aria-label="Período de análise">
-              <button class="seg-btn" data-days="30" onclick="setAnalyticsPeriod(30)">30 dias</button>
-              <button class="seg-btn" data-days="60" onclick="setAnalyticsPeriod(60)">60 dias</button>
-              <button class="seg-btn" data-days="90" onclick="setAnalyticsPeriod(90)">90 dias</button>
-              <button class="seg-btn" data-days="180" onclick="setAnalyticsPeriod(180)">180 dias</button>
+            <div class="an-date-picker">
+              <label for="an-start-date" class="an-date-label">De:</label>
+              <input type="date" id="an-start-date" class="form-control an-date-input" title="Data inicial">
+              <label for="an-end-date" class="an-date-label">Até:</label>
+              <input type="date" id="an-end-date" class="form-control an-date-input" title="Data final">
+              <button class="btn btn-primary btn-sm" onclick="applyCustomAnalyticsDates()" title="Filtrar pelo intervalo selecionado">Filtrar</button>
             </div>
-            <button class="btn btn-outline btn-sm" onclick="loadAnalytics(true)">Atualizar do Jira</button>
+            <div class="seg" role="group" aria-label="Atalhos de período">
+              <button class="seg-btn" data-preset="today" onclick="setAnalyticsPreset('today')">Hoje</button>
+              <button class="seg-btn" data-preset="yesterday" onclick="setAnalyticsPreset('yesterday')">Ontem</button>
+              <button class="seg-btn" data-preset="this_month" onclick="setAnalyticsPreset('this_month')">Este Mês</button>
+              <button class="seg-btn" data-preset="last_month" onclick="setAnalyticsPreset('last_month')">Mês Anterior</button>
+              <button class="seg-btn active" data-preset="30d" onclick="setAnalyticsPreset('30d')">30 Dias</button>
+              <button class="seg-btn" data-preset="90d" onclick="setAnalyticsPreset('90d')">90 Dias</button>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="loadAnalytics(true)" title="Forçar atualização dos dados diretamente do Jira">Atualizar do Jira</button>
           </div>
         </div>
       </div>
@@ -3929,9 +3938,14 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/analytics":
-                days = normalize_days((query.get("days", ["30"])[0] or "30"))
+                start = (query.get("start", query.get("start_date", [""]))[0] or "").strip()
+                end = (query.get("end", query.get("end_date", [""]))[0] or "").strip()
+                days_raw = (query.get("days", ["30"])[0] or "30").strip()
                 force = (query.get("refresh", ["0"])[0] == "1")
-                self._send_json(get_analytics(days=days, force=force))
+                if start and end:
+                    self._send_json(get_analytics(start_date=start, end_date=end, force=force))
+                else:
+                    self._send_json(get_analytics(days=normalize_days(days_raw), force=force))
                 return
 
             if path == "/api/status":

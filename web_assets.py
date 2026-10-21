@@ -1398,6 +1398,33 @@ pre.terminal-box {
   flex-wrap: wrap;
 }
 
+.an-date-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  padding: 4px 8px;
+  flex-wrap: wrap;
+}
+
+.an-date-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.an-date-input {
+  padding: 3px 7px;
+  font-size: 12px;
+  height: 28px;
+  border-radius: 2px;
+  width: auto;
+}
+
 .section-hint {
   font-size: 12px;
   color: var(--text-muted);
@@ -2203,7 +2230,9 @@ function closeMobileSidebar() {
 # ----------------------------------------------------------------------------------------------------------------------
 ANALYTICS_JS = r"""
 /* ==================== DASHBOARD ANALITICO ==================== */
-let analyticsDays = 30;
+let analyticsStart = '';
+let analyticsEnd = '';
+let analyticsActivePreset = '30d';
 let analyticsData = null;
 let analyticsLoading = false;
 let analyticsGran = 'day';
@@ -2214,6 +2243,83 @@ const SERIES_DEFS = {
   cumulative: { label: 'Finalizados acumulados', cls: 's2', axis: 'count' },
   hours: { label: 'Horas lançadas', cls: 's5', axis: 'hours' }
 };
+
+function fmtIsoDate(d) {
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+function calcPresetDates(preset) {
+  const today = new Date();
+  if (preset === 'today') {
+    const s = fmtIsoDate(today);
+    return { start: s, end: s };
+  }
+  if (preset === 'yesterday') {
+    const y = new Date(today);
+    y.setDate(today.getDate() - 1);
+    const s = fmtIsoDate(y);
+    return { start: s, end: s };
+  }
+  if (preset === 'this_month') {
+    const first = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { start: fmtIsoDate(first), end: fmtIsoDate(today) };
+  }
+  if (preset === 'last_month') {
+    const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const last = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { start: fmtIsoDate(first), end: fmtIsoDate(last) };
+  }
+  if (preset === '90d') {
+    const past = new Date(today);
+    past.setDate(today.getDate() - 89);
+    return { start: fmtIsoDate(past), end: fmtIsoDate(today) };
+  }
+  // default: 30d
+  const past = new Date(today);
+  past.setDate(today.getDate() - 29);
+  return { start: fmtIsoDate(past), end: fmtIsoDate(today) };
+}
+
+function setAnalyticsPreset(preset) {
+  analyticsActivePreset = preset;
+  const range = calcPresetDates(preset);
+  analyticsStart = range.start;
+  analyticsEnd = range.end;
+  syncDateInputs();
+  loadAnalytics(false);
+}
+
+function applyCustomAnalyticsDates() {
+  const startEl = document.getElementById('an-start-date');
+  const endEl = document.getElementById('an-end-date');
+  if (!startEl || !endEl) return;
+  let s = (startEl.value || '').trim();
+  let e = (endEl.value || '').trim();
+  if (!s && !e) return;
+  if (!s) s = e;
+  if (!e) e = s;
+  if (s > e) {
+    const tmp = s; s = e; e = tmp;
+    startEl.value = s;
+    endEl.value = e;
+  }
+  analyticsStart = s;
+  analyticsEnd = e;
+  analyticsActivePreset = '';
+  syncDateInputs();
+  loadAnalytics(false);
+}
+
+function syncDateInputs() {
+  const startEl = document.getElementById('an-start-date');
+  const endEl = document.getElementById('an-end-date');
+  if (startEl && analyticsStart) startEl.value = analyticsStart;
+  if (endEl && analyticsEnd) endEl.value = analyticsEnd;
+  document.querySelectorAll('.seg-btn[data-preset]').forEach(b => {
+    b.classList.toggle('active', b.dataset.preset === analyticsActivePreset);
+  });
+}
 
 function anFmtNumber(value, decimals) {
   return Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: decimals });
@@ -2243,26 +2349,33 @@ function anAnimateNumber(el, target, decimals) {
 }
 
 function setAnalyticsPeriod(days) {
-  analyticsDays = days;
+  const today = new Date();
+  const past = new Date(today);
+  past.setDate(today.getDate() - (days - 1));
+  analyticsStart = fmtIsoDate(past);
+  analyticsEnd = fmtIsoDate(today);
+  analyticsActivePreset = (days === 30 ? '30d' : days === 90 ? '90d' : '');
+  syncDateInputs();
   loadAnalytics(false);
-}
-
-function updatePeriodButtons() {
-  document.querySelectorAll('.seg-btn[data-days]').forEach(b => {
-    b.classList.toggle('active', Number(b.dataset.days) === analyticsDays);
-  });
 }
 
 async function loadAnalytics(force) {
   if (analyticsLoading) return;
   analyticsLoading = true;
-  updatePeriodButtons();
+  if (!analyticsStart || !analyticsEnd) {
+    const def = calcPresetDates('30d');
+    analyticsStart = def.start;
+    analyticsEnd = def.end;
+  }
+  syncDateInputs();
   const stateEl = document.getElementById('an-state');
   const contentEl = document.getElementById('an-content');
   stateEl.style.display = '';
   stateEl.innerHTML = '<div class="an-loading"><span class="spinner"></span><span>Consultando o Jira e consolidando seus lançamentos...</span></div>';
   try {
-    const data = await apiCall('/api/analytics?days=' + analyticsDays + (force ? '&refresh=1' : ''));
+    const data = await apiCall('/api/analytics?start=' + encodeURIComponent(analyticsStart)
+      + '&end=' + encodeURIComponent(analyticsEnd)
+      + (force ? '&refresh=1' : ''));
     analyticsData = data;
     if (!data.available) {
       contentEl.style.display = 'none';
@@ -2288,9 +2401,13 @@ function renderAnalytics(d) {
   const c = d.completion;
   const tp = d.time_per_ticket;
 
-  document.getElementById('an-subtitle').textContent =
-    'Período de ' + anFmtDate(d.start_date) + ' a ' + anFmtDate(d.end_date)
-    + ' - dados reais do Jira (atualizado em ' + (d.generated_at || '-') + ')';
+  if (d.start_date === d.end_date) {
+    document.getElementById('an-subtitle').textContent =
+      'Período: ' + anFmtDate(d.start_date) + ' (1 dia selecionado) - dados reais do Jira (atualizado em ' + (d.generated_at || '-') + ')';
+  } else {
+    document.getElementById('an-subtitle').textContent =
+      'Período de ' + anFmtDate(d.start_date) + ' a ' + anFmtDate(d.end_date) + ' (' + d.period_days + ' dias) - dados reais do Jira (atualizado em ' + (d.generated_at || '-') + ')';
+  }
 
   document.getElementById('an-kpi-hours').textContent = t.formatted;
   document.getElementById('an-kpi-hours-sub').textContent =

@@ -674,11 +674,17 @@ class JiraClient:
         return results
 
 
-    def get_user_analytics_data(self, days: int = 90) -> Dict[str, Any]:
+    def get_user_analytics_data(
+        self,
+        days: int = 90,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Coleta os dados necessarios para o Dashboard Analitico: chamados em que o usuario lancou horas
-        nos ultimos N dias (com tipo, status e historico de transicoes) e os worklogs do proprio usuario.
+        no periodo solicitado (com tipo, status e historico de transicoes) e os worklogs do proprio usuario.
 
+        Aceita start_date e end_date (formato 'YYYY-MM-DD') ou days (padrao 90).
         Retorna {"issues": {chave: metadados}, "worklogs": [..]}. Levanta excecao se a consulta principal falhar.
         """
         import urllib.parse
@@ -686,8 +692,23 @@ class JiraClient:
 
         base_url = self.config.get_clean_base_url()
         headers = self._get_auth_headers()
-        days = max(1, int(days))
-        cutoff = (datetime.now() - timedelta(days=days)).date().isoformat()
+
+        if start_date and end_date:
+            s_str = str(start_date)[:10]
+            e_str = str(end_date)[:10]
+            if s_str > e_str:
+                s_str, e_str = e_str, s_str
+            cutoff_start = s_str
+            cutoff_end = e_str
+            if cutoff_start == cutoff_end:
+                jql = f'worklogAuthor = currentUser() AND worklogDate = "{cutoff_start}"'
+            else:
+                jql = f'worklogAuthor = currentUser() AND worklogDate >= "{cutoff_start}" AND worklogDate <= "{cutoff_end}"'
+        else:
+            days = max(1, int(days))
+            cutoff_start = (datetime.now() - timedelta(days=days)).date().isoformat()
+            cutoff_end = datetime.now().date().isoformat()
+            jql = f"worklogAuthor = currentUser() AND worklogDate >= -{days}d"
 
         me: Dict[str, Any] = {}
         try:
@@ -705,7 +726,6 @@ class JiraClient:
             author = author or {}
             return any(str(author.get(k)) in my_ids for k in ("accountId", "name", "key") if author.get(k))
 
-        jql = f"worklogAuthor = currentUser() AND worklogDate >= -{days}d"
         fields = "key,summary,issuetype,status,resolution,resolutiondate,assignee,created"
 
         def fetch_issues(with_changelog: bool) -> List[Dict[str, Any]]:
@@ -786,7 +806,7 @@ class JiraClient:
                     if not started or not is_mine(w.get("author")):
                         continue
                     day_str = started[:10]
-                    if day_str < cutoff:
+                    if not (cutoff_start <= day_str <= cutoff_end):
                         continue
                     rows.append({
                         "id": str(w.get("id")),
