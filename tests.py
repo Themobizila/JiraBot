@@ -834,6 +834,82 @@ class TestAnalyticsAndRedesign(unittest.TestCase):
                 self.assertEqual(si.lpDesktop, r"WinSta0\Default")
 
 
+class TestReportReconciliationAndKeyCleaning(unittest.TestCase):
+    def test_clean_jira_issue_key_patterns(self):
+        from storage import clean_jira_issue_key
+
+        self.assertEqual(clean_jira_issue_key("https://consisanet.atlassian.net/browse/NOTAON-5713"), "NOTAON-5713")
+        self.assertEqual(clean_jira_issue_key("http://jira.internal/browse/ABC-1234?param=1#hash"), "ABC-1234")
+        self.assertEqual(clean_jira_issue_key("  consisabi-427  "), "CONSISABI-427")
+        self.assertEqual(clean_jira_issue_key("NOTAON-5713"), "NOTAON-5713")
+        self.assertEqual(clean_jira_issue_key(""), "")
+        self.assertEqual(clean_jira_issue_key(None), "")
+        self.assertEqual(clean_jira_issue_key("invalid_key"), "INVALID_KEY")
+
+    def test_day_summary_cleans_legacy_url_keys(self):
+        from storage import DaySummary
+
+        legacy_data = {
+            "date_str": "2026-10-21",
+            "total_seconds": 1151,
+            "by_issue": {
+                "https://consisanet.atlassian.net/browse/NOTAON-5713": 1151,
+                "  CONSISABI-427  ": 3600,
+            },
+            "is_logged": True,
+            "worklog_ids": ["123"],
+            "completed_at": "2026-10-21T18:00:00",
+        }
+        summary = DaySummary.from_dict(legacy_data)
+        self.assertIn("NOTAON-5713", summary.by_issue)
+        self.assertIn("CONSISABI-427", summary.by_issue)
+        self.assertNotIn("https://consisanet.atlassian.net/browse/NOTAON-5713", summary.by_issue)
+        self.assertEqual(summary.by_issue["NOTAON-5713"], 1151)
+
+    def test_build_report_payload_reconciles_from_jira(self):
+        from datetime import date, timedelta
+        from web_panel import build_report_payload
+
+        test_dir = Path(tempfile.mkdtemp())
+        try:
+            today = date.today()
+            d_prev = (today - timedelta(days=2)).isoformat()
+
+            mock_worklogs = [
+                {
+                    "id": "9901",
+                    "issue_key": "https://consisanet.atlassian.net/browse/NOTAON-5713",
+                    "date": d_prev,
+                    "time_spent_seconds": 21600,
+                }
+            ]
+
+            with patch("config.get_default_config_dir", return_value=test_dir), \
+                 patch("storage.get_default_config_dir", return_value=test_dir), \
+                 patch("jira_client.JiraClient.get_user_worklogs_by_date_range", return_value=mock_worklogs):
+
+                cfg = BotConfig(notifications_enabled=False)
+                cfg.save()
+                state_mgr = StateManager(base_dir=test_dir)
+                self.assertEqual(len(state_mgr.load_history()), 0)
+
+                payload = build_report_payload(days=7, fetch_jira=True)
+
+                found_prev = next((r for r in payload["rows"] if r["date"] == d_prev), None)
+                self.assertIsNotNone(found_prev)
+                self.assertEqual(found_prev["total_seconds"], 21600)
+                self.assertTrue(found_prev["is_logged"])
+                self.assertEqual(len(found_prev["tickets"]), 1)
+                self.assertEqual(found_prev["tickets"][0]["issue_key"], "NOTAON-5713")
+
+                saved_history = state_mgr.load_history()
+                self.assertEqual(len(saved_history), 1)
+                self.assertEqual(saved_history[0].date_str, d_prev)
+                self.assertIn("NOTAON-5713", saved_history[0].by_issue)
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
 

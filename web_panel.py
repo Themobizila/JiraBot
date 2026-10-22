@@ -1,5 +1,5 @@
 """
-Painel Web Interativo do JiraBot (v2.2.0).
+Painel Web Interativo do JiraBot (v2.2.1).
 Servidor HTTP nativo (Standard Library) com interface grafica Web completa para:
 - Monitoramento e controle do servico em background e cronometro do dia
 - Dark Mode / Light Mode com persistencia por usuario
@@ -41,6 +41,7 @@ from storage import (
     TimeInterval,
     _parse_hm,
     calculate_shift_schedule,
+    clean_jira_issue_key,
 )
 from updater import (
     APP_VERSION,
@@ -450,8 +451,8 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
     }
 
 
-def build_report_payload(days: int = 7) -> Dict[str, Any]:
-    """Gera os dados estruturados e texto do relatorio de horas para o Painel Web."""
+def build_report_payload(days: int = 7, fetch_jira: bool = True) -> Dict[str, Any]:
+    """Gera os dados estruturados e texto do relatorio de horas para o Painel Web conciliando com o Jira."""
     config = BotConfig.load()
     state_mgr = StateManager()
     history = state_mgr.load_history()
@@ -474,6 +475,51 @@ def build_report_payload(days: int = 7) -> Dict[str, Any]:
     today = date.today()
     start_date = today - timedelta(days=max(1, days) - 1)
 
+    # Consulta lancamentos confirmados no Jira para conciliar com o historico local
+    summaries_to_save: List[DaySummary] = []
+    if fetch_jira:
+        try:
+            client = JiraClient(config.jira, state_mgr)
+            wls = client.get_user_worklogs_by_date_range(start_date.isoformat(), today.isoformat())
+            jira_by_date: Dict[str, List[Dict[str, Any]]] = {}
+            for w in wls:
+                d_key = (w.get("date") or "")[:10]
+                if d_key:
+                    jira_by_date.setdefault(d_key, []).append(w)
+
+            for d_str, day_wls in jira_by_date.items():
+                jira_total_sec = sum(int(w.get("time_spent_seconds", 0) or 0) for w in day_wls)
+                jira_by_issue: Dict[str, int] = {}
+                jira_w_ids: List[str] = []
+                for w in day_wls:
+                    raw_key = w.get("issue_key", "")
+                    c_key = clean_jira_issue_key(raw_key) or config.jira.default_issue
+                    sec = int(w.get("time_spent_seconds", 0) or 0)
+                    if sec > 0:
+                        jira_by_issue[c_key] = jira_by_issue.get(c_key, 0) + sec
+                    if w.get("id"):
+                        jira_w_ids.append(str(w["id"]))
+
+                existing_summary = history_by_date.get(d_str)
+                # Se o Jira contem lancamentos confirmados para este dia, o Jira e a autoridade oficial
+                if jira_total_sec > 0:
+                    new_summary = DaySummary(
+                        date_str=d_str,
+                        total_seconds=jira_total_sec,
+                        by_issue=jira_by_issue,
+                        is_logged=True,
+                        worklog_ids=jira_w_ids or (existing_summary.worklog_ids if existing_summary else []),
+                        completed_at=existing_summary.completed_at if existing_summary else f"{d_str}T18:00:00",
+                    )
+                    history_by_date[d_str] = new_summary
+                    if d_str != today.isoformat():
+                        summaries_to_save.append(new_summary)
+
+            if summaries_to_save:
+                state_mgr.save_summaries_to_history(summaries_to_save)
+        except Exception as e:
+            logger.warning(f"Falha ao consultar worklogs do Jira no relatorio: {e}")
+
     rows: List[Dict[str, Any]] = []
     total_period_seconds = 0
     total_target_seconds = 0
@@ -491,7 +537,7 @@ def build_report_payload(days: int = 7) -> Dict[str, Any]:
             if not is_weekend:
                 total_target_seconds += target_seconds_per_day
             tickets_list = [
-                {"issue_key": k, "seconds": v, "formatted": format_duration(v)}
+                {"issue_key": clean_jira_issue_key(k), "seconds": v, "formatted": format_duration(v)}
                 for k, v in summary.by_issue.items()
                 if v > 0
             ]
@@ -538,7 +584,7 @@ def build_report_payload(days: int = 7) -> Dict[str, Any]:
         "balance_seconds": diff_seconds,
         "balance_positive": diff_seconds >= 0,
         "balance_formatted": f"{diff_sign}{format_duration(abs(diff_seconds))}",
-        "raw_report": generate_report(days=days),
+        "raw_report": generate_report(days=days, history_by_date=history_by_date),
     }
 
 
@@ -570,7 +616,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <div class="brand-logo">__LOGO_SVG__</div>
     <div class="brand-text">
       <h1>JiraBot</h1>
-      <span id="sidebar-version-label">Gerenciador de Horas v2.2.0</span>
+      <span id="sidebar-version-label">Gerenciador de Horas v2.2.1</span>
     </div>
   </div>
 
@@ -1580,7 +1626,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <div class="form-grid">
             <div>
               <div style="font-size:12px; color:var(--text-muted);">VERSÃO INSTALADA</div>
-              <div style="font-size:15px; font-weight:700;" id="upd-version-text">v2.2.0</div>
+              <div style="font-size:15px; font-weight:700;" id="upd-version-text">v2.2.1</div>
               <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;" id="upd-lastmod-text">-</div>
             </div>
             <div>
@@ -2077,6 +2123,13 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+function cleanJiraIssueKey(str) {
+  if (!str) return '';
+  const s = String(str).trim().toUpperCase();
+  const match = s.match(/([A-Z0-9]+-\d+)/);
+  return match ? match[1] : s;
+}
+
 /* ==================== DASHBOARD ==================== */
 async function loadDashboard(forceScheduleFill = false) {
   try {
@@ -2288,7 +2341,7 @@ function quickEditIssueToday(issueKey, currentComment) {
 }
 
 async function submitSwitchOrComment(action) {
-  const issue_key = document.getElementById('switch-issue-input').value.trim().toUpperCase();
+  const issue_key = cleanJiraIssueKey(document.getElementById('switch-issue-input').value);
   const comment = document.getElementById('switch-comment-input').value.trim();
   const no_comment = document.getElementById('today-no-comment-chk').checked;
   if (!issue_key) {
@@ -2320,8 +2373,8 @@ async function toggleTodayNoComment(checked) {
 }
 
 async function submitTransferToday() {
-  const source_issue = document.getElementById('transfer-src-input').value.trim().toUpperCase();
-  const target_issue = document.getElementById('transfer-tgt-input').value.trim().toUpperCase();
+  const source_issue = cleanJiraIssueKey(document.getElementById('transfer-src-input').value);
+  const target_issue = cleanJiraIssueKey(document.getElementById('transfer-tgt-input').value);
   const time_str = document.getElementById('transfer-time-input').value.trim();
   if (!source_issue || !target_issue) {
     showToast('Informe o ticket de origem e o de destino.', 'error');
@@ -2463,7 +2516,7 @@ function closeIntervalModal() {
 
 async function saveIntervalModal() {
   const idx = parseInt(document.getElementById('inter-modal-idx').value, 10);
-  const issue_key = document.getElementById('inter-modal-issue').value.trim().toUpperCase();
+  const issue_key = cleanJiraIssueKey(document.getElementById('inter-modal-issue').value);
   const start_hm = document.getElementById('inter-modal-start').value;
   const end_hm = document.getElementById('inter-modal-end').value;
   const comment = document.getElementById('inter-modal-comment').value.trim();
@@ -2667,7 +2720,7 @@ function recalcBulkEditModal() {
 
 async function submitBulkEditWorklogs() {
   const applyTicket = document.getElementById('bulk-apply-ticket-chk').checked;
-  const newTicket = document.getElementById('bulk-new-ticket').value.trim().toUpperCase();
+  const newTicket = cleanJiraIssueKey(document.getElementById('bulk-new-ticket').value);
   const applySchedule = document.getElementById('bulk-apply-schedule-chk').checked;
   const start_hm = document.getElementById('bulk-edit-start-hm').value;
   const lunch_start_hm = document.getElementById('bulk-edit-ls-hm').value;
@@ -3010,7 +3063,7 @@ function renderBatchTemplateTickets(infoObj = null) {
       <tr>
         <td style="white-space:nowrap;">${orderCellHtml}</td>
         <td>
-          <input type="text" class="form-control" style="width:145px; padding:6px 8px;" value="${escapeHtml(t.issue_key)}" placeholder="Ex: CONSISABI-427" oninput="batchTemplateTickets[${idx}].issue_key=this.value.toUpperCase()">
+          <input type="text" class="form-control" style="width:145px; padding:6px 8px;" value="${escapeHtml(t.issue_key)}" placeholder="Ex: CONSISABI-427" oninput="batchTemplateTickets[${idx}].issue_key=cleanJiraIssueKey(this.value)" onblur="this.value=cleanJiraIssueKey(this.value); batchTemplateTickets[${idx}].issue_key=this.value">
         </td>
         <td>
           <input type="time" class="form-control" style="padding:6px 6px;" value="${t.start_hm}" oninput="batchTemplateTickets[${idx}].start_hm=this.value; updateBatchTemplateRowNet(${idx})">
@@ -3587,8 +3640,8 @@ function recalcModalWorklog() {
 
 async function saveModalWorklog() {
   const worklog_id = document.getElementById('wl-modal-id').value.trim();
-  const source_issue = document.getElementById('wl-modal-source-issue').value.trim().toUpperCase();
-  const target_issue = document.getElementById('wl-modal-issue').value.trim().toUpperCase();
+  const source_issue = cleanJiraIssueKey(document.getElementById('wl-modal-source-issue').value);
+  const target_issue = cleanJiraIssueKey(document.getElementById('wl-modal-issue').value);
   const date_str = document.getElementById('wl-modal-date').value;
   const start_hm = document.getElementById('wl-modal-start-hm').value;
   const lunch_start_hm = document.getElementById('wl-modal-ls-hm').value;
@@ -3928,6 +3981,10 @@ async function testJiraConnection() {
 
 /* ==================== RELATORIOS ==================== */
 async function loadReport(days = 7) {
+  const tbody = document.getElementById('rep-table-tbody');
+  if (tbody) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:28px 16px; color:var(--text-muted); font-size:13px;"><div class="spinner" style="margin:0 auto 10px auto;"></div>Consultando lançamentos no Jira e consolidando banco de horas... Aguarde.</td></tr>';
+  }
   try {
     const res = await apiCall(`/api/report?days=${days}`);
     document.getElementById('rep-total-worked').textContent = res.total_period_formatted;
@@ -4254,7 +4311,8 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
             if path == "/api/report":
                 days = int(query.get("days", ["7"])[0])
-                self._send_json(build_report_payload(days=days))
+                fetch_jira = (query.get("fetch_jira", ["1"])[0] != "0")
+                self._send_json(build_report_payload(days=days, fetch_jira=fetch_jira))
                 return
 
             if path == "/api/weekly":
@@ -4411,7 +4469,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
                 state = state_mgr.load_state()
-                active_issue = (body.get("issue_key") or state.target_issue or cfg.jira.default_issue).strip().upper()
+                active_issue = clean_jira_issue_key(body.get("issue_key") or state.target_issue or cfg.jira.default_issue)
 
                 if action in ["add", "update"]:
                     st_dt = _parse_hm(state.date_str, body.get("start_hm", ""))
@@ -4465,7 +4523,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 client = JiraClient(cfg.jira, state_mgr)
 
                 if action == "switch":
-                    issue_key = (body.get("issue_key") or "").strip().upper()
+                    issue_key = clean_jira_issue_key(body.get("issue_key") or "")
                     comment = (body.get("comment") or "").strip()
                     engine = BotEngine(config=cfg, state_manager=state_mgr)
                     engine.switch_ticket(issue_key, comment=comment if comment else None)
@@ -4473,7 +4531,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     return
 
                 if action == "set_comment":
-                    issue_key = (body.get("issue_key") or "").strip().upper()
+                    issue_key = clean_jira_issue_key(body.get("issue_key") or "")
                     comment = (body.get("comment") or "").strip()
                     state = state_mgr.load_state()
                     state.no_comment = bool(body.get("no_comment", False))
@@ -4492,8 +4550,8 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     return
 
                 if action == "transfer":
-                    src = (body.get("source_issue") or "").strip().upper()
-                    tgt = (body.get("target_issue") or "").strip().upper()
+                    src = clean_jira_issue_key(body.get("source_issue") or "")
+                    tgt = clean_jira_issue_key(body.get("target_issue") or "")
                     t_str = (body.get("time_str") or "").strip()
                     sec = parse_duration_input(t_str) if t_str else None
                     engine = BotEngine(config=cfg, state_manager=state_mgr)
@@ -4652,7 +4710,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
                 items = body.get("items", [])
                 apply_ticket = bool(body.get("apply_ticket", False))
-                target_issue = (body.get("target_issue") or "").strip().upper()
+                target_issue = clean_jira_issue_key(body.get("target_issue") or "")
                 apply_schedule = bool(body.get("apply_schedule", False))
                 start_hm = (body.get("start_hm") or "07:45").strip()
                 ls_hm = (body.get("lunch_start_hm") or "").strip()
@@ -4666,7 +4724,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
                 for it in items:
                     wid = str(it.get("worklog_id") or "").strip()
-                    src_issue = (it.get("source_issue") or "").strip().upper()
+                    src_issue = clean_jira_issue_key(it.get("source_issue") or "")
                     d_str = (it.get("date_str") or date.today().isoformat())[:10]
                     if not wid or not src_issue:
                         continue
@@ -4769,8 +4827,8 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 client = JiraClient(cfg.jira, state_mgr)
 
                 worklog_id = (body.get("worklog_id") or "").strip()
-                source_issue = (body.get("source_issue") or "").strip().upper()
-                target_issue = (body.get("target_issue") or "").strip().upper()
+                source_issue = clean_jira_issue_key(body.get("source_issue") or "")
+                target_issue = clean_jira_issue_key(body.get("target_issue") or "")
                 date_str = (body.get("date_str") or date.today().isoformat())[:10]
                 start_hm = (body.get("start_hm") or "08:00").strip()
                 lunch_start_hm = (body.get("lunch_start_hm") or "").strip()
@@ -4877,7 +4935,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     return
 
             if path == "/api/worklogs/delete":
-                issue_key = (body.get("issue_key") or "").strip().upper()
+                issue_key = clean_jira_issue_key(body.get("issue_key") or "")
                 worklog_id = str(body.get("worklog_id") or "").strip()
                 if not issue_key or not worklog_id:
                     self._send_json({"error": "Ticket e ID do worklog são obrigatórios."}, status_code=400)

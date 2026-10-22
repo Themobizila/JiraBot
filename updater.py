@@ -24,7 +24,7 @@ from config import BotConfig, get_default_config_dir
 
 logger = logging.getLogger("JiraBot.Updater")
 
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 APP_DIR = Path(__file__).parent.resolve()
 
 # Lista branca estrita de extensoes e arquivos de codigo permitidos em atualizacoes/publicacoes

@@ -19,26 +19,28 @@ WEEKDAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 def generate_report(
     days: int = 7,
     base_dir: Optional[Path] = None,
+    history_by_date: Optional[Dict[str, DaySummary]] = None,
 ) -> str:
     """Gera um relatório tabular formatado dos últimos N dias."""
     config = BotConfig.load()
     state_mgr = StateManager(base_dir=base_dir)
-    history = state_mgr.load_history()
     current_state = state_mgr.load_state()
 
-    # Mapear dias do historico por data
-    history_by_date: Dict[str, DaySummary] = {h.date_str: h for h in history}
+    # Se nao foi passado um historico reconciliado externo, carrega local
+    if history_by_date is None:
+        history = state_mgr.load_history()
+        history_by_date = {h.date_str: h for h in history}
 
-    # Se o dia atual tiver horas acumuladas, inclui no relatorio em tempo real
-    if current_state.get_total_seconds() > 0:
-        history_by_date[current_state.date_str] = DaySummary(
-            date_str=current_state.date_str,
-            total_seconds=current_state.get_total_seconds(),
-            by_issue=current_state.get_seconds_by_issue(),
-            is_logged=current_state.is_logged,
-            worklog_ids=current_state.jira_worklog_ids,
-            completed_at=current_state.last_event_time,
-        )
+        # Se o dia atual tiver horas acumuladas, inclui no relatorio em tempo real
+        if current_state.get_total_seconds() > 0:
+            history_by_date[current_state.date_str] = DaySummary(
+                date_str=current_state.date_str,
+                total_seconds=current_state.get_total_seconds(),
+                by_issue=current_state.get_seconds_by_issue(),
+                is_logged=current_state.is_logged,
+                worklog_ids=current_state.jira_worklog_ids,
+                completed_at=current_state.last_event_time,
+            )
 
     profile = config.get_current_profile()
     target_seconds_per_day = int(profile.target_hours * 3600)

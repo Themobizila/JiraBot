@@ -13,6 +13,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from config import get_default_config_dir
+import re
+
+
+def clean_jira_issue_key(value: Optional[str]) -> str:
+    """
+    Limpa e extrai a chave do ticket Jira no formato PROJ-123,
+    mesmo que o usuario cole a URL completa (ex: https://.../browse/PROJ-123)
+    ou informe com espacos/minusculas.
+    """
+    if not value:
+        return ""
+    val = str(value).strip().upper()
+    if not val or val == "SEM_TICKET":
+        return val
+    match = re.search(r"[A-Z0-9]+-\d+", val)
+    return match.group(0) if match else val
 
 
 @dataclass
@@ -36,7 +52,7 @@ class TimeInterval:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> TimeInterval:
-        return cls(start=data["start"], end=data.get("end"), issue_key=data.get("issue_key"), comment=data.get("comment"))
+        return cls(start=data["start"], end=data.get("end"), issue_key=clean_jira_issue_key(data.get("issue_key")), comment=data.get("comment"))
 
 
 @dataclass
@@ -82,22 +98,24 @@ class DailyState:
         """Calcula o total de segundos acumulados agrupados por cada ticket trabalhado."""
         totals: Dict[str, int] = {}
         for interval in self.intervals:
-            issue = interval.issue_key or self.target_issue or default_issue or "SEM_TICKET"
+            raw_key = interval.issue_key or self.target_issue or default_issue or "SEM_TICKET"
+            issue = clean_jira_issue_key(raw_key) or "SEM_TICKET"
             totals[issue] = totals.get(issue, 0) + interval.get_duration_seconds()
         return totals
 
     def get_issue_comment(self, issue_key: str, default: str = "") -> str:
         """Retorna o comentario/descricao associado ao ticket."""
-        return self.issue_comments.get(issue_key, "").strip() or default
+        clean_key = clean_jira_issue_key(issue_key)
+        return self.issue_comments.get(clean_key, "").strip() or default
 
     def set_issue_comment(self, issue_key: str, comment: str) -> None:
         """Define ou atualiza a descricao de um ticket trabalhado hoje."""
-        clean_key = issue_key.strip().upper()
+        clean_key = clean_jira_issue_key(issue_key)
         if clean_key:
             self.issue_comments[clean_key] = comment.strip()
             # Atualiza tambem nos intervalos daquele ticket se aplicavel
             for inter in self.intervals:
-                if inter.issue_key == clean_key and not inter.comment:
+                if clean_jira_issue_key(inter.issue_key) == clean_key and not inter.comment:
                     inter.comment = comment.strip()
 
     def transfer_hours(self, source_issue: str, target_issue: str, seconds: Optional[int] = None) -> int:
@@ -549,10 +567,12 @@ class DaySummary:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> DaySummary:
+        raw_issues = data.get("by_issue", {})
+        cleaned_issues = {clean_jira_issue_key(k): v for k, v in raw_issues.items()}
         return cls(
             date_str=data["date_str"],
             total_seconds=data.get("total_seconds", 0),
-            by_issue=data.get("by_issue", {}),
+            by_issue=cleaned_issues,
             is_logged=data.get("is_logged", False),
             worklog_ids=data.get("worklog_ids", []),
             completed_at=data.get("completed_at", datetime.now().isoformat()),
@@ -709,7 +729,6 @@ class StateManager:
 
     def save_day_to_history(self, state: DailyState) -> None:
         """Registra o resumo do dia no historico sem duplicar registros do mesmo dia."""
-        history = self.load_history()
         summary = DaySummary(
             date_str=state.date_str,
             total_seconds=state.get_total_seconds(),
@@ -718,10 +737,16 @@ class StateManager:
             worklog_ids=state.jira_worklog_ids,
             completed_at=datetime.now().isoformat(),
         )
+        self.save_summaries_to_history([summary])
 
-        # Remove versao anterior da mesma data se ja existir
-        history = [h for h in history if h.date_str != state.date_str]
-        history.append(summary)
+    def save_summaries_to_history(self, summaries: List[DaySummary]) -> None:
+        """Registra ou atualiza multiplos DaySummary diretamente no historico sem duplicatas."""
+        if not summaries:
+            return
+        history = self.load_history()
+        dates_to_replace = {s.date_str for s in summaries}
+        history = [h for h in history if h.date_str not in dates_to_replace]
+        history.extend(summaries)
         history.sort(key=lambda x: x.date_str)
 
         temp_file = self.history_file.with_suffix(".tmp")

@@ -11,7 +11,7 @@ from typing import Callable, Optional
 from config import BotConfig, ShiftProfile
 from notifier import send_notification
 from review_dialog import get_fallback_description, show_pre_exit_popup
-from storage import DailyState, StateManager, TimeInterval
+from storage import DailyState, StateManager, TimeInterval, clean_jira_issue_key
 
 logger = logging.getLogger("JiraBot.Engine")
 
@@ -56,7 +56,8 @@ class BotEngine:
 
     def get_active_issue(self) -> str:
         """Retorna a tarefa ativa atual (seletor dinamico ou padrao)."""
-        return self.state.target_issue or self.config.jira.default_issue
+        raw = self.state.target_issue or self.config.jira.default_issue
+        return clean_jira_issue_key(raw) or "SEM_TICKET"
 
     def switch_ticket(
         self,
@@ -74,7 +75,7 @@ class BotEngine:
         self.refresh_state()
 
         old_issue = self.get_active_issue()
-        new_issue = new_issue_key.strip().upper()
+        new_issue = clean_jira_issue_key(new_issue_key) or old_issue
 
         if self.state.status == "RUNNING":
             if self.state.intervals and self.state.intervals[-1].end is None:
