@@ -226,6 +226,32 @@ def build_dashboard_payload() -> Dict[str, Any]:
     }
 
 
+def build_alerts_payload() -> Dict[str, Any]:
+    """Constroi o payload com status do alerta pre-saida hoje e configuracoes de antecedencia."""
+    cfg = BotConfig.load()
+    prof = cfg.get_current_profile()
+    state_mgr = StateManager()
+    state = state_mgr.load_state()
+
+    planned_exit = prof.get_planned_exit_time()
+    warn_min = max(1, min(60, int(getattr(cfg, "exit_warning_minutes", 5))))
+    exit_dt = datetime(2000, 1, 1, planned_exit.hour, planned_exit.minute, 0)
+    trigger_dt = exit_dt - timedelta(minutes=warn_min)
+
+    return {
+        "profile_name": cfg.active_profile,
+        "profile_desc": prof.description,
+        "planned_exit_hm": planned_exit.strftime("%H:%M"),
+        "trigger_time_hm": trigger_dt.strftime("%H:%M"),
+        "warning_minutes": warn_min,
+        "warning_enabled": bool(getattr(cfg, "exit_warning_enabled", True)),
+        "warning_popup": bool(getattr(cfg, "exit_warning_popup", True)),
+        "notifications_enabled": bool(cfg.notifications_enabled),
+        "fired_today": bool(state.prompted_exit_review),
+        "state_status": state.status,
+    }
+
+
 def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dict[str, Any]:
     """
     Constroi a Visualizacao Semanal completa (Segunda a Domingo) com base na data ou semana escolhida,
@@ -572,6 +598,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <button class="nav-btn" data-tab="tab-profiles" title="Perfis de Turno e Janelas" onclick="switchTab('tab-profiles', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       <span class="nav-label">Perfis de Turno e Janelas</span>
+    </button>
+    <button class="nav-btn" data-tab="tab-alerts" title="Avisos e Notificações" onclick="switchTab('tab-alerts', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      <span class="nav-label">Avisos e Notificações</span>
     </button>
     <button class="nav-btn" data-tab="tab-reports" title="Relatórios e Banco de Horas" onclick="switchTab('tab-reports', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -1441,6 +1471,99 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
     </section>
 
+    <!-- ==================== TAB: AVISOS E NOTIFICACOES DE EXPEDIENTE ==================== -->
+    <section id="tab-alerts" class="tab-pane">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Avisos e Notificações de Encerramento de Turno</div>
+            <div class="section-hint">Configure a antecedência e o comportamento do alerta automático de fim de expediente.</div>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-outline btn-sm" onclick="testExitAlert()">Testar Alerta Agora</button>
+            <button class="btn btn-primary btn-sm" onclick="saveAlertConfig()">Salvar Configurações</button>
+          </div>
+        </div>
+
+        <div class="grid-4" style="margin-bottom: 20px;">
+          <div class="stat-card">
+            <div class="stat-label">Perfil Ativo</div>
+            <div class="stat-value" style="font-size: 18px;" id="alert-profile-name">-</div>
+            <div class="stat-sub" id="alert-profile-desc">Turno configurado</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Horário Planejado de Saída</div>
+            <div class="stat-value" id="alert-planned-exit">-</div>
+            <div class="stat-sub" id="alert-planned-exit-sub">Base calculada do turno</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Disparo do Alerta Programado</div>
+            <div class="stat-value" id="alert-trigger-time">-</div>
+            <div class="stat-sub" id="alert-trigger-time-sub">Antecedência configurada</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Status do Alerta Hoje</div>
+            <div class="stat-value" style="font-size: 16px;" id="alert-today-status">-</div>
+            <div class="stat-sub" id="alert-today-status-sub">Disparo no expediente atual</div>
+          </div>
+        </div>
+
+        <div class="schedule-box" style="margin-bottom: 20px;">
+          <div class="card-title" style="margin-bottom: 14px;">Configuração do Tempo de Antecedência</div>
+
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; font-weight: 600;">
+              <input type="checkbox" id="cfg-alert-enabled" onchange="onAlertEnabledChange()">
+              Ativar aviso pré-encerramento do expediente
+            </label>
+            <span class="section-hint" style="margin-left: 24px;">Quando desativado, o JiraBot não emitirá som, notificação ou janela popup antes de encerrar o expediente.</span>
+          </div>
+
+          <div id="alert-settings-controls">
+            <div class="form-group" style="margin-bottom: 18px;">
+              <label for="cfg-alert-minutes" style="font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px; display: block;">
+                Minutos de Antecedência do Aviso (antes da saída):
+              </label>
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <input type="number" id="cfg-alert-minutes" class="form-control" min="1" max="60" value="5" style="width: 100px;" oninput="onAlertMinutesInput()">
+                <span style="font-size: 13px; color: var(--text-muted);">minutos antes da saída</span>
+                <div class="seg" role="group" aria-label="Atalhos de minutos de aviso">
+                  <button type="button" class="seg-btn" onclick="setAlertMinutesQuick(3)">3 min</button>
+                  <button type="button" class="seg-btn" onclick="setAlertMinutesQuick(5)">5 min</button>
+                  <button type="button" class="seg-btn" onclick="setAlertMinutesQuick(10)">10 min</button>
+                  <button type="button" class="seg-btn" onclick="setAlertMinutesQuick(15)">15 min</button>
+                  <button type="button" class="seg-btn" onclick="setAlertMinutesQuick(20)">20 min</button>
+                  <button type="button" class="seg-btn" onclick="setAlertMinutesQuick(30)">30 min</button>
+                </div>
+              </div>
+              <span class="section-hint" id="alert-calculation-hint" style="margin-top: 6px; display: block;"></span>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 8px;">
+              <label style="font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px; display: block;">
+                Modos de Exibição do Alerta:
+              </label>
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+                  <input type="checkbox" id="cfg-alert-popup">
+                  Exibir janela interativa (Popup) em primeiro plano para revisar e editar as descrições dos tickets do dia
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+                  <input type="checkbox" id="cfg-alert-toast">
+                  Exibir notificação nativa do Windows (toast na bandeja do sistema)
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <button class="btn btn-outline" onclick="testExitAlert()">Testar Alerta na Minha Tela Agora</button>
+          <button class="btn btn-primary" onclick="saveAlertConfig()">Salvar Configurações de Avisos</button>
+        </div>
+      </div>
+    </section>
+
     <!-- ==================== TAB 7: CONFIGURACOES, ISOLAMENTO MULTI-USUARIO E ATUALIZACAO ==================== -->
     <section id="tab-settings" class="tab-pane">
       <!-- Card de Atualizacao em 1 Clique e Isolamento de Configuracoes Individuais -->
@@ -1866,6 +1989,7 @@ function switchTab(tabId, btnEl) {
   const titles = {
     'tab-dashboard': 'Painel do Dia e Controle de Expediente',
     'tab-analytics': 'Dashboard Analítico (Tickets, Tipos e Evolução)',
+    'tab-alerts': 'Avisos e Notificações de Expediente',
     'tab-weekly': 'Visualização Semanal (Calendário e Status)',
     'tab-worklogs': 'Lançamentos do Jira (Worklogs e Multi-Seleção)',
     'tab-batch': 'Lançamentos em Lote (Múltiplos Dias e Semanas)',
@@ -1879,6 +2003,8 @@ function switchTab(tabId, btnEl) {
     const refInput = document.getElementById('weekly-ref-date');
     if (!refInput.value) refInput.value = new Date().toISOString().slice(0, 10);
     loadWeeklyView(refInput.value);
+  } else if (tabId === 'tab-alerts') {
+    loadAlertsData();
   } else if (tabId === 'tab-worklogs' && loadedWorklogs.length === 0) {
     loadJiraWorklogs();
   } else if (tabId === 'tab-batch') {
@@ -3836,6 +3962,164 @@ async function loadReport(days = 7) {
   }
 }
 
+/* ==================== AVISOS E NOTIFICACOES DE EXPEDIENTE ==================== */
+let alertsState = null;
+
+async function loadAlertsData() {
+  try {
+    const data = await apiCall('/api/alerts/status');
+    alertsState = data;
+    renderAlertsData(data);
+  } catch (err) {
+    showToast('Erro ao carregar dados de avisos: ' + err.message, 'error');
+  }
+}
+
+function renderAlertsData(data) {
+  if (!data) return;
+  const pName = document.getElementById('alert-profile-name');
+  if (pName) pName.textContent = data.profile_name || '-';
+  const pDesc = document.getElementById('alert-profile-desc');
+  if (pDesc) pDesc.textContent = data.profile_desc || 'Turno configurado';
+  const pExit = document.getElementById('alert-planned-exit');
+  if (pExit) pExit.textContent = data.planned_exit_hm || '-';
+  const pExitSub = document.getElementById('alert-planned-exit-sub');
+  if (pExitSub) pExitSub.textContent = `Saída nominal do perfil ${data.profile_name}`;
+  const pTrig = document.getElementById('alert-trigger-time');
+  if (pTrig) pTrig.textContent = data.trigger_time_hm || '-';
+  const pTrigSub = document.getElementById('alert-trigger-time-sub');
+  if (pTrigSub) pTrigSub.textContent = `${data.warning_minutes} min antes de ${data.planned_exit_hm}`;
+
+  const stEl = document.getElementById('alert-today-status');
+  const stSub = document.getElementById('alert-today-status-sub');
+  if (stEl && stSub) {
+    if (!data.warning_enabled) {
+      stEl.textContent = 'Desativado';
+      stEl.style.color = 'var(--text-muted)';
+      stSub.textContent = 'Avisos desligados na configuração';
+    } else if (data.fired_today) {
+      stEl.textContent = 'Já Disparado Hoje';
+      stEl.style.color = 'var(--accent)';
+      stSub.textContent = `Aviso acionado próximo a ${data.trigger_time_hm}`;
+    } else {
+      stEl.textContent = 'Aguardando Turno';
+      stEl.style.color = 'var(--success)';
+      stSub.textContent = `Disparará em torno de ${data.trigger_time_hm}`;
+    }
+  }
+
+  const enabledChk = document.getElementById('cfg-alert-enabled');
+  if (enabledChk) enabledChk.checked = Boolean(data.warning_enabled);
+  const minInp = document.getElementById('cfg-alert-minutes');
+  if (minInp) minInp.value = data.warning_minutes || 5;
+  const popChk = document.getElementById('cfg-alert-popup');
+  if (popChk) popChk.checked = Boolean(data.warning_popup);
+  const toastChk = document.getElementById('cfg-alert-toast');
+  if (toastChk) toastChk.checked = Boolean(data.notifications_enabled);
+
+  onAlertEnabledChange();
+  updateAlertCalculationHint();
+  highlightQuickMinuteButton(data.warning_minutes);
+}
+
+function onAlertEnabledChange() {
+  const enabledChk = document.getElementById('cfg-alert-enabled');
+  const enabled = enabledChk ? enabledChk.checked : true;
+  const ctrls = document.getElementById('alert-settings-controls');
+  if (ctrls) {
+    ctrls.style.opacity = enabled ? '1' : '0.45';
+    ctrls.style.pointerEvents = enabled ? 'auto' : 'none';
+  }
+}
+
+function highlightQuickMinuteButton(mins) {
+  const segs = document.querySelectorAll('#tab-alerts .seg-btn');
+  segs.forEach(btn => {
+    const val = parseInt(btn.textContent, 10);
+    if (val === parseInt(mins, 10)) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+}
+
+function setAlertMinutesQuick(mins) {
+  const minInp = document.getElementById('cfg-alert-minutes');
+  if (minInp) minInp.value = mins;
+  highlightQuickMinuteButton(mins);
+  updateAlertCalculationHint();
+}
+
+function onAlertMinutesInput() {
+  const minInp = document.getElementById('cfg-alert-minutes');
+  const minVal = parseInt(minInp ? minInp.value : '5', 10);
+  highlightQuickMinuteButton(minVal);
+  updateAlertCalculationHint();
+}
+
+function updateAlertCalculationHint() {
+  const hintEl = document.getElementById('alert-calculation-hint');
+  if (!hintEl) return;
+  const minInp = document.getElementById('cfg-alert-minutes');
+  const mins = parseInt(minInp ? minInp.value : '5', 10);
+  const plannedHm = alertsState ? alertsState.planned_exit_hm : (document.getElementById('alert-planned-exit').textContent || '15:15');
+  const planMinutes = hmToMinutes(plannedHm);
+  if (planMinutes !== null && !isNaN(mins)) {
+    const triggerMin = (planMinutes - mins + 1440) % 1440;
+    const triggerHm = minutesToHM(triggerMin);
+    hintEl.innerHTML = `Com saída planejada às <strong>${plannedHm}</strong>, o aviso disparará às <strong>${triggerHm}</strong> (${mins} minutos antes).`;
+    const trigVal = document.getElementById('alert-trigger-time');
+    if (trigVal) trigVal.textContent = triggerHm;
+  } else {
+    hintEl.textContent = '';
+  }
+}
+
+async function saveAlertConfig() {
+  const enabledChk = document.getElementById('cfg-alert-enabled');
+  const enabled = enabledChk ? enabledChk.checked : true;
+  const minInp = document.getElementById('cfg-alert-minutes');
+  const minutes = parseInt(minInp ? minInp.value : '5', 10);
+  const popChk = document.getElementById('cfg-alert-popup');
+  const popup = popChk ? popChk.checked : true;
+  const toastChk = document.getElementById('cfg-alert-toast');
+  const toast = toastChk ? toastChk.checked : true;
+
+  if (isNaN(minutes) || minutes < 1 || minutes > 60) {
+    showToast('Informe uma antecedência entre 1 e 60 minutos.', 'error');
+    return;
+  }
+
+  try {
+    const res = await apiCall('/api/alerts/config', 'POST', {
+      exit_warning_enabled: enabled,
+      exit_warning_minutes: minutes,
+      exit_warning_popup: popup,
+      notifications_enabled: toast
+    });
+    showToast(res.message || 'Configurações de avisos gravadas com sucesso!', 'success');
+    if (res.data) {
+      alertsState = res.data;
+      renderAlertsData(res.data);
+    } else {
+      await loadAlertsData();
+    }
+  } catch (err) {
+    showToast('Erro ao salvar avisos: ' + err.message, 'error');
+  }
+}
+
+async function testExitAlert() {
+  try {
+    showToast('Disparando janela de aviso pré-saída na sua tela...', 'info');
+    const res = await apiCall('/api/alerts/test', 'POST', {});
+    showToast(res.message || 'Janela de aviso disparada!', 'success');
+  } catch (err) {
+    showToast('Erro ao disparar aviso de teste: ' + err.message, 'error');
+  }
+}
+
 async function refreshAll() {
   await loadDashboard(true);
   if (document.getElementById('tab-weekly').classList.contains('active')) {
@@ -3950,6 +4234,10 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
             if path == "/api/status":
                 self._send_json(build_dashboard_payload())
+                return
+
+            if path == "/api/alerts/status":
+                self._send_json(build_alerts_payload())
                 return
 
             if path == "/api/config":
@@ -4082,7 +4370,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     st = engine.handle_unlock()
                     self._send_json({"success": True, "message": f"Evento UNLOCK processado. Novo estado: {st.status}."})
                 elif action == "test_popup":
-                    show_pre_exit_popup(state_mgr)
+                    show_pre_exit_popup(state_mgr, force=True)
                     self._send_json({"success": True, "message": "Janela gráfica de revisão pré-saída disparada."})
                 elif action == "flush_queue":
                     client = JiraClient(cfg.jira, state_mgr)
@@ -4642,6 +4930,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         cfg.notifications_enabled = bool(body["notifications_enabled"])
                     if "auto_log_on_exit" in body:
                         cfg.auto_log_on_exit = bool(body["auto_log_on_exit"])
+                    if "exit_warning_enabled" in body:
+                        cfg.exit_warning_enabled = bool(body["exit_warning_enabled"])
+                    if "exit_warning_minutes" in body:
+                        cfg.exit_warning_minutes = max(1, min(60, int(body["exit_warning_minutes"])))
+                    if "exit_warning_popup" in body:
+                        cfg.exit_warning_popup = bool(body["exit_warning_popup"])
                     if "update_source" in body:
                         cfg.update_source = body["update_source"].strip()
                     if "auto_update_on_start" in body:
@@ -4655,6 +4949,30 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
                     self._send_json({"success": True, "message": "Configurações gravadas com sucesso!"})
                     return
+
+            if path == "/api/alerts/test":
+                state_mgr = StateManager()
+                show_pre_exit_popup(state_mgr, force=True)
+                self._send_json({"success": True, "message": "Janela gráfica de aviso pré-saída disparada com sucesso."})
+                return
+
+            if path == "/api/alerts/config":
+                cfg = BotConfig.load()
+                if "exit_warning_enabled" in body:
+                    cfg.exit_warning_enabled = bool(body["exit_warning_enabled"])
+                if "exit_warning_minutes" in body:
+                    cfg.exit_warning_minutes = max(1, min(60, int(body["exit_warning_minutes"])))
+                if "exit_warning_popup" in body:
+                    cfg.exit_warning_popup = bool(body["exit_warning_popup"])
+                if "notifications_enabled" in body:
+                    cfg.notifications_enabled = bool(body["notifications_enabled"])
+                cfg.save()
+                self._send_json({
+                    "success": True,
+                    "message": "Configurações de avisos de expediente gravadas com sucesso!",
+                    "data": build_alerts_payload(),
+                })
+                return
 
             if path == "/api/test-jira":
                 cfg = BotConfig.load()

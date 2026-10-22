@@ -108,6 +108,33 @@ class ShiftProfile:
     description: str = ""
     calculator: Dict[str, Any] = field(default_factory=dict)
 
+    def get_planned_exit_time(self) -> time:
+        """Retorna o horario nominal planejado de saida do expediente."""
+        if self.calculator and "exit_hm" in self.calculator:
+            try:
+                parts = str(self.calculator["exit_hm"]).strip().split(":")
+                return time(int(parts[0]), int(parts[1]), 0)
+            except Exception:
+                pass
+
+        # Para perfis padrao pre-configurados conhecidos
+        if self.name == "8h":
+            return time(17, 42, 0)
+        elif self.name == "6h_0745":
+            return time(15, 15, 0)
+        elif self.name == "6h_0800":
+            return time(15, 30, 0)
+
+        # Fallback: centro da janela de saida
+        st = self.exit_window.start_time
+        et = self.exit_window.end_time
+        st_sec = st.hour * 3600 + st.minute * 60
+        et_sec = et.hour * 3600 + et.minute * 60
+        if et_sec < st_sec:
+            et_sec += 86400
+        mid_sec = ((st_sec + et_sec) // 2) % 86400
+        return time(mid_sec // 3600, (mid_sec % 3600) // 60, 0)
+
     def to_dict(self) -> Dict[str, Any]:
         data = {
             "name": self.name,
@@ -271,6 +298,9 @@ class BotConfig:
     theme: str = "dark"
     update_source: str = ""
     auto_update_on_start: bool = False
+    exit_warning_enabled: bool = True
+    exit_warning_minutes: int = 5
+    exit_warning_popup: bool = True
 
     def get_current_profile(self) -> ShiftProfile:
         return self.profiles.get(self.active_profile, self.profiles["6h_0745"])
@@ -287,6 +317,9 @@ class BotConfig:
             "theme": self.theme,
             "update_source": self.update_source,
             "auto_update_on_start": self.auto_update_on_start,
+            "exit_warning_enabled": self.exit_warning_enabled,
+            "exit_warning_minutes": self.exit_warning_minutes,
+            "exit_warning_popup": self.exit_warning_popup,
         }
 
     @classmethod
@@ -315,6 +348,9 @@ class BotConfig:
             theme=data.get("theme", "dark"),
             update_source=data.get("update_source", ""),
             auto_update_on_start=bool(data.get("auto_update_on_start", False)),
+            exit_warning_enabled=bool(data.get("exit_warning_enabled", True)),
+            exit_warning_minutes=max(1, min(60, int(data.get("exit_warning_minutes", 5)))),
+            exit_warning_popup=bool(data.get("exit_warning_popup", True)),
         )
 
     def save(self, filepath: Optional[Path] = None) -> None:

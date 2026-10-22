@@ -297,12 +297,16 @@ def start_background() -> int:
     cmd = [executable, str(script_path), "run-daemon"]
 
     flags = 0
+    startupinfo = None
     if sys.platform == "win32":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.lpDesktop = r"WinSta0\Default"
 
     proc = subprocess.Popen(
         cmd,
         creationflags=flags,
+        startupinfo=startupinfo,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,

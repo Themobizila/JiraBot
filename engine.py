@@ -329,24 +329,32 @@ class BotEngine:
     def check_scheduled_transitions(self, now: Optional[datetime] = None) -> DailyState:
         """
         Verificacao periodica executada pelo daemon:
-        1. Alerta de revisao de descricao 5 minutos antes do horario de saida.
+        1. Alerta de revisao de descricao configuravel antes do horario nominal de saida.
         """
         now = now or datetime.now()
         self.refresh_state()
+
+        if not getattr(self.config, "exit_warning_enabled", True):
+            return self.state
+
         profile = self.get_profile()
 
-        # Janela de alerta 5 minutos antes do fim de expediente
+        # Janela de alerta baseada no horario planejado real de saida e minutos configurados
         try:
             today = now.date()
-            exit_st = profile.exit_window.start_time
-            exit_dt = datetime(today.year, today.month, today.day, exit_st.hour, exit_st.minute, 0)
-            pre_exit_dt = exit_dt - timedelta(minutes=5)
+            planned_exit = profile.get_planned_exit_time()
+            exit_dt = datetime(today.year, today.month, today.day, planned_exit.hour, planned_exit.minute, 0)
+            warn_minutes = max(1, min(60, int(getattr(self.config, "exit_warning_minutes", 5))))
+            pre_exit_dt = exit_dt - timedelta(minutes=warn_minutes)
 
             if self.state.status == "RUNNING" and not self.state.prompted_exit_review:
                 if pre_exit_dt <= now <= (exit_dt + timedelta(minutes=15)):
                     self.state.prompted_exit_review = True
                     self.state_manager.save_state(self.state)
-                    logger.info("Disparando janela de revisao de descricao 5 minutos antes do encerramento.")
+                    logger.info(
+                        f"Disparando alerta de revisao de descricao {warn_minutes} minutos antes "
+                        f"do encerramento planejado ({planned_exit.strftime('%H:%M')})."
+                    )
                     show_pre_exit_popup(self.state_manager)
         except Exception as e:
             logger.error(f"Erro ao avaliar alerta pre-saida: {e}")

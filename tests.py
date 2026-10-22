@@ -662,6 +662,177 @@ class TestAnalyticsAndRedesign(unittest.TestCase):
         self.assertEqual(res["totals"]["worklogs"], 3)
         self.assertEqual(len(res["evolution"]), 82)
 
+    def test_shift_profile_planned_exit_time(self):
+        from config import ShiftProfile, TimeWindow
+        from datetime import time
+
+        # 1. Perfil padrao 6h_0745 com janela de 15:05 a 16:00 -> saida nominal 15:15
+        p_6h = ShiftProfile(
+            name="6h_0745",
+            description="Turno 6h",
+            target_hours=6.0,
+            entry_window=TimeWindow("07:30", "08:15"),
+            lunch_start_window=TimeWindow("11:30", "12:30"),
+            lunch_end_window=TimeWindow("12:00", "13:30"),
+            exit_window=TimeWindow("15:05", "16:00"),
+        )
+        self.assertEqual(p_6h.get_planned_exit_time(), time(15, 15))
+
+        # 2. Perfil 8h padrao -> saida nominal 17:42
+        p_8h = ShiftProfile(
+            name="8h",
+            description="Turno 8h",
+            target_hours=8.0,
+            entry_window=TimeWindow("07:15", "08:15"),
+            lunch_start_window=TimeWindow("11:30", "12:30"),
+            lunch_end_window=TimeWindow("12:55", "13:30"),
+            exit_window=TimeWindow("17:25", "18:30"),
+        )
+        self.assertEqual(p_8h.get_planned_exit_time(), time(17, 42))
+
+        # 3. Perfil personalizado com calculator persistido (ex: 16:45)
+        p_custom = ShiftProfile(
+            name="custom",
+            description="Turno customizado",
+            target_hours=7.0,
+            entry_window=TimeWindow("08:00", "09:00"),
+            lunch_start_window=TimeWindow("12:00", "13:00"),
+            lunch_end_window=TimeWindow("13:00", "14:00"),
+            exit_window=TimeWindow("16:30", "17:15"),
+            calculator={"exit_hm": "16:45"},
+        )
+        self.assertEqual(p_custom.get_planned_exit_time(), time(16, 45))
+
+    def test_bot_config_exit_warning_fields(self):
+        from config import BotConfig
+
+        cfg = BotConfig()
+        # Valores padrao de fabrica
+        self.assertTrue(cfg.exit_warning_enabled)
+        self.assertEqual(cfg.exit_warning_minutes, 5)
+        self.assertTrue(cfg.exit_warning_popup)
+
+        # Serializacao e desserializacao
+        cfg.exit_warning_enabled = False
+        cfg.exit_warning_minutes = 15
+        cfg.exit_warning_popup = False
+        d = cfg.to_dict()
+        self.assertFalse(d["exit_warning_enabled"])
+        self.assertEqual(d["exit_warning_minutes"], 15)
+        self.assertFalse(d["exit_warning_popup"])
+
+        restored = BotConfig.from_dict(d)
+        self.assertFalse(restored.exit_warning_enabled)
+        self.assertEqual(restored.exit_warning_minutes, 15)
+        self.assertFalse(restored.exit_warning_popup)
+
+    def test_web_panel_alerts_payload_and_html(self):
+        from web_panel import build_alerts_payload, HTML_PAGE
+
+        payload = build_alerts_payload()
+        self.assertIn("profile_name", payload)
+        self.assertIn("planned_exit_hm", payload)
+        self.assertIn("trigger_time_hm", payload)
+        self.assertIn("warning_minutes", payload)
+        self.assertIn("warning_enabled", payload)
+        self.assertIn("warning_popup", payload)
+        self.assertIn("fired_today", payload)
+
+        # Confirma que a nova aba e seus controles estao no HTML
+        self.assertIn('id="tab-alerts"', HTML_PAGE)
+        self.assertIn('data-tab="tab-alerts"', HTML_PAGE)
+        self.assertIn('id="cfg-alert-minutes"', HTML_PAGE)
+        self.assertIn('id="cfg-alert-enabled"', HTML_PAGE)
+        self.assertIn('id="cfg-alert-popup"', HTML_PAGE)
+        self.assertIn('id="cfg-alert-toast"', HTML_PAGE)
+        self.assertIn('setAlertMinutesQuick', HTML_PAGE)
+        self.assertIn('testExitAlert', HTML_PAGE)
+        self.assertIn('saveAlertConfig', HTML_PAGE)
+
+    def test_engine_exit_warning_transition_timing(self):
+        from engine import BotEngine
+        from config import BotConfig, ShiftProfile, TimeWindow
+        from storage import StateManager, DailyState
+        from datetime import datetime, date, time
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            today = date.today()
+            mgr = StateManager(base_dir=Path(tmpdir))
+            st = DailyState(date_str=today.isoformat(), status="RUNNING")
+            mgr.save_state(st)
+
+            cfg = BotConfig()
+            cfg.active_profile = "test_6h"
+            cfg.profiles["test_6h"] = ShiftProfile(
+                name="test_6h",
+                description="Turno 6h teste",
+                target_hours=6.0,
+                entry_window=TimeWindow("07:30", "08:15"),
+                lunch_start_window=TimeWindow("11:30", "12:30"),
+                lunch_end_window=TimeWindow("12:00", "13:30"),
+                exit_window=TimeWindow("15:05", "16:00"),
+                calculator={"exit_hm": "15:15"},
+            )
+            cfg.exit_warning_enabled = True
+            cfg.exit_warning_minutes = 5
+
+            fired = []
+            def _dummy_popup(sm, force=False):
+                fired.append(True)
+
+            engine = BotEngine(config=cfg, state_manager=mgr)
+            import engine as engine_mod
+            orig_popup = engine_mod.show_pre_exit_popup
+            engine_mod.show_pre_exit_popup = _dummy_popup
+
+            try:
+                # 1. As 15:05 (antigo horario com bug: exit_window.start_time 15:10 - 5min = 15:05):
+                # Com o calculo corrigido baseado na saida planejada 15:15, as 15:05 NAO deve disparar
+                engine.check_scheduled_transitions(now=datetime.combine(today, time(15, 5, 0)))
+                self.assertEqual(len(fired), 0)
+                self.assertFalse(engine.state.prompted_exit_review)
+
+                # 2. As 15:10 (exatos 5 minutos antes da saida planejada 15:15):
+                # DEVE disparar o aviso
+                engine.check_scheduled_transitions(now=datetime.combine(today, time(15, 10, 0)))
+                self.assertEqual(len(fired), 1)
+                self.assertTrue(engine.state.prompted_exit_review)
+            finally:
+                engine_mod.show_pre_exit_popup = orig_popup
+
+    def test_show_pre_exit_popup_force_flag(self):
+        from review_dialog import show_pre_exit_popup
+        import sys
+        from unittest.mock import patch, MagicMock
+
+        with patch("review_dialog.BotConfig.load") as mock_cfg_load, \
+             patch("review_dialog.send_notification") as mock_notify, \
+             patch("review_dialog.subprocess.Popen") as mock_popen, \
+             patch("review_dialog._bring_existing_popup_to_top", return_value=False):
+
+            mock_cfg = MagicMock()
+            mock_cfg.exit_warning_enabled = False
+            mock_cfg.exit_warning_popup = False
+            mock_cfg.notifications_enabled = False
+            mock_cfg.get_current_profile.return_value.get_planned_exit_time.return_value.strftime.return_value = "15:15"
+            mock_cfg_load.return_value = mock_cfg
+
+            # 1. Sem force (comportamento diario normal): nao dispara subprocess nem popup
+            show_pre_exit_popup(force=False)
+            mock_popen.assert_not_called()
+
+            # 2. Com force=True (disparo de teste explicito do usuario): dispara o subprocesso e o desktop WinSta0\Default
+            show_pre_exit_popup(force=True)
+            mock_popen.assert_called_once()
+            call_kwargs = mock_popen.call_args.kwargs
+            self.assertIn("startupinfo", call_kwargs)
+            si = call_kwargs["startupinfo"]
+            if sys.platform == "win32":
+                self.assertIsNotNone(si)
+                self.assertEqual(si.lpDesktop, r"WinSta0\Default")
+
 
 if __name__ == "__main__":
     unittest.main()

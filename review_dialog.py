@@ -18,6 +18,42 @@ from storage import DailyState, StateManager
 logger = logging.getLogger("JiraBot.ReviewDialog")
 
 
+def _attach_to_interactive_desktop() -> None:
+    """Garante que a thread GUI esteja ancorada no desktop interativo do usuario (WinSta0\\Default)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwinsta = user32.OpenWindowStationW("WinSta0", False, 0x01FF)
+        if hwinsta:
+            user32.SetProcessWindowStation(hwinsta)
+        hdesk = user32.OpenDesktopW("Default", 0, False, 0x01FF)
+        if hdesk:
+            user32.SetThreadDesktop(hdesk)
+    except Exception as e:
+        logger.warning(f"Nao foi possivel ancorar ao desktop interativo Default: {e}")
+
+
+def _bring_existing_popup_to_top() -> bool:
+    """Se uma janela de revisao pre-saida ja estiver aberta, restaura e traz para o primeiro plano."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, "JiraBot - Revisao de Expediente")
+        if hwnd and user32.IsWindow(hwnd):
+            user32.AllowSetForegroundWindow(-1)
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+            user32.BringWindowToTop(hwnd)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def format_seconds(sec: int) -> str:
     h = sec // 3600
     m = (sec % 3600) // 60
@@ -142,6 +178,8 @@ def run_popup_gui(state_manager: Optional[StateManager] = None) -> None:
     Apresenta uma janela moderna com titulo, ticket ativo, campo editavel para descricao
     e botoes de acao direta: Salvar, Manter Atual e Enviar sem Descricao.
     """
+    _attach_to_interactive_desktop()
+
     try:
         import tkinter as tk
     except ImportError:
@@ -150,12 +188,20 @@ def run_popup_gui(state_manager: Optional[StateManager] = None) -> None:
 
     mgr = state_manager or StateManager()
     cfg = BotConfig.load()
-    client = JiraClient(cfg.jira)
 
     state = mgr.load_state()
     active_issue = (state.target_issue or cfg.jira.default_issue or "SEM_TICKET").strip().upper()
     current_desc = state.get_issue_comment(active_issue)
-    fallback_desc = get_fallback_description(active_issue, client)
+
+    # Nao bloqueia a abertura da janela com chamadas lentas de rede caso ja exista descricao
+    fallback_desc = ""
+    if not current_desc and not state.no_comment:
+        try:
+            client = JiraClient(cfg.jira)
+            fallback_desc = get_fallback_description(active_issue, client)
+        except Exception:
+            fallback_desc = f"Atividades em {active_issue}"
+
     worked_seconds = state.get_total_seconds()
     worked_str = format_seconds(worked_seconds)
 
@@ -184,20 +230,29 @@ def run_popup_gui(state_manager: Optional[StateManager] = None) -> None:
     root.lift()
     root.focus_force()
 
-    # Forca primeiro plano via API Win32
+    # Forca primeiro plano via API Win32 no HWND top-level real
     try:
         import ctypes
-        hwnd = root.winfo_id()
-        ctypes.windll.user32.SetForegroundWindow(hwnd)
-        ctypes.windll.user32.BringWindowToTop(hwnd)
+        user32 = ctypes.windll.user32
+        root.update_idletasks()
+        frame_str = root.wm_frame()
+        hwnd = int(frame_str, 16) if frame_str else root.winfo_id()
+        user32.AllowSetForegroundWindow(-1)
+        user32.ShowWindow(hwnd, 5)  # SW_SHOW
+        user32.SetForegroundWindow(hwnd)
+        user32.BringWindowToTop(hwnd)
     except Exception:
         pass
 
-    # Sinal sonoro
+    # Sinal sonoro nativo do Windows
     try:
-        root.bell()
+        import winsound
+        winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
     except Exception:
-        pass
+        try:
+            root.bell()
+        except Exception:
+            pass
 
     # Header Frame
     header_frame = tk.Frame(root, bg=bg_color, padx=20, pady=15)
@@ -212,9 +267,11 @@ def run_popup_gui(state_manager: Optional[StateManager] = None) -> None:
     )
     lbl_title.pack(anchor="w")
 
+    warn_min = getattr(cfg, "exit_warning_minutes", 5)
+    exit_time_str = cfg.get_current_profile().get_planned_exit_time().strftime("%H:%M")
     lbl_sub = tk.Label(
         header_frame,
-        text="Faltam aproximadamente 5 minutos para a janela de encerramento do seu turno.",
+        text=f"Faltam aproximadamente {warn_min} minuto(s) para o encerramento do seu turno ({exit_time_str}).",
         font=("Segoe UI", 9),
         fg=subtext_color,
         bg=bg_color,
@@ -332,36 +389,54 @@ def run_popup_gui(state_manager: Optional[StateManager] = None) -> None:
     root.mainloop()
 
 
-def show_pre_exit_popup(state_manager: Optional[StateManager] = None) -> None:
+def show_pre_exit_popup(state_manager: Optional[StateManager] = None, force: bool = False) -> None:
     """
     Dispara o popup grafico pre-saida em um processo GUI independente,
     garantindo execucao na thread principal e foco forcado no Windows 11.
     """
     try:
         cfg = BotConfig.load()
+        if not force and not getattr(cfg, "exit_warning_enabled", True):
+            return
+
+        warn_min = getattr(cfg, "exit_warning_minutes", 5)
+        exit_time_str = cfg.get_current_profile().get_planned_exit_time().strftime("%H:%M")
+
         send_notification(
             "JiraBot - Revisao de Expediente",
-            "Faltam 5 minutos para o encerramento. Revise a descricao na janela aberta.",
+            f"Faltam {warn_min} minuto(s) para o encerramento do turno ({exit_time_str}). Revise a descricao na janela aberta.",
             cfg.notifications_enabled,
         )
 
-        python_exe = sys.executable
-        pythonw = Path(python_exe).parent / "pythonw.exe"
-        exe = str(pythonw) if pythonw.exists() else python_exe
-        script = Path(__file__).resolve()
+        if force or getattr(cfg, "exit_warning_popup", True):
+            if _bring_existing_popup_to_top():
+                logger.info("Janela existente de popup pre-saida trazida para o primeiro plano.")
+                return
 
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            python_exe = sys.executable
+            pythonw = Path(python_exe).parent / "pythonw.exe"
+            exe = str(pythonw) if pythonw.exists() else python_exe
+            script = Path(__file__).resolve()
 
-        subprocess.Popen(
-            [exe, str(script), "popup"],
-            creationflags=creationflags,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-        )
-        logger.info("Processo GUI do popup pre-saida disparado com sucesso.")
+            creationflags = 0
+            startupinfo = None
+            if sys.platform == "win32":
+                creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.lpDesktop = r"WinSta0\Default"
+
+            err_log_path = Path.home() / ".jirabot" / "popup_err.log"
+            err_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(err_log_path, "a", encoding="utf-8") as err_file:
+                subprocess.Popen(
+                    [exe, str(script), "popup"],
+                    creationflags=creationflags,
+                    startupinfo=startupinfo,
+                    stdout=err_file,
+                    stderr=err_file,
+                    stdin=subprocess.DEVNULL,
+                )
+            logger.info("Processo GUI do popup pre-saida disparado com sucesso.")
     except Exception as e:
         logger.error(f"Erro ao disparar processo do popup pre-saida: {e}")
 
@@ -462,6 +537,11 @@ def prompt_history_worklogs_cli(default_days: int = 14) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "popup":
+        try:
+            from daemon import setup_logging
+            setup_logging(log_to_file=True)
+        except Exception:
+            pass
         run_popup_gui()
     else:
         prompt_review_cli()
