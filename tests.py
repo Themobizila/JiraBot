@@ -938,9 +938,6 @@ class TestThemeSelectorAndSeasonalThemes(unittest.TestCase):
         self.assertIn('[data-theme="pascoa"]', THEME_CSS)
         self.assertIn('.theme-dropdown-wrap', THEME_CSS)
         self.assertIn('.theme-menu', THEME_CSS)
-        # Protecao para exibicao do menu de temas com efeitos pausados
-        self.assertIn('html.fx-paused .theme-menu', THEME_CSS)
-        self.assertIn('html:not(.fx-paused) .theme-dropdown-wrap.open .theme-menu', THEME_CSS)
 
     def test_thematic_logos_and_lofi_scenes(self):
         from web_assets import (
@@ -987,6 +984,52 @@ class TestThemeSelectorAndSeasonalThemes(unittest.TestCase):
         self.assertNotIn('__THEME_BADGES__', HTML_PAGE)
         self.assertIn('.brand-theme-badge', THEME_CSS)
         self.assertIn('display: none !important', THEME_CSS)
+
+        # Reprodutor de musica Lofi integrado aos temas com audio oficial Lofi Girl e YouTube
+        self.assertIn('lofi-player', LOFI_SCENES_HTML)
+        self.assertIn('lofi-track-title', LOFI_SCENES_HTML)
+        self.assertIn('lofi-btn-play', LOFI_SCENES_HTML)
+        self.assertIn('lofi-slider', LOFI_SCENES_HTML)
+        self.assertIn('lofi-pill-vinyl', LOFI_SCENES_HTML)
+        self.assertIn('lofi-pill-rain', LOFI_SCENES_HTML)
+        self.assertIn('lofi-pill-fire', LOFI_SCENES_HTML)
+        # Nomes limpos sem o sufixo "Real"
+        self.assertIn('>Vinil</button>', LOFI_SCENES_HTML)
+        self.assertIn('>Chuva</button>', LOFI_SCENES_HTML)
+        self.assertIn('>Lareira</button>', LOFI_SCENES_HTML)
+        self.assertNotIn('Chuva Real', LOFI_SCENES_HTML)
+        self.assertNotIn('Lareira Real', LOFI_SCENES_HTML)
+        self.assertIn('yt-player-music', LOFI_SCENES_HTML)
+        self.assertIn('yt-player-vinyl', LOFI_SCENES_HTML)
+        self.assertIn('yt-player-rain', LOFI_SCENES_HTML)
+        self.assertIn('yt-player-fire', LOFI_SCENES_HTML)
+        self.assertIn('.lofi-player', THEME_CSS)
+        self.assertIn('.lofi-eq-bar', THEME_CSS)
+        self.assertIn('.yt-audio-host', THEME_CSS)
+
+        # Botao Lofi Girl posicionado no rodape lateral oposto ao perfil/status com avatar oficial
+        self.assertIn('lofi-footer-btn', HTML_PAGE)
+        self.assertIn('lofi-footer-link', HTML_PAGE)
+        self.assertIn('lofi-footer-avatar', HTML_PAGE)
+        self.assertIn('.lofi-footer-btn', THEME_CSS)
+        self.assertIn('.lofi-footer-avatar', THEME_CSS)
+        self.assertIn('.sidebar-footer-left', THEME_CSS)
+
+        # Protecao do dropdown de temas com efeitos pausados
+        self.assertIn('html.fx-paused .theme-menu', THEME_CSS)
+        self.assertIn('visibility: visible !important', THEME_CSS)
+
+        from web_assets import UI_FX_JS
+        self.assertIn('LofiAudioEngine', UI_FX_JS)
+        self.assertIn('initVinyl', UI_FX_JS)
+        self.assertIn('syncVinyl', UI_FX_JS)
+        self.assertIn('Lofi Girl', UI_FX_JS)
+        self.assertIn('NIP3fNueJMA', UI_FX_JS)
+        self.assertIn('UgHKb_7884o', UI_FX_JS)
+        self.assertIn('V6V080RVeAE', UI_FX_JS)
+        self.assertIn('XSXEaikz0Bc', UI_FX_JS)
+        self.assertIn('0sfDth4lMLc', UI_FX_JS)
+        self.assertIn('window.LofiPlayer', UI_FX_JS)
 
 
 if __name__ == "__main__":

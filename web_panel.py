@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -37,6 +38,7 @@ from web_assets import (
     ANALYTICS_JS,
     BRAND_TITLE_ICONS_HTML,
     EARLY_JS,
+    LOFI_GIRL_AVATAR_DATA_URI,
     LOFI_SCENES_HTML,
     LOGO_SVG,
     THEME_BADGES_HTML,
@@ -682,11 +684,16 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </div>
 
   <div class="sidebar-footer">
-    <div class="daemon-pill">
-      <span id="sidebar-dot" class="dot"></span>
-      <span id="sidebar-daemon-text" class="footer-text">Verificando serviço...</span>
+    <div class="sidebar-footer-left">
+      <div class="daemon-pill">
+        <span id="sidebar-dot" class="dot"></span>
+        <span id="sidebar-daemon-text" class="footer-text">Verificando serviço...</span>
+      </div>
+      <div id="sidebar-profile-text" class="footer-text">Perfil: -</div>
     </div>
-    <div id="sidebar-profile-text" class="footer-text">Perfil: -</div>
+    <a href="https://www.youtube.com/@LofiGirl" target="_blank" rel="noopener noreferrer" class="lofi-footer-btn lofi-footer-icon-btn" id="lofi-footer-link" title="Canal Oficial Lofi Girl no YouTube">
+      <img src="__LOFI_GIRL_AVATAR__" alt="Lofi Girl" class="lofi-footer-avatar" width="28" height="28" />
+    </a>
   </div>
 </aside>
 
@@ -2137,6 +2144,11 @@ function applyThemePreference(pref) {
   const cfgSelect = document.getElementById('cfg-theme-selector');
   if (cfgSelect && cfgSelect.value !== cleanPref) {
     cfgSelect.value = cleanPref;
+  }
+
+  // Sincroniza o reprodutor Lofi com o tema ativo
+  if (window.LofiPlayer && typeof window.LofiPlayer.onThemeChanged === 'function') {
+    window.LofiPlayer.onThemeChanged(effectiveTheme);
   }
 }
 
@@ -4416,6 +4428,7 @@ HTML_PAGE = (
     .replace("__BRAND_TITLE_ICONS__", BRAND_TITLE_ICONS_HTML)
     .replace("__LOFI_SCENES__", LOFI_SCENES_HTML)
     .replace("__THEME_BADGES__", "")
+    .replace("__LOFI_GIRL_AVATAR__", LOFI_GIRL_AVATAR_DATA_URI)
 )
 
 
@@ -4484,6 +4497,21 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
             if path in ["/favicon.svg", "/favicon.ico", "/logo.svg"]:
                 self._send_svg(LOGO_SVG)
                 return
+
+            if path in ["/assets/lofigirl.png", "/lofigirl-avatar.png"]:
+                try:
+                    img_path = os.path.join(os.path.dirname(__file__), "assets", "lofigirl.png")
+                    with open(img_path, "rb") as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                except Exception:
+                    pass
 
             if path == "/api/analytics":
                 start = (query.get("start", query.get("start_date", [""]))[0] or "").strip()

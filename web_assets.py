@@ -7,6 +7,17 @@ e permitindo que o atualizador (que copia apenas .py/.bat/.ico/.png) distribua o
 
 from __future__ import annotations
 
+import base64
+import os
+
+# Carrega avatar oficial da Lofi Girl em base64 data URI para renderizacao instantanea sem requisicoes extras
+_lofigirl_path = os.path.join(os.path.dirname(__file__), "assets", "lofigirl.png")
+if os.path.exists(_lofigirl_path):
+    with open(_lofigirl_path, "rb") as _f:
+        LOFI_GIRL_AVATAR_DATA_URI = "data:image/png;base64," + base64.b64encode(_f.read()).decode("ascii")
+else:
+    LOFI_GIRL_AVATAR_DATA_URI = "/assets/lofigirl.png"
+
 # ----------------------------------------------------------------------------------------------------------------------
 # LOGOTIPOS TEMATICOS COMPLETOS (VETORIAIS SVG SEM EMOJIS)
 # ----------------------------------------------------------------------------------------------------------------------
@@ -778,6 +789,44 @@ LOFI_SCENES_HTML = (
     </g>
   </svg>
   <div class="lofi-caption">Oficina do Relojoeiro | Foco Suave</div>
+</div>
+<div class="lofi-player" id="lofi-player">
+  <div class="yt-audio-host" aria-hidden="true">
+    <div id="yt-player-music"></div>
+    <div id="yt-player-fire"></div>
+    <div id="yt-player-rain"></div>
+    <div id="yt-player-vinyl"></div>
+  </div>
+  <div class="lofi-player-track">
+    <div class="lofi-eq" id="lofi-eq" aria-hidden="true">
+      <span class="lofi-eq-bar"></span>
+      <span class="lofi-eq-bar"></span>
+      <span class="lofi-eq-bar"></span>
+    </div>
+    <div class="lofi-track-info">
+      <div class="lofi-track-title" id="lofi-track-title">Lofi Girl - Beats to Relax / Study</div>
+      <div class="lofi-track-sub" id="lofi-track-sub">Audio Oficial Lofi Girl (YouTube)</div>
+    </div>
+  </div>
+  <div class="lofi-controls">
+    <button type="button" class="lofi-btn-play" id="lofi-btn-play" onclick="toggleLofiPlay()" title="Tocar / Pausar Musica Lofi">
+      <svg class="lofi-ico-play" viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+      <svg class="lofi-ico-pause" viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+      <span id="lofi-play-label">Ouvir Lofi</span>
+    </button>
+    <div class="lofi-vol-wrap">
+      <button type="button" class="lofi-btn-vol" id="lofi-btn-vol" onclick="toggleLofiMute()" title="Silenciar / Ativar Som">
+        <svg class="lofi-ico-vol" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        <svg class="lofi-ico-mute" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"/><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg>
+      </button>
+      <input type="range" class="lofi-slider" id="lofi-slider" min="0" max="100" value="50" oninput="setLofiVolume(this.value)" title="Volume Geral">
+    </div>
+  </div>
+  <div class="lofi-ambient-row">
+    <button type="button" class="lofi-pill active" id="lofi-pill-vinyl" onclick="toggleLofiAmbient('vinyl')" title="Chiado de vinil vintage (YouTube: NIP3fNueJMA)">Vinil</button>
+    <button type="button" class="lofi-pill" id="lofi-pill-rain" onclick="toggleLofiAmbient('rain')" title="Chuva na janela (YouTube: V6V080RVeAE)">Chuva</button>
+    <button type="button" class="lofi-pill" id="lofi-pill-fire" onclick="toggleLofiAmbient('fire')" title="Lareira estalando (YouTube: UgHKb_7884o)">Lareira</button>
+  </div>
 </div>'''
 )
 
@@ -1470,6 +1519,211 @@ html:not([data-theme]) .lofi-scene.scene-default,
   text-overflow: ellipsis;
 }
 
+/* ==================== REPRODUTOR DE AUDIO LOFI TEMATIZADO ==================== */
+.lofi-player {
+  background: rgba(14, 10, 6, 0.94);
+  border-top: 1px solid rgba(200, 170, 110, 0.22);
+  padding: 8px 10px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  user-select: none;
+}
+
+.lofi-player-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lofi-eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.lofi-eq-bar {
+  width: 3px;
+  height: 4px;
+  background: var(--gold-bright, #c9a050);
+  border-radius: 1px;
+  transition: height 0.15s ease;
+}
+
+.lofi-player.is-playing .lofi-eq-bar:nth-child(1) {
+  animation: lofiEqPulse1 0.75s ease-in-out infinite alternate;
+}
+.lofi-player.is-playing .lofi-eq-bar:nth-child(2) {
+  animation: lofiEqPulse2 0.6s ease-in-out infinite alternate 0.2s;
+}
+.lofi-player.is-playing .lofi-eq-bar:nth-child(3) {
+  animation: lofiEqPulse3 0.85s ease-in-out infinite alternate 0.4s;
+}
+
+@keyframes lofiEqPulse1 { from { height: 3px; } to { height: 13px; } }
+@keyframes lofiEqPulse2 { from { height: 5px; } to { height: 11px; } }
+@keyframes lofiEqPulse3 { from { height: 4px; } to { height: 14px; } }
+
+html.fx-paused .lofi-player.is-playing .lofi-eq-bar {
+  animation: none !important;
+  height: 9px !important;
+}
+
+.lofi-track-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.lofi-track-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #fff4d1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+}
+
+.lofi-track-sub {
+  font-size: 10px;
+  color: #c2b088;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.lofi-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.lofi-btn-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, rgba(200, 160, 60, 0.25), rgba(120, 90, 30, 0.35));
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  border-radius: 6px;
+  color: #fff2c4;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.lofi-btn-play:hover {
+  background: linear-gradient(135deg, rgba(200, 160, 60, 0.45), rgba(140, 105, 35, 0.55));
+  border-color: rgba(230, 195, 75, 0.7);
+  color: #ffffff;
+}
+
+.lofi-player .lofi-ico-pause { display: none; }
+.lofi-player .lofi-ico-play { display: inline-block; }
+.lofi-player.is-playing .lofi-ico-play { display: none; }
+.lofi-player.is-playing .lofi-ico-pause { display: inline-block; }
+
+.lofi-vol-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lofi-btn-vol {
+  background: none;
+  border: none;
+  color: #c2b088;
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+
+.lofi-btn-vol:hover {
+  color: #fff2c4;
+}
+
+.lofi-player .lofi-ico-mute { display: none; }
+.lofi-player .lofi-ico-vol { display: inline-block; }
+.lofi-player.is-muted .lofi-ico-vol { display: none; }
+.lofi-player.is-muted .lofi-ico-mute { display: inline-block; }
+
+.lofi-slider {
+  width: 54px;
+  height: 4px;
+  -webkit-appearance: none;
+  background: rgba(200, 170, 110, 0.25);
+  border-radius: 2px;
+  outline: none;
+}
+
+.lofi-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #e6c34b;
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+}
+
+.lofi-ambient-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lofi-pill {
+  flex: 1;
+  text-align: center;
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 2px 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(200, 170, 110, 0.18);
+  border-radius: 4px;
+  color: #a89a80;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.lofi-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e6d3a8;
+}
+
+.lofi-pill.active {
+  background: rgba(200, 160, 60, 0.22);
+  border-color: rgba(212, 175, 55, 0.5);
+  color: #fff2c4;
+}
+
+.lofi-link-yt {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.yt-audio-host {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0.001;
+  pointer-events: none;
+  overflow: hidden;
+  left: -9999px;
+  top: -9999px;
+}
+
 /* ==================== ANIMATION KEYFRAMES ==================== */
 /* Halloween */
 html:not(.fx-paused) .lofi-pumpkin-glow {
@@ -1768,14 +2022,12 @@ html.fx-paused .lofi-scene * {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-.theme-dropdown-wrap.open .theme-menu {
-  display: block !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-}
-
 html:not(.fx-paused) .theme-dropdown-wrap.open .theme-menu {
   animation: themeMenuPop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.theme-dropdown-wrap.open .theme-menu {
+  display: block;
 }
 
 html.fx-paused .theme-menu,
@@ -2009,12 +2261,58 @@ html.fx-paused .theme-dropdown-wrap.open .theme-menu {
 }
 
 .sidebar-footer {
-  padding: 14px 18px;
+  padding: 12px 14px;
   font-size: 12px;
   color: #8f8368;
   position: relative;
   white-space: nowrap;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sidebar-footer-left {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.lofi-footer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: transform 0.2s ease, filter 0.2s ease;
+  user-select: none;
+  line-height: 1;
+}
+
+.lofi-footer-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  border: 1.5px solid rgba(212, 175, 55, 0.4);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.lofi-footer-btn:hover .lofi-footer-avatar {
+  transform: scale(1.12);
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(212, 175, 55, 0.6);
+}
+
+html.sidebar-collapsed .lofi-footer-btn {
+  display: none !important;
 }
 
 .sidebar-footer::before {
@@ -3763,9 +4061,19 @@ function closeMobileSidebar() {
       if (ev.key === 'Escape') closeMobileSidebar();
     });
 
-    // Recolore as brasas ao trocar de tema
-    const obs = new MutationObserver(function () { Embers.redraw(); });
+    // Recolore as brasas e atualiza trilha Lofi ao trocar de tema
+    const obs = new MutationObserver(function () {
+      Embers.redraw();
+      if (window.LofiPlayer) {
+        const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+        window.LofiPlayer.onThemeChanged(cur);
+      }
+    });
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+    if (window.LofiPlayer) {
+      window.LofiPlayer.init();
+    }
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
@@ -3773,6 +4081,431 @@ function closeMobileSidebar() {
     boot();
   }
 })();
+
+/* ==================== REPRODUTOR OFICIAL LOFI GIRL E AMBIENCIAS DO YOUTUBE ==================== */
+const LofiAudioEngine = (function () {
+  let isPlaying = false;
+  let isMuted = false;
+  let volume = 50;
+  let currentTheme = 'dark';
+  let apiLoaded = false;
+  let musicReady = false;
+  let fireReady = false;
+  let rainReady = false;
+  let vinylReady = false;
+  let pendingPlay = false;
+
+  let playerMusic = null;
+  let playerFire = null;
+  let playerRain = null;
+  let playerVinyl = null;
+
+  const ambientState = {
+    vinyl: true,
+    rain: false,
+    fire: false
+  };
+
+  const TRACKS = {
+    natal: {
+      title: 'Lofi Girl - Christmas Cozy Radio',
+      sub: 'Ao Vivo & Mix Natalino Oficial Lofi Girl',
+      ytId: 'XSXEaikz0Bc',
+      ytUrl: 'https://www.youtube.com/watch?v=XSXEaikz0Bc'
+    },
+    halloween: {
+      title: 'Lofi Girl - Halloween Spooky Ambience',
+      sub: 'Mix Oficial das Bruxas & Noite Assombrada',
+      ytId: '0sfDth4lMLc',
+      ytUrl: 'https://www.youtube.com/watch?v=0sfDth4lMLc'
+    },
+    ano_novo: {
+      title: 'Lofi Girl - Night Protocol (Synthwave & Chill)',
+      sub: 'Mix Cyberpunk & Foco Noturno da Virada',
+      ytId: 'zXGb3k-A1Vo',
+      ytUrl: 'https://www.youtube.com/watch?v=zXGb3k-A1Vo'
+    },
+    pascoa: {
+      title: 'Lofi Girl - Quiet Forest & Peaceful Focus',
+      sub: 'Mix Primavera, Natureza e Serenidade',
+      ytId: 'xxYJONmXE8w',
+      ytUrl: 'https://www.youtube.com/watch?v=xxYJONmXE8w'
+    },
+    dark: {
+      title: 'Lofi Girl - Beats to Relax / Study',
+      sub: 'Lofi Hip Hop Mix Oficial Lofi Girl',
+      ytId: 'CFGLoQIhmow',
+      ytUrl: 'https://www.youtube.com/watch?v=CFGLoQIhmow'
+    }
+  };
+  TRACKS.light = TRACKS.dark;
+
+  const VINYL_YT_ID = 'NIP3fNueJMA'; // ASMR Old Vinyl Record Player Noise, Pops and Crackles - Quantum Sound
+  const FIRE_YT_ID = 'UgHKb_7884o'; // 12 Hours of Relaxing Fireplace Sounds - Cat Trumpet
+  const RAIN_YT_ID = 'V6V080RVeAE'; // Som de Chuva leve e calma
+
+  function initVinyl() {}
+  function syncVinyl() {}
+
+  function loadYouTubeAPI() {
+    if (window.YT && window.YT.Player) {
+      initPlayers();
+      return;
+    }
+    if (document.getElementById('yt-iframe-api')) return;
+    const tag = document.createElement('script');
+    tag.id = 'yt-iframe-api';
+    tag.src = 'https://www.youtube.com/iframe_api';
+    const firstScript = document.getElementsByTagName('script')[0];
+    if (firstScript && firstScript.parentNode) {
+      firstScript.parentNode.insertBefore(tag, firstScript);
+    } else {
+      document.head.appendChild(tag);
+    }
+  }
+
+  window.onYouTubeIframeAPIReady = function () {
+    apiLoaded = true;
+    initPlayers();
+  };
+
+  function initPlayers() {
+    if (!window.YT || !window.YT.Player) return;
+
+    const trk = TRACKS[currentTheme] || TRACKS.dark;
+
+    if (!playerMusic && document.getElementById('yt-player-music')) {
+      playerMusic = new YT.Player('yt-player-music', {
+        height: '1',
+        width: '1',
+        videoId: trk.ytId,
+        playerVars: {
+          autoplay: 0,
+          controls: 0,
+          loop: 1,
+          playlist: trk.ytId,
+          playsinline: 1,
+          enablejsapi: 1
+        },
+        events: {
+          onReady: function (e) {
+            musicReady = true;
+            try {
+              e.target.setVolume(volume);
+              if (isMuted) e.target.mute();
+            } catch (err) {}
+            if (pendingPlay) {
+              pendingPlay = false;
+              play();
+            }
+          },
+          onStateChange: function (e) {
+            if (window.YT && e.data === YT.PlayerState.PLAYING) {
+              isPlaying = true;
+              updateUI();
+            } else if (window.YT && (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED)) {
+              if (e.data === YT.PlayerState.ENDED) {
+                try { e.target.playVideo(); } catch (err) {}
+              }
+            }
+          }
+        }
+      });
+    }
+
+    if (!playerVinyl && document.getElementById('yt-player-vinyl')) {
+      playerVinyl = new YT.Player('yt-player-vinyl', {
+        height: '1',
+        width: '1',
+        videoId: VINYL_YT_ID,
+        playerVars: {
+          autoplay: 0,
+          controls: 0,
+          loop: 1,
+          playlist: VINYL_YT_ID,
+          playsinline: 1,
+          enablejsapi: 1
+        },
+        events: {
+          onReady: function (e) {
+            vinylReady = true;
+            try {
+              e.target.setVolume(Math.round(volume * 0.70));
+              if (isMuted) e.target.mute();
+            } catch (err) {}
+            if (isPlaying && ambientState.vinyl) {
+              try { e.target.playVideo(); } catch (err) {}
+            }
+          }
+        }
+      });
+    }
+
+    if (!playerFire && document.getElementById('yt-player-fire')) {
+      playerFire = new YT.Player('yt-player-fire', {
+        height: '1',
+        width: '1',
+        videoId: FIRE_YT_ID,
+        playerVars: {
+          autoplay: 0,
+          controls: 0,
+          loop: 1,
+          playlist: FIRE_YT_ID,
+          playsinline: 1,
+          enablejsapi: 1
+        },
+        events: {
+          onReady: function (e) {
+            fireReady = true;
+            try {
+              e.target.setVolume(Math.round(volume * 0.75));
+              if (isMuted) e.target.mute();
+            } catch (err) {}
+            if (isPlaying && ambientState.fire) {
+              try { e.target.playVideo(); } catch (err) {}
+            }
+          }
+        }
+      });
+    }
+
+    if (!playerRain && document.getElementById('yt-player-rain')) {
+      playerRain = new YT.Player('yt-player-rain', {
+        height: '1',
+        width: '1',
+        videoId: RAIN_YT_ID,
+        playerVars: {
+          autoplay: 0,
+          controls: 0,
+          loop: 1,
+          playlist: RAIN_YT_ID,
+          playsinline: 1,
+          enablejsapi: 1
+        },
+        events: {
+          onReady: function (e) {
+            rainReady = true;
+            try {
+              e.target.setVolume(Math.round(volume * 0.75));
+              if (isMuted) e.target.mute();
+            } catch (err) {}
+            if (isPlaying && ambientState.rain) {
+              try { e.target.playVideo(); } catch (err) {}
+            }
+          }
+        }
+      });
+    }
+  }
+
+  function play() {
+    isPlaying = true;
+    updateUI();
+
+    if (!musicReady) {
+      pendingPlay = true;
+      loadYouTubeAPI();
+      return;
+    }
+
+    try {
+      if (playerMusic && typeof playerMusic.playVideo === 'function') {
+        playerMusic.playVideo();
+      }
+    } catch (e) {}
+
+    if (ambientState.vinyl && playerVinyl && typeof playerVinyl.playVideo === 'function') {
+      try { playerVinyl.playVideo(); } catch (e) {}
+    }
+    if (ambientState.fire && playerFire && typeof playerFire.playVideo === 'function') {
+      try { playerFire.playVideo(); } catch (e) {}
+    }
+    if (ambientState.rain && playerRain && typeof playerRain.playVideo === 'function') {
+      try { playerRain.playVideo(); } catch (e) {}
+    }
+  }
+
+  function pause() {
+    isPlaying = false;
+    pendingPlay = false;
+    updateUI();
+
+    try {
+      if (playerMusic && typeof playerMusic.pauseVideo === 'function') {
+        playerMusic.pauseVideo();
+      }
+    } catch (e) {}
+    try {
+      if (playerVinyl && typeof playerVinyl.pauseVideo === 'function') {
+        playerVinyl.pauseVideo();
+      }
+    } catch (e) {}
+    try {
+      if (playerFire && typeof playerFire.pauseVideo === 'function') {
+        playerFire.pauseVideo();
+      }
+    } catch (e) {}
+    try {
+      if (playerRain && typeof playerRain.pauseVideo === 'function') {
+        playerRain.pauseVideo();
+      }
+    } catch (e) {}
+  }
+
+  function updateUI() {
+    const playerEl = document.getElementById('lofi-player');
+    const playLabel = document.getElementById('lofi-play-label');
+    const titleEl = document.getElementById('lofi-track-title');
+    const subEl = document.getElementById('lofi-track-sub');
+    const slider = document.getElementById('lofi-slider');
+    const linkYt = document.getElementById('lofi-footer-link') || document.getElementById('lofi-link-yt');
+
+    const trk = TRACKS[currentTheme] || TRACKS.dark;
+    if (titleEl) titleEl.textContent = trk.title;
+    if (subEl) subEl.textContent = trk.sub;
+    if (linkYt) linkYt.href = trk.ytUrl || 'https://www.youtube.com/@LofiGirl';
+
+    if (playerEl) {
+      playerEl.classList.toggle('is-playing', isPlaying);
+      playerEl.classList.toggle('is-muted', isMuted);
+    }
+    if (playLabel) {
+      playLabel.textContent = isPlaying ? 'Pausar Lofi' : 'Ouvir Lofi';
+    }
+    if (slider) {
+      slider.value = volume;
+    }
+
+    ['vinyl', 'rain', 'fire'].forEach(type => {
+      const pill = document.getElementById('lofi-pill-' + type);
+      if (pill) pill.classList.toggle('active', !!ambientState[type]);
+    });
+  }
+
+  return {
+    init: function () {
+      try {
+        const savedVol = localStorage.getItem('jirabot_lofi_vol');
+        if (savedVol !== null) volume = Math.max(0, Math.min(100, parseInt(savedVol, 10)));
+        const savedMuted = localStorage.getItem('jirabot_lofi_muted');
+        if (savedMuted !== null) isMuted = savedMuted === '1';
+        ['vinyl', 'rain', 'fire'].forEach(type => {
+          const s = localStorage.getItem('jirabot_lofi_amb_' + type);
+          if (s !== null) ambientState[type] = s === '1';
+        });
+      } catch (e) {}
+
+      const eff = document.documentElement.getAttribute('data-theme') || 'dark';
+      currentTheme = TRACKS[eff] ? eff : 'dark';
+      updateUI();
+      loadYouTubeAPI();
+    },
+
+    play: play,
+    pause: pause,
+    toggle: function () {
+      if (isPlaying) pause(); else play();
+    },
+
+    setVolume: function (val) {
+      volume = Math.max(0, Math.min(100, parseInt(val, 10)));
+      isMuted = false;
+      try { localStorage.setItem('jirabot_lofi_vol', String(volume)); } catch (e) {}
+
+      try {
+        if (playerMusic && typeof playerMusic.setVolume === 'function') {
+          playerMusic.setVolume(volume);
+          playerMusic.unMute();
+        }
+        if (playerVinyl && typeof playerVinyl.setVolume === 'function') {
+          playerVinyl.setVolume(Math.round(volume * 0.70));
+          playerVinyl.unMute();
+        }
+        if (playerFire && typeof playerFire.setVolume === 'function') {
+          playerFire.setVolume(Math.round(volume * 0.75));
+          playerFire.unMute();
+        }
+        if (playerRain && typeof playerRain.setVolume === 'function') {
+          playerRain.setVolume(Math.round(volume * 0.75));
+          playerRain.unMute();
+        }
+      } catch (e) {}
+      updateUI();
+    },
+
+    toggleMute: function () {
+      isMuted = !isMuted;
+      try { localStorage.setItem('jirabot_lofi_muted', isMuted ? '1' : '0'); } catch (e) {}
+      try {
+        if (playerMusic && typeof playerMusic.mute === 'function') {
+          if (isMuted) playerMusic.mute(); else playerMusic.unMute();
+        }
+        if (playerVinyl && typeof playerVinyl.mute === 'function') {
+          if (isMuted) playerVinyl.mute(); else playerVinyl.unMute();
+        }
+        if (playerFire && typeof playerFire.mute === 'function') {
+          if (isMuted) playerFire.mute(); else playerFire.unMute();
+        }
+        if (playerRain && typeof playerRain.mute === 'function') {
+          if (isMuted) playerRain.mute(); else playerRain.unMute();
+        }
+      } catch (e) {}
+      updateUI();
+    },
+
+    toggleAmbient: function (type) {
+      if (!(type in ambientState)) return;
+      ambientState[type] = !ambientState[type];
+      try { localStorage.setItem('jirabot_lofi_amb_' + type, ambientState[type] ? '1' : '0'); } catch (e) {}
+
+      let targetPlayer = null;
+      if (type === 'vinyl') targetPlayer = playerVinyl;
+      else if (type === 'fire') targetPlayer = playerFire;
+      else if (type === 'rain') targetPlayer = playerRain;
+
+      if (targetPlayer && typeof targetPlayer.playVideo === 'function') {
+        try {
+          if (ambientState[type]) {
+            targetPlayer.playVideo();
+          } else {
+            targetPlayer.pauseVideo();
+          }
+        } catch (e) {}
+      }
+      updateUI();
+    },
+
+    toggleVinyl: function () { this.toggleAmbient('vinyl'); },
+    toggleRain: function () { this.toggleAmbient('rain'); },
+    toggleFire: function () { this.toggleAmbient('fire'); },
+    initVinyl: initVinyl,
+    syncVinyl: syncVinyl,
+
+    onThemeChanged: function (newTheme) {
+      const cleanTheme = TRACKS[newTheme] ? newTheme : 'dark';
+      if (cleanTheme === currentTheme) return;
+      currentTheme = cleanTheme;
+      updateUI();
+
+      const newTrk = TRACKS[currentTheme];
+      if (playerMusic && typeof playerMusic.loadVideoById === 'function') {
+        try {
+          if (isPlaying) {
+            playerMusic.loadVideoById({ videoId: newTrk.ytId });
+          } else if (typeof playerMusic.cueVideoById === 'function') {
+            playerMusic.cueVideoById({ videoId: newTrk.ytId });
+          }
+        } catch (e) {}
+      }
+    }
+  };
+})();
+
+function toggleLofiPlay() { if (window.LofiPlayer) window.LofiPlayer.toggle(); }
+function toggleLofiMute() { if (window.LofiPlayer) window.LofiPlayer.toggleMute(); }
+function setLofiVolume(val) { if (window.LofiPlayer) window.LofiPlayer.setVolume(val); }
+function toggleLofiAmbient(type) { if (window.LofiPlayer) window.LofiPlayer.toggleAmbient(type); }
+window.LofiPlayer = LofiAudioEngine;
 """
 
 # ----------------------------------------------------------------------------------------------------------------------
