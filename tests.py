@@ -938,6 +938,9 @@ class TestThemeSelectorAndSeasonalThemes(unittest.TestCase):
         self.assertIn('[data-theme="pascoa"]', THEME_CSS)
         self.assertIn('.theme-dropdown-wrap', THEME_CSS)
         self.assertIn('.theme-menu', THEME_CSS)
+        # Protecao para exibicao do menu de temas com efeitos pausados
+        self.assertIn('html.fx-paused .theme-menu', THEME_CSS)
+        self.assertIn('html:not(.fx-paused) .theme-dropdown-wrap.open .theme-menu', THEME_CSS)
 
     def test_thematic_logos_and_lofi_scenes(self):
         from web_assets import (

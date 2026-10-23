@@ -1760,7 +1760,7 @@ html.fx-paused .lofi-scene * {
   z-index: 1000;
   display: none;
   backdrop-filter: blur(12px);
-  animation: themeMenuPop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 1;
 }
 
 @keyframes themeMenuPop {
@@ -1769,7 +1769,21 @@ html.fx-paused .lofi-scene * {
 }
 
 .theme-dropdown-wrap.open .theme-menu {
-  display: block;
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+html:not(.fx-paused) .theme-dropdown-wrap.open .theme-menu {
+  animation: themeMenuPop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html.fx-paused .theme-menu,
+html.fx-paused .theme-dropdown-wrap.open .theme-menu {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+  visibility: visible !important;
 }
 
 .theme-menu-header {
