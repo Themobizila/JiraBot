@@ -910,6 +910,82 @@ class TestReportReconciliationAndKeyCleaning(unittest.TestCase):
             shutil.rmtree(test_dir, ignore_errors=True)
 
 
+class TestThemeSelectorAndSeasonalThemes(unittest.TestCase):
+    def test_theme_config_persistence(self):
+        test_dir = Path(tempfile.mkdtemp())
+        try:
+            with patch("config.get_default_config_dir", return_value=test_dir):
+                cfg = BotConfig(notifications_enabled=False)
+                for theme in ["auto", "dark", "light", "halloween", "natal", "ano_novo", "pascoa"]:
+                    cfg.theme = theme
+                    cfg.save()
+                    reloaded = BotConfig.load()
+                    self.assertEqual(reloaded.theme, theme)
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
+
+    def test_theme_assets_and_badges(self):
+        from web_assets import THEME_BADGES_HTML, THEME_CSS
+
+        self.assertIn('badge-halloween', THEME_BADGES_HTML)
+        self.assertIn('badge-natal', THEME_BADGES_HTML)
+        self.assertIn('badge-ano_novo', THEME_BADGES_HTML)
+        self.assertIn('badge-pascoa', THEME_BADGES_HTML)
+        # Verifica que todas as declaracoes de tema existem no CSS
+        self.assertIn('[data-theme="halloween"]', THEME_CSS)
+        self.assertIn('[data-theme="natal"]', THEME_CSS)
+        self.assertIn('[data-theme="ano_novo"]', THEME_CSS)
+        self.assertIn('[data-theme="pascoa"]', THEME_CSS)
+        self.assertIn('.theme-dropdown-wrap', THEME_CSS)
+        self.assertIn('.theme-menu', THEME_CSS)
+
+    def test_thematic_logos_and_lofi_scenes(self):
+        from web_assets import (
+            THEME_LOGOS_HTML,
+            BRAND_TITLE_ICONS_HTML,
+            LOFI_SCENES_HTML,
+            THEME_CSS,
+        )
+        from web_panel import HTML_PAGE
+
+        # 5 Logotipos completos
+        self.assertIn('logo-default', THEME_LOGOS_HTML)
+        self.assertIn('logo-halloween', THEME_LOGOS_HTML)
+        self.assertIn('logo-natal', THEME_LOGOS_HTML)
+        self.assertIn('logo-ano_novo', THEME_LOGOS_HTML)
+        self.assertIn('logo-pascoa', THEME_LOGOS_HTML)
+
+        # Icones de titulo
+        self.assertIn('title-icon-halloween', BRAND_TITLE_ICONS_HTML)
+        self.assertIn('title-icon-natal', BRAND_TITLE_ICONS_HTML)
+        self.assertIn('title-icon-ano_novo', BRAND_TITLE_ICONS_HTML)
+        self.assertIn('title-icon-pascoa', BRAND_TITLE_ICONS_HTML)
+
+        # 5 Cenarios Lofi com animacoes SVG
+        self.assertIn('scene-halloween', LOFI_SCENES_HTML)
+        self.assertIn('scene-natal', LOFI_SCENES_HTML)
+        self.assertIn('scene-ano_novo', LOFI_SCENES_HTML)
+        self.assertIn('scene-pascoa', LOFI_SCENES_HTML)
+        self.assertIn('scene-default', LOFI_SCENES_HTML)
+
+        # Elementos especificos dos cenarios solicitados
+        self.assertIn('lofi-scarecrow', LOFI_SCENES_HTML)
+        self.assertIn('lofi-cat', LOFI_SCENES_HTML)
+        self.assertIn('lofi-fireplace', LOFI_SCENES_HTML)
+        self.assertIn('lofi-window-snow', LOFI_SCENES_HTML)
+        self.assertIn('lofi-steam', LOFI_SCENES_HTML)
+
+        # Presenca no HTML renderizado
+        self.assertIn('sidebar-lofi-wrap', HTML_PAGE)
+        self.assertIn('brand-title', HTML_PAGE)
+        self.assertIn('brand-name', HTML_PAGE)
+        self.assertIn('brand-title-icon', HTML_PAGE)
+        # Protecao de layout: badges antigos nao vazam na marca
+        self.assertNotIn('__THEME_BADGES__', HTML_PAGE)
+        self.assertIn('.brand-theme-badge', THEME_CSS)
+        self.assertIn('display: none !important', THEME_CSS)
+
+
 if __name__ == "__main__":
     unittest.main()
 

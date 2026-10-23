@@ -33,7 +33,17 @@ from engine import BotEngine, format_duration
 from history import WEEKDAYS_PT, generate_report
 from jira_client import JiraClient
 from review_dialog import get_fallback_description, show_pre_exit_popup
-from web_assets import ANALYTICS_JS, EARLY_JS, LOGO_SVG, THEME_CSS, UI_FX_JS
+from web_assets import (
+    ANALYTICS_JS,
+    BRAND_TITLE_ICONS_HTML,
+    EARLY_JS,
+    LOFI_SCENES_HTML,
+    LOGO_SVG,
+    THEME_BADGES_HTML,
+    THEME_CSS,
+    THEME_LOGOS_HTML,
+    UI_FX_JS,
+)
 from storage import (
     DailyState,
     DaySummary,
@@ -613,10 +623,15 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <!-- Sidebar -->
 <aside class="sidebar" id="app-sidebar">
   <div class="brand">
-    <div class="brand-logo">__LOGO_SVG__</div>
+    <div class="brand-logo">
+      __THEME_LOGOS__
+    </div>
     <div class="brand-text">
-      <h1>JiraBot</h1>
-      <span id="sidebar-version-label">Gerenciador de Horas v2.2.1</span>
+      <h1 class="brand-title">
+        <span class="brand-name">JiraBot</span>
+        __BRAND_TITLE_ICONS__
+      </h1>
+      <span id="sidebar-version-label" class="brand-version">Gerenciador de Horas v2.2.1</span>
     </div>
   </div>
 
@@ -662,6 +677,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </button>
   </div>
 
+  <div class="sidebar-lofi-wrap" id="sidebar-lofi-wrap">
+    __LOFI_SCENES__
+  </div>
+
   <div class="sidebar-footer">
     <div class="daemon-pill">
       <span id="sidebar-dot" class="dot"></span>
@@ -687,10 +706,69 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <svg class="fx-ico-play" viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="7 4 20 12 7 20 7 4"/></svg>
         <span id="fx-toggle-label">Pausar Efeitos</span>
       </button>
-      <button class="btn btn-outline btn-sm" id="theme-toggle-btn" onclick="toggleTheme()">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-        <span id="theme-toggle-label">Modo Claro</span>
-      </button>
+      <div class="theme-dropdown-wrap" id="theme-dropdown-wrap">
+        <button type="button" class="btn btn-outline btn-sm theme-selector-btn" id="theme-selector-btn" onclick="toggleThemeDropdown(event)" aria-haspopup="true" aria-expanded="false" title="Selecionar Tema Visual e Datas Comemorativas">
+          <span id="theme-icon-slot" class="theme-icon-slot"></span>
+          <span id="theme-label-slot">Tema: Automático</span>
+          <svg class="theme-caret" viewBox="0 0 24 24" width="12" height="12"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <div class="theme-menu" id="theme-menu">
+          <div class="theme-menu-header">Seletor de Tema</div>
+          <button type="button" class="theme-menu-item" data-theme-val="auto" onclick="setThemePreference('auto')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            <div class="theme-item-text">
+              <span class="theme-item-title">Automático (Sazonal)</span>
+              <span class="theme-item-desc" id="theme-auto-badge">Ativa datas comemorativas no período</span>
+            </div>
+          </button>
+          <div class="theme-menu-divider"></div>
+          <div class="theme-menu-group-label">Temas Clássicos</div>
+          <button type="button" class="theme-menu-item" data-theme-val="dark" onclick="setThemePreference('dark')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <div class="theme-item-text">
+              <span class="theme-item-title">Escuro</span>
+              <span class="theme-item-desc">Obsidiana, ouro e brasas</span>
+            </div>
+          </button>
+          <button type="button" class="theme-menu-item" data-theme-val="light" onclick="setThemePreference('light')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <div class="theme-item-text">
+              <span class="theme-item-title">Claro</span>
+              <span class="theme-item-desc">Tons claros e bronze</span>
+            </div>
+          </button>
+          <div class="theme-menu-divider"></div>
+          <div class="theme-menu-group-label">Datas Especiais</div>
+          <button type="button" class="theme-menu-item" data-theme-val="halloween" onclick="setThemePreference('halloween')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M4.5 9c0 6 3 11 7.5 11s7.5-5 7.5-11c0-2-1.5-4-3.5-4-1.5 0-2.8 1-4 1s-2.5-1-4-1c-2 0-3.5 2-3.5 4zM8 11l2 2-2 2M16 11l-2 2 2 2M9 17h6"/></svg>
+            <div class="theme-item-text">
+              <span class="theme-item-title">Halloween (Sazonal)</span>
+              <span class="theme-item-desc">Abóbora, roxo místico e brasas</span>
+            </div>
+          </button>
+          <button type="button" class="theme-menu-item" data-theme-val="natal" onclick="setThemePreference('natal')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 5h-2l3 5h-2l3 6H5l3-6H6l3-5H7l3-5h2zM12 18v4"/></svg>
+            <div class="theme-item-text">
+              <span class="theme-item-title">Natal (Sazonal)</span>
+              <span class="theme-item-desc">Vermelho festivo, pinheiro e neve</span>
+            </div>
+          </button>
+          <button type="button" class="theme-menu-item" data-theme-val="ano_novo" onclick="setThemePreference('ano_novo')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            <div class="theme-item-text">
+              <span class="theme-item-title">Ano Novo (Sazonal)</span>
+              <span class="theme-item-desc">Ouro champanhe e estrelas</span>
+            </div>
+          </button>
+          <button type="button" class="theme-menu-item" data-theme-val="pascoa" onclick="setThemePreference('pascoa')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C8 2 5 7 5 13a7 7 0 0 0 14 0c0-6-3-11-7-11zM7 13h10M8 17h8"/></svg>
+            <div class="theme-item-text">
+              <span class="theme-item-title">Páscoa (Sazonal)</span>
+              <span class="theme-item-desc">Menta suave, lavanda e primavera</span>
+            </div>
+          </button>
+        </div>
+      </div>
       <button class="btn btn-outline btn-sm" onclick="refreshAll()">Atualizar Dados</button>
       <button class="btn btn-outline btn-sm" onclick="switchTab('tab-batch')">Lançar em Lote</button>
       <button class="btn btn-primary btn-sm" onclick="openWorklogModal()">+ Novo Lançamento no Jira</button>
@@ -1672,6 +1750,34 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <div id="update-status-box" style="margin-top:12px; font-size:13px; display:none; padding:10px 14px; border-radius:7px;"></div>
       </div>
 
+      <!-- Card de Aparencia Visual e Temas Sazonais -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Aparência Visual e Temas Sazonais Automáticos</div>
+        </div>
+        <div class="schedule-box">
+          <div class="form-grid">
+            <div class="form-group" style="margin-bottom:0">
+              <label>Tema Preferido</label>
+              <select id="cfg-theme-selector" class="form-control" onchange="setThemePreference(this.value)">
+                <option value="auto">Automático (Sazonal) - Ativa temas especiais nas épocas comemorativas</option>
+                <option value="dark">Escuro - Obsidiana, ouro e brasas</option>
+                <option value="light">Claro - Tons claros e bronze</option>
+                <option value="halloween">Halloween (Sazonal) - Tons de abóbora, roxo místico e brasas</option>
+                <option value="natal">Natal (Sazonal) - Vermelho festivo, pinheiro e neve suave</option>
+                <option value="ano_novo">Ano Novo (Sazonal) - Ouro champanhe e estrelas cintilantes</option>
+                <option value="pascoa">Páscoa (Sazonal) - Menta suave, lavanda e primavera</option>
+              </select>
+            </div>
+            <div>
+              <div style="font-size:12px; color:var(--text-muted);">CALENDÁRIO SAZONAL AUTOMÁTICO</div>
+              <div style="font-size:13px; font-weight:600; margin-top:4px;" id="cfg-seasonal-status">Outubro: Halloween | Dezembro: Natal | Virada: Ano Novo | Março-Abril: Páscoa</div>
+              <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">No modo Automático, o tema troca sozinho sem exigir nenhuma configuração manual.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="grid-2">
         <div class="card">
           <div class="card-header">
@@ -1954,32 +2060,125 @@ let batchPreviewRows = [];
 let currentWeeklyData = null;
 let scheduleInputsTouched = false;
 
-/* ==================== TEMA (DARK / LIGHT MODE) ==================== */
-function applyTheme(theme) {
-  const clean = theme === 'light' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', clean);
-  localStorage.setItem('jirabot_theme', clean);
-  const lbl = document.getElementById('theme-toggle-label');
-  if (lbl) {
-    lbl.textContent = clean === 'dark' ? 'Modo Claro' : 'Modo Escuro';
-  }
+/* ==================== SELETOR DE TEMAS E DATAS ESPECIAIS ==================== */
+const THEME_LABELS = {
+  auto: 'Automático (Sazonal)',
+  dark: 'Escuro',
+  light: 'Claro',
+  halloween: 'Halloween (Sazonal)',
+  natal: 'Natal (Sazonal)',
+  ano_novo: 'Ano Novo (Sazonal)',
+  pascoa: 'Páscoa (Sazonal)'
+};
+
+const THEME_ICONS_SVG = {
+  auto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>',
+  dark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+  light: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>',
+  halloween: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M4.5 9c0 6 3 11 7.5 11s7.5-5 7.5-11c0-2-1.5-4-3.5-4-1.5 0-2.8 1-4 1s-2.5-1-4-1c-2 0-3.5 2-3.5 4zM8 11l2 2-2 2M16 11l-2 2 2 2M9 17h6"/></svg>',
+  natal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 5h-2l3 5h-2l3 6H5l3-6H6l3-5H7l3-5h2zM12 18v4"/></svg>',
+  ano_novo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+  pascoa: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C8 2 5 7 5 13a7 7 0 0 0 14 0c0-6-3-11-7-11zM7 13h10M8 17h8"/></svg>'
+};
+
+function getSeasonalTheme(dateObj = new Date()) {
+  const m = dateObj.getMonth() + 1;
+  const d = dateObj.getDate();
+  if ((m === 10 && d >= 1) || (m === 11 && d <= 3)) return 'halloween';
+  if (m === 12 && d >= 1 && d <= 26) return 'natal';
+  if ((m === 12 && d >= 27) || (m === 1 && d <= 6)) return 'ano_novo';
+  if ((m === 3 && d >= 20) || (m === 4 && d <= 25)) return 'pascoa';
+  return 'dark';
 }
 
-async function toggleTheme() {
-  const current = document.documentElement.getAttribute('data-theme') || 'dark';
-  const next = current === 'dark' ? 'light' : 'dark';
-  applyTheme(next);
+function applyThemePreference(pref) {
+  const allowed = ['auto', 'dark', 'light', 'halloween', 'natal', 'ano_novo', 'pascoa'];
+  const cleanPref = allowed.includes(pref) ? pref : 'auto';
+  const effectiveTheme = cleanPref === 'auto' ? getSeasonalTheme() : cleanPref;
+
+  document.documentElement.setAttribute('data-theme', effectiveTheme);
+  document.documentElement.setAttribute('data-theme-preference', cleanPref);
+
   try {
-    await apiCall('/api/theme', 'POST', { theme: next });
-  } catch (e) {
-    // salvo no localStorage mesmo se offline
+    localStorage.setItem('jirabot_theme_pref', cleanPref);
+    localStorage.setItem('jirabot_theme', effectiveTheme);
+  } catch (e) {}
+
+  // Atualiza slots visuais da barra superior
+  const iconSlot = document.getElementById('theme-icon-slot');
+  if (iconSlot) {
+    iconSlot.innerHTML = THEME_ICONS_SVG[effectiveTheme] || THEME_ICONS_SVG.dark;
+  }
+  const labelSlot = document.getElementById('theme-label-slot');
+  if (labelSlot) {
+    if (cleanPref === 'auto') {
+      labelSlot.textContent = `Tema: Auto (${THEME_LABELS[effectiveTheme] || effectiveTheme})`;
+    } else {
+      labelSlot.textContent = `Tema: ${THEME_LABELS[effectiveTheme] || effectiveTheme}`;
+    }
+  }
+
+  // Atualiza badge explicativo no item Auto
+  const autoBadge = document.getElementById('theme-auto-badge');
+  if (autoBadge) {
+    const sTheme = getSeasonalTheme();
+    autoBadge.textContent = sTheme !== 'dark' 
+      ? `Atualmente ativando: ${THEME_LABELS[sTheme]}` 
+      : 'Atualmente: Escuro Padrão';
+  }
+
+  // Atualiza selecao ativa no menu
+  document.querySelectorAll('.theme-menu-item').forEach(item => {
+    const val = item.getAttribute('data-theme-val');
+    item.classList.toggle('active', val === cleanPref);
+  });
+
+  // Atualiza seletor da aba de configuracoes (se existir)
+  const cfgSelect = document.getElementById('cfg-theme-selector');
+  if (cfgSelect && cfgSelect.value !== cleanPref) {
+    cfgSelect.value = cleanPref;
   }
 }
 
-// Aplica tema salvo imediatamente ao carregar
+async function setThemePreference(pref) {
+  applyThemePreference(pref);
+  closeThemeDropdown();
+  const label = THEME_LABELS[pref] || pref;
+  showToast(`Tema configurado para: ${label}`, 'success');
+  try {
+    await apiCall('/api/theme', 'POST', { theme: pref });
+  } catch (e) {}
+}
+
+function toggleThemeDropdown(ev) {
+  if (ev) ev.stopPropagation();
+  const wrap = document.getElementById('theme-dropdown-wrap');
+  if (wrap) {
+    const isOpen = wrap.classList.toggle('open');
+    const btn = document.getElementById('theme-selector-btn');
+    if (btn) btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+}
+
+function closeThemeDropdown() {
+  const wrap = document.getElementById('theme-dropdown-wrap');
+  if (wrap) {
+    wrap.classList.remove('open');
+    const btn = document.getElementById('theme-selector-btn');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+}
+
+window.addEventListener('click', function (e) {
+  const wrap = document.getElementById('theme-dropdown-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    closeThemeDropdown();
+  }
+});
+
 (function initTheme() {
-  const saved = localStorage.getItem('jirabot_theme') || 'dark';
-  applyTheme(saved);
+  const saved = localStorage.getItem('jirabot_theme_pref') || localStorage.getItem('jirabot_theme') || 'auto';
+  applyThemePreference(saved);
 })();
 
 function showToast(msg, type = 'info') {
@@ -3716,6 +3915,10 @@ async function loadConfigData() {
     const data = await apiCall('/api/config');
     configData = data;
 
+    if (data.theme) {
+      applyThemePreference(data.theme);
+    }
+
     document.getElementById('prof-active-select').value = data.active_profile;
     populateProfileFields(data.active_profile);
 
@@ -4209,6 +4412,10 @@ HTML_PAGE = (
     .replace("/*__UI_FX_JS__*/", UI_FX_JS)
     .replace("/*__ANALYTICS_JS__*/", ANALYTICS_JS)
     .replace("__LOGO_SVG__", LOGO_SVG)
+    .replace("__THEME_LOGOS__", THEME_LOGOS_HTML)
+    .replace("__BRAND_TITLE_ICONS__", BRAND_TITLE_ICONS_HTML)
+    .replace("__LOFI_SCENES__", LOFI_SCENES_HTML)
+    .replace("__THEME_BADGES__", "")
 )
 
 
@@ -4372,9 +4579,10 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
             body = self._read_json_body()
 
             if path == "/api/theme":
-                theme = body.get("theme", "dark")
+                theme = (body.get("theme") or "auto").strip().lower()
+                allowed = {"auto", "dark", "light", "halloween", "natal", "ano_novo", "pascoa"}
                 cfg = BotConfig.load()
-                cfg.theme = "light" if theme == "light" else "dark"
+                cfg.theme = theme if theme in allowed else "auto"
                 cfg.save()
                 self._send_json({"success": True, "theme": cfg.theme})
                 return
