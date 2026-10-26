@@ -30,8 +30,19 @@ APP_DIR = Path(__file__).parent.resolve()
 # Lista branca estrita de extensoes e arquivos de codigo permitidos em atualizacoes/publicacoes
 ALLOWED_CODE_EXTENSIONS = {".py", ".bat", ".ico", ".png", ".svg"}
 ALLOWED_DOC_FILES = {"requirements.txt", "README.md", ".gitignore"}
-FORBIDDEN_NAMES = {".env", "config.json", "state.json", "queue.json", "history.json", "worklog_schedules.json", "jirabot.pid", "jirabot.log"}
-FORBIDDEN_DIRS = {"relatorios", "backupP", "backupCore", "__pycache__", ".git", ".venv", "venv"}
+FORBIDDEN_NAMES = {
+    ".env",
+    "config.json",
+    "state.json",
+    "queue.json",
+    "history.json",
+    "worklog_schedules.json",
+    "jirabot.pid",
+    "jirabot.log",
+    "msal_sharepoint_cache.bin",
+    "sharepoint_auth_meta.json",
+}
+FORBIDDEN_DIRS = {"relatorios", "backupP", "backupCore", "__pycache__", ".git", ".venv", "venv", "dds_docx_cache"}
 
 
 def _file_sha256(filepath: Path) -> str:

@@ -2,27 +2,27 @@
 # JiraBot - Requisitos e Dependencias
 # ==============================================================================
 #
-# O JiraBot foi desenvolvido para ser 100% nativo e portatil, utilizando
-# EXCLUSIVAMENTE modulos da Biblioteca Padrao do Python (Standard Library)
-# e chamadas diretas a API Win32 do Windows.
+# O nucleo do JiraBot foi desenvolvido para ser altamente nativo e portatil,
+# utilizando prioritariamente modulos da Biblioteca Padrao do Python (Standard Library)
+# e chamadas diretas a API Win32 do Windows (bloqueio de sessao, system tray, etc).
 #
-# PORTANTO: NAO E NECESSARIO INSTALAR NENHUM PACOTE EXTERNO VIA PIP!
+# Para a sincronizacao automatica ao vivo com o Microsoft 365 e SharePoint Online
+# (leitura direta de arquivos .docx vivos e extracao de evidencias com resolucao de AADSTS65002),
+# e utilizada a biblioteca oficial Microsoft Authentication Library (MSAL).
 #
 # ------------------------------------------------------------------------------
 # Requisitos de Sistema:
 # ------------------------------------------------------------------------------
 # - Sistema Operacional: Windows 10 ou Windows 11 (64-bit)
-# - Versao do Python  : Python >= 3.8 (Testado e compativel com 3.8 a 3.13)
+# - Versao do Python  : Python >= 3.8 (Testado e compativel com 3.8 a 3.14)
 #
-# Modulos nativos utilizados pelo bot:
-# - urllib.request   : Integracao HTTP com a API REST do Jira
-# - ctypes / wintypes: Monitoramento de bloqueio de sessao (WTS) e System Tray
-# - tkinter          : Dialogos graficos de revisao pre-saida
-# - dataclasses      : Modelagem tipada de estado e configuracao
-# - json / pathlib   : Persistencia local atomica
-# - subprocess / sys : Gerenciamento de processos desacoplados (pythonw.exe)
+# Instalacao rapida das dependencias:
+#   pip install -r requirements.txt
 #
 # Para iniciar o bot, basta dar duplo clique em:
 #   iniciar.bat
 #
 # ==============================================================================
+
+# Autenticacao Oficial Microsoft 365 / SharePoint Online (Graph API - Device Code Flow)
+msal>=1.28.0

@@ -1032,6 +1032,1350 @@ class TestThemeSelectorAndSeasonalThemes(unittest.TestCase):
         self.assertIn('window.LofiPlayer', UI_FX_JS)
 
 
+class TestJiraTicketsManagementAndDds(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = Path(tempfile.mkdtemp())
+        self.state_mgr = StateManager(base_dir=self.test_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    @patch("urllib.request.urlopen")
+    def test_get_my_assigned_tickets(self, mock_urlopen):
+        import json
+        mock_data = {
+            "issues": [
+                {
+                    "key": "CONSISABI-418",
+                    "fields": {
+                        "summary": "Implementacao Regras BI",
+                        "status": {"name": "Em Andamento"},
+                        "priority": {"name": "Alta"},
+                        "issuetype": {"name": "Tarefa"},
+                        "customfield_11200": "https://consisa.sharepoint.com/:w:/r/dds.docx",
+                        "customfield_12600": None,
+                        "created": "2026-10-20T10:00:00.000-0300",
+                        "updated": "2026-10-26T08:00:00.000-0300",
+                    }
+                },
+                {
+                    "key": "CONSISABI-442",
+                    "fields": {
+                        "summary": "Ajuste de relatorio",
+                        "status": {"name": "Concluído"},
+                        "priority": {"name": "Média"},
+                        "issuetype": {"name": "Melhoria"},
+                        "customfield_11200": None,
+                        "customfield_12600": None,
+                        "created": "2026-10-18T10:00:00.000-0300",
+                        "updated": "2026-10-25T14:00:00.000-0300",
+                    }
+                }
+            ]
+        }
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        cfg = BotConfig(notifications_enabled=False)
+        client = JiraClient(cfg.jira, self.state_mgr)
+        tickets = client.get_my_assigned_tickets(status_filter="all")
+        self.assertEqual(len(tickets), 2)
+        t1 = tickets[0]
+        self.assertEqual(t1["key"], "CONSISABI-418")
+        self.assertEqual(t1["summary"], "Implementacao Regras BI")
+        self.assertEqual(t1["status"], "Em Andamento")
+        self.assertEqual(t1["priority"], "Alta")
+        self.assertTrue(t1["has_dds"])
+        t2 = tickets[1]
+        self.assertEqual(t2["key"], "CONSISABI-442")
+        self.assertFalse(t2["has_dds"])
+
+    @patch("urllib.request.urlopen")
+    def test_get_ticket_dds_details(self, mock_urlopen):
+        import json
+        mock_data = {
+            "key": "CONSISABI-418",
+            "fields": {
+                "summary": "Implementacao Regras BI",
+                "status": {"name": "Em Andamento"},
+                "priority": {"name": "Alta"},
+                "issuetype": {"name": "Tarefa"},
+                "created": "2026-10-20T10:00:00.000-0300",
+                "updated": "2026-10-26T08:00:00.000-0300",
+                "customfield_11200": "https://consisa.sharepoint.com/:w:/r/sites/DDS_418.docx",
+                "customfield_12600": None,
+                "description": {
+                    "type": "doc",
+                    "version": 1,
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [
+                                {"type": "text", "text": "Segue link DDS e Movidesk Ticket: 371517. Link: https://consisa.sharepoint.com/:w:/r/sites/DDS_Doc2.docx"}
+                            ]
+                        }
+                    ]
+                },
+                "attachment": [
+                    {
+                        "id": "1001",
+                        "filename": "especificacao.pdf",
+                        "size": 2048,
+                        "created": "2026-10-20T10:05:00.000-0300",
+                        "content": "https://consisanet.atlassian.net/rest/api/2/attachment/content/1001"
+                    }
+                ]
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        cfg = BotConfig(notifications_enabled=False)
+        client = JiraClient(cfg.jira, self.state_mgr)
+        details = client.get_ticket_dds_details("CONSISABI-418")
+        self.assertEqual(details["key"], "CONSISABI-418")
+        self.assertEqual(len(details["dds_links"]), 2)
+        self.assertIn("embedview", details["dds_links"][0]["embed_url"])
+        self.assertEqual(details["movidesk_ticket"], "371517")
+        self.assertEqual(len(details["attachments"]), 1)
+        self.assertEqual(details["attachments"][0]["name"], "especificacao.pdf")
+
+    def test_web_markup_and_css_gestao_tickets(self):
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        # Aba de Tickets e Modal DDS presentes no HTML da SPA
+        self.assertIn('tab-tickets', HTML_PAGE)
+        self.assertIn('ticket-dds-modal', HTML_PAGE)
+        self.assertIn('modal-dds-links-container', HTML_PAGE)
+        self.assertIn('modal-ticket-description', HTML_PAGE)
+        self.assertIn('modal-btn-start-ticket', HTML_PAGE)
+        self.assertIn('loadMyTickets', HTML_PAGE)
+        self.assertIn('openTicketDdsModal', HTML_PAGE)
+        self.assertIn('startTicketFromCard', HTML_PAGE)
+        self.assertIn('filterTicketsList', HTML_PAGE)
+
+        # Recursos avancados: Leitor DDS nativo, Timeline e Imagens
+        self.assertIn('subtab-btn-timeline', HTML_PAGE)
+        self.assertIn('subtab-btn-images', HTML_PAGE)
+        self.assertIn('subtab-btn-dds', HTML_PAGE)
+        self.assertIn('modal-timeline-container', HTML_PAGE)
+        self.assertIn('modal-images-grid', HTML_PAGE)
+        self.assertIn('image-lightbox-modal', HTML_PAGE)
+        self.assertIn('openImageLightbox', HTML_PAGE)
+        self.assertIn('closeImageLightbox', HTML_PAGE)
+        self.assertIn('copyDdsText', HTML_PAGE)
+        self.assertIn('modal-dds-fullscreen-btn', HTML_PAGE)
+        self.assertIn('switchModalSubtab', HTML_PAGE)
+
+        # Recursos avancados: Menu lateral com categorias e dropdowns colapsaveis
+        self.assertIn('nav-group-tickets', HTML_PAGE)
+        self.assertIn('nav-group-jornada', HTML_PAGE)
+        self.assertIn('nav-group-perfil', HTML_PAGE)
+        self.assertIn('toggleNavGroup', HTML_PAGE)
+        self.assertIn('initNavGroups', HTML_PAGE)
+
+        # Regras CSS para os cards, badges, dropdowns, leitor nativo, timeline e galeria
+        self.assertIn('.tickets-grid', THEME_CSS)
+        self.assertIn('.ticket-card', THEME_CSS)
+        self.assertIn('.badge-dds', THEME_CSS)
+        self.assertIn('.badge-active-pulse', THEME_CSS)
+        self.assertIn('.dds-link-card', THEME_CSS)
+        self.assertIn('.nav-group-toggle', THEME_CSS)
+        self.assertIn('.nav-group-items', THEME_CSS)
+        self.assertIn('.modal-dialog.is-fullscreen', THEME_CSS)
+        self.assertIn('.dds-viewer-container', THEME_CSS)
+        self.assertIn('.movidesk-banner', THEME_CSS)
+        self.assertIn('.dds-native-viewer', THEME_CSS)
+        self.assertIn('.timeline-container', THEME_CSS)
+        self.assertIn('.timeline-card', THEME_CSS)
+        self.assertIn('.image-gallery-grid', THEME_CSS)
+
+    def test_extrair_texto_docx(self):
+        import io
+        import zipfile
+        from jira_client import extrair_texto_docx
+
+        docx_buffer = io.BytesIO()
+        with zipfile.ZipFile(docx_buffer, "w") as z:
+            xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                <w:body>
+                    <w:p><w:r><w:t>DDS - Documento de Solução</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Regra de Negócio: Campo X deve ser calculado.</w:t></w:r></w:p>
+                </w:body>
+            </w:document>
+            """
+            z.writestr("word/document.xml", xml)
+            z.writestr("word/media/image1.png", b"\x89PNG\r\n\x1a\nfakeimage")
+
+        text, images = extrair_texto_docx(docx_buffer.getvalue())
+        self.assertIn("DDS - Documento de Solução", text)
+        self.assertIn("Regra de Negócio: Campo X deve ser calculado.", text)
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["filename"], "image1.png")
+        self.assertTrue(images[0]["data_url"].startswith("data:image/png;base64,"))
+
+    @patch("urllib.request.urlopen")
+    def test_comments_timeline_and_movidesk(self, mock_urlopen):
+        import json
+        mock_data = {
+            "key": "CONSISABI-325",
+            "fields": {
+                "summary": "TICKET-379353 - Ajuste Balancete",
+                "status": {"name": "Em Andamento"},
+                "priority": {"name": "Média"},
+                "issuetype": {"name": "Tarefa"},
+                "created": "2026-01-07T10:00:00.000-0300",
+                "updated": "2026-01-08T10:00:00.000-0300",
+                "reporter": {"displayName": "Julio - Fortaleza"},
+                "assignee": {"displayName": "Dev Jira"},
+                "description": "Descrição da tarefa",
+                "attachment": [
+                    {
+                        "id": "2001",
+                        "filename": "screenshot.png",
+                        "size": 5000,
+                        "mimeType": "image/png",
+                        "content": "https://consisanet.atlassian.net/rest/api/2/attachment/content/2001"
+                    }
+                ],
+                "comment": {
+                    "comments": [
+                        {
+                            "id": "501",
+                            "author": {"displayName": "TI", "avatarUrls": {"48x48": "https://avatar.png"}},
+                            "created": "2026-01-07T13:41:55.000-0300",
+                            "body": "Julio - Fortaleza:\r\nsegue dds em anexo\r\n#MovideskAction#"
+                        },
+                        {
+                            "id": "502",
+                            "author": {"displayName": "Caio Dias", "avatarUrls": {}},
+                            "created": "2026-01-19T15:56:15.000-0300",
+                            "body": "Ajuste realizado conforme DDS."
+                        }
+                    ]
+                }
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        cfg = BotConfig(notifications_enabled=False)
+        client = JiraClient(cfg.jira, self.state_mgr)
+        details = client.get_ticket_dds_details("CONSISABI-325")
+
+        # Timeline
+        self.assertEqual(len(details["comments_timeline"]), 2)
+        c1 = details["comments_timeline"][0]
+        self.assertTrue(c1["is_movidesk"])
+        self.assertEqual(c1["movidesk_sender"], "Julio - Fortaleza")
+        self.assertIn("segue dds em anexo", c1["body"])
+
+        c2 = details["comments_timeline"][1]
+        self.assertFalse(c2["is_movidesk"])
+        self.assertEqual(c2["author"], "Caio Dias")
+
+        # Imagens e proxy
+        self.assertEqual(len(details["images"]), 1)
+        self.assertEqual(details["images"][0]["name"], "screenshot.png")
+        self.assertIn("/api/jira/attachment?url=", details["images"][0]["proxy_url"])
+
+        # Movidesk info
+        self.assertEqual(details["movidesk_info"]["ticket"], "379353")
+        self.assertEqual(details["movidesk_info"]["solicitante"], "Julio - Fortaleza")
+
+    def test_web_handler_start_ticket_endpoint(self):
+        import io
+        import json
+        from web_panel import JiraBotWebHandler
+
+        with patch("config.get_default_config_dir", return_value=self.test_dir), \
+             patch("storage.get_default_config_dir", return_value=self.test_dir):
+
+            cfg = BotConfig(notifications_enabled=False)
+            cfg.save()
+
+            req = MagicMock()
+            handler = JiraBotWebHandler.__new__(JiraBotWebHandler)
+            handler.request = req
+            handler.client_address = ("127.0.0.1", 12345)
+            handler.wfile = io.BytesIO()
+            handler.path = "/api/jira/start-ticket"
+
+            payload = {
+                "issue_key": "CONSISABI-418",
+                "comment": "Desenvolvimento DDS 418"
+            }
+            payload_bytes = json.dumps(payload).encode("utf-8")
+            handler.rfile = io.BytesIO(payload_bytes)
+            handler.headers = {"Content-Length": str(len(payload_bytes))}
+
+            handler.send_response = MagicMock()
+            handler.send_header = MagicMock()
+            handler.end_headers = MagicMock()
+
+            handler.do_POST()
+
+            resp_bytes = handler.wfile.getvalue()
+            self.assertTrue(len(resp_bytes) > 0)
+            resp_data = json.loads(resp_bytes.decode("utf-8"))
+            self.assertTrue(resp_data.get("success"))
+            self.assertEqual(resp_data.get("active_ticket"), "CONSISABI-418")
+            self.assertEqual(resp_data.get("active_comment"), "Desenvolvimento DDS 418")
+
+    def test_estruturar_conteudo_dds_parsing(self):
+        from jira_client import estruturar_conteudo_dds
+
+        sample_dds = """
+DDS – Documento de Detalhamento da Solicitação
+
+Solicitação Nº
+TICKET-380374
+
+Dados do Solicitante
+Nome do solicitante / Setor:
+Luiz Henrique Gielow
+Código / Empresa Cliente:
+55550001 - CONSISA INFORMATICA LTDA.
+Nome do contato na Empresa Cliente:
+Luiz Henrique Gielow
+
+Data:
+Preenchido pelo Solicitante
+Selecione o Tipo desta Solicitação:
+CORREÇÃO (erros no sistema)
+ALTERAÇÃO (alterações de legislação, melhorias de rotinas existentes)
+X
+IMPLEMENTAÇÃO (novas funcionalidades, atendimentos de novas legislações)
+
+Sistema / Módulo:
+Consisa BI
+Opção (caminho da funcionalidade no sistema):
+BI Mobile
+Versão atual do sistema (código e data/hora):
+Empresa / Filial:
+Consisa Matriz
+
+Especificação dos dados
+(Período, Nº Nota, Empregado etc.):
+Parâmetros gerais de teste.
+
+Detalhar com clareza quais são as necessidades do cliente, não deixando margem para interpretação incorreta (Incluir evidencias – telas – sequência de passos). Para cada necessidade detalhar
+- O que: Descreva a necessidade específica do cliente, explicando claramente o que é necessário ou o que está sendo solicitado.
+- Quando/Como: Detalhe o momento e a forma como essa necessidade ocorre. Inclua um passo a passo que explique claramente o processo ou a situação em que a necessidade se manifesta. Use capturas de tela, sequência de passos e outros artefatos visuais para ilustrar as situações e facilitar a compreensão.
+Disponibilizar versões MOBILES do CONSISA BI para os cenários atualmente existentes.
+Trata-se de uma adaptação de layout das visões atuais para formato mobile, com impacto principalmente em tempo de desenvolvimento.
+
+Resultado Esperado:
+Por quê: Explique o motivo por trás da necessidade, descrevendo o impacto ou a importância que essa solicitação tem para o cliente. Em caso de obrigações legais, indicar a data limite para a situação envolvida.
+Obs.: Para os casos de melhoria detalhar a forma que o cliente trabalha com esta informação ou falta dela. (Se controla por planilha, caso tenha embasamento legal, consultoria disponibilizar)
+Facilitar a visualização de indicadores;
+Apoiar a estratégia comercial de vendas de BI com acesso mobile;
+Atender pedidos específicos de clientes no cenário comercial.
+
+Preenchido pela Análise de Negócios
+Nome: Jhonatan Reiss
+Data: 15/01/2025
+Adaptar as visões atuais do CONSISA BI para versões Mobiles, apresentando os principais indicativos de cada visão:
+Gestão Comercial;
+Gestão de Compras.
+Resultado esperado:
+Adaptar as visões atuais do CONSISA BI para versões Mobiles.
+
+Revisão final
+Categoria
+Descrição
+Revisão
+Padrão de codificação
+Todos os códigos incluídos apenas para fins de testes foram devidamente retirados?
+Sim
+Os valores gerados pelo sistema estão corretos de acordo com as regras estabelecidas?
+Sim
+Interface
+A ordem de tabulação dos campos está correta?
+Sim
+A máscara do(s) campo(s) está de acordo com o tipo do campo?
+Não aplicável
+"""
+        res = estruturar_conteudo_dds(sample_dds)
+        self.assertTrue(res["has_structured_data"])
+        self.assertEqual(res["tipo"], "IMPLEMENTAÇÃO")
+        self.assertEqual(res["solicitacao"], "TICKET-380374")
+        self.assertEqual(res["solicitante"], "Luiz Henrique Gielow")
+        self.assertEqual(res["empresa"], "55550001 - CONSISA INFORMATICA LTDA.")
+        self.assertEqual(res["sistema"], "Consisa BI")
+        self.assertEqual(res["opcao"], "BI Mobile")
+        self.assertEqual(res["empresa_filial"], "Consisa Matriz")
+        self.assertIn("Disponibilizar versões MOBILES do CONSISA BI", res["necessidade_cliente"])
+        self.assertNotIn("Detalhar com clareza quais são as necessidades", res["necessidade_cliente"])
+        self.assertIn("Facilitar a visualização de indicadores;", res["resultado_esperado"])
+        self.assertNotIn("Por quê: Explique o motivo", res["resultado_esperado"])
+        self.assertEqual(res["analise_negocios"]["responsavel"], "Jhonatan Reiss")
+        self.assertEqual(res["analise_negocios"]["data"], "15/01/2025")
+        self.assertIn("Adaptar as visões atuais do CONSISA BI", res["analise_negocios"]["detalhamento"])
+        self.assertTrue(len(res["checklist"]) >= 4)
+        self.assertEqual(res["checklist"][0]["categoria"], "Padrão de codificação")
+        self.assertEqual(res["checklist"][0]["resposta"], "Sim")
+        self.assertEqual(res["checklist"][3]["categoria"], "Interface")
+        self.assertEqual(res["checklist"][3]["resposta"], "Não aplicável")
+
+    @patch("urllib.request.urlopen")
+    def test_account_id_mention_resolution_and_timeline(self, mock_urlopen):
+        import json
+
+        def _mock_urlopen_router(req, *args, **kwargs):
+            url = req.get_full_url() if hasattr(req, "get_full_url") else str(req)
+            resp = MagicMock()
+            resp.status = 200
+            if "/rest/api/2/user?accountId=" in url:
+                user_id = url.split("accountId=")[1]
+                if "5cbf5ad212f0f60ffebf9bd3" in user_id:
+                    resp.read.return_value = json.dumps({"displayName": "Jhonatan Reiss"}).encode("utf-8")
+                elif "557058" in user_id:
+                    resp.read.return_value = json.dumps({"displayName": "Roberto Zonta"}).encode("utf-8")
+                else:
+                    resp.read.return_value = json.dumps({"displayName": "Usuario Jira"}).encode("utf-8")
+            elif "/rest/api/2/issue/TEST-1" in url:
+                issue_data = {
+                    "key": "TEST-1",
+                    "fields": {
+                        "summary": "Demanda de Teste Mencoes",
+                        "status": {"name": "Em Andamento"},
+                        "priority": {"name": "Alta"},
+                        "issuetype": {"name": "Tarefa"},
+                        "description": "Texto simples",
+                        "attachment": [],
+                        "comment": {
+                            "comments": [
+                                {
+                                    "id": "1",
+                                    "author": {"displayName": "TI"},
+                                    "created": "2026-10-26T08:00:00.000-0300",
+                                    "body": "Por favor [~accountid:5cbf5ad212f0f60ffebf9bd3] e [~accountid:557058:cc6f4eb2] avaliar dds."
+                                }
+                            ]
+                        }
+                    }
+                }
+                resp.read.return_value = json.dumps(issue_data).encode("utf-8")
+            resp.__enter__.return_value = resp
+            return resp
+
+        mock_urlopen.side_effect = _mock_urlopen_router
+        cfg = BotConfig(notifications_enabled=False)
+        client = JiraClient(cfg.jira, self.state_mgr)
+
+        name1 = client.resolve_jira_account_id("5cbf5ad212f0f60ffebf9bd3")
+        self.assertEqual(name1, "Jhonatan Reiss")
+        name1_cached = client.resolve_jira_account_id("5cbf5ad212f0f60ffebf9bd3")
+        self.assertEqual(name1_cached, "Jhonatan Reiss")
+
+        details = client.get_ticket_dds_details("TEST-1")
+        comments = details.get("comments_timeline", [])
+        self.assertEqual(len(comments), 1)
+        c = comments[0]
+        self.assertIn("@Jhonatan Reiss", c["body"])
+        self.assertIn("@Roberto Zonta", c["body"])
+        self.assertNotIn("[~accountid:", c["body"])
+        self.assertIn("Jhonatan Reiss", c["mentions"])
+        self.assertIn("Roberto Zonta", c["mentions"])
+
+    def test_web_markup_and_css_structured_dds(self):
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        self.assertIn('dds-structured-view', HTML_PAGE)
+        self.assertIn('dds-raw-view', HTML_PAGE)
+        self.assertIn('btn-toggle-dds-mode', HTML_PAGE)
+        self.assertIn('dds-tipo-badge', HTML_PAGE)
+        self.assertIn('dds-struct-meta-grid', HTML_PAGE)
+        self.assertIn('dds-struct-necessidade', HTML_PAGE)
+        self.assertIn('dds-struct-resultado', HTML_PAGE)
+        self.assertIn('dds-struct-especificacao', HTML_PAGE)
+        self.assertIn('dds-struct-analise', HTML_PAGE)
+        self.assertIn('dds-card-checklist', HTML_PAGE)
+        self.assertIn('dds-checklist-table', HTML_PAGE)
+        self.assertIn('dds-checklist-tbody', HTML_PAGE)
+        self.assertIn('toggleDdsViewMode', HTML_PAGE)
+        self.assertIn('formatCommentBody', HTML_PAGE)
+
+        self.assertIn('.dds-structured-container', THEME_CSS)
+        self.assertIn('.dds-meta-grid', THEME_CSS)
+        self.assertIn('.dds-meta-item', THEME_CSS)
+        self.assertIn('.dds-section-card', THEME_CSS)
+        self.assertIn('.dds-checklist-details', THEME_CSS)
+        self.assertIn('.dds-checklist-summary', THEME_CSS)
+        self.assertIn('.dds-checklist-table', THEME_CSS)
+        self.assertIn('.mention-pill', THEME_CSS)
+
+    @patch("urllib.request.urlopen")
+    def test_parent_ticket_dds_inheritance(self, mock_urlopen):
+        import json
+        import urllib.parse
+
+        def _mock_urlopen_parent_router(req, *args, **kwargs):
+            raw_url = req.get_full_url() if hasattr(req, "get_full_url") else str(req)
+            url = urllib.parse.unquote(raw_url)
+            resp = MagicMock()
+            resp.status = 200
+
+            if "/rest/api/2/issue/CHILD-101" in url:
+                child_data = {
+                    "key": "CHILD-101",
+                    "fields": {
+                        "summary": "Implementar módulo sub-tarefa",
+                        "status": {"name": "Em Andamento"},
+                        "priority": {"name": "Média"},
+                        "issuetype": {"name": "Desenvolvimento", "subtask": True},
+                        "description": "Desenvolver conforme DDS pai",
+                        "attachment": [],
+                        "customfield_11200": None,
+                        "customfield_12600": None,
+                        "parent": {
+                            "id": "1000",
+                            "key": "PARENT-500",
+                            "fields": {
+                                "summary": "TICKET-99999 Demanda Principal com DDS",
+                                "status": {"name": "Sprint Backlog"},
+                                "priority": {"name": "Alta"},
+                                "issuetype": {"name": "Solicitação", "subtask": False}
+                            }
+                        }
+                    }
+                }
+                resp.read.return_value = json.dumps(child_data).encode("utf-8")
+
+            elif "/rest/api/2/issue/PARENT-500" in url:
+                parent_data = {
+                    "key": "PARENT-500",
+                    "fields": {
+                        "summary": "TICKET-99999 Demanda Principal com DDS",
+                        "status": {"name": "Sprint Backlog"},
+                        "priority": {"name": "Alta"},
+                        "issuetype": {"name": "Solicitação", "subtask": False},
+                        "description": "Requisitos gerais",
+                        "customfield_11200": "https://consisa.sharepoint.com/:w:/r/sites/DDS_Pai.docx",
+                        "customfield_12600": None,
+                        "attachment": [
+                            {
+                                "id": "901",
+                                "filename": "especificacao_pai.pdf",
+                                "size": 4096,
+                                "created": "2026-10-20T10:00:00.000-0300",
+                                "content": "https://consisanet.atlassian.net/rest/api/2/attachment/content/901"
+                            }
+                        ]
+                    }
+                }
+                resp.read.return_value = json.dumps(parent_data).encode("utf-8")
+
+            elif "/rest/api/2/search/jql" in url and "key in" not in url:
+                search_data = {
+                    "issues": [
+                        {
+                            "key": "CHILD-101",
+                            "fields": {
+                                "summary": "Implementar módulo sub-tarefa",
+                                "status": {"name": "Em Andamento"},
+                                "priority": {"name": "Média"},
+                                "issuetype": {"name": "Desenvolvimento", "subtask": True},
+                                "description": "Desenvolver conforme DDS pai",
+                                "customfield_11200": None,
+                                "customfield_12600": None,
+                                "parent": {
+                                    "key": "PARENT-500",
+                                    "fields": {"summary": "TICKET-99999 Demanda Principal com DDS"}
+                                }
+                            }
+                        }
+                    ]
+                }
+                resp.read.return_value = json.dumps(search_data).encode("utf-8")
+
+            elif "key in" in url:
+                parent_search_data = {
+                    "issues": [
+                        {
+                            "key": "PARENT-500",
+                            "fields": {
+                                "summary": "TICKET-99999 Demanda Principal com DDS",
+                                "customfield_11200": "https://consisa.sharepoint.com/:w:/r/sites/DDS_Pai.docx",
+                                "customfield_12600": None,
+                                "description": "",
+                                "attachment": []
+                            }
+                        }
+                    ]
+                }
+                resp.read.return_value = json.dumps(parent_search_data).encode("utf-8")
+
+            resp.__enter__.return_value = resp
+            return resp
+
+        mock_urlopen.side_effect = _mock_urlopen_parent_router
+        cfg = BotConfig(notifications_enabled=False)
+        client = JiraClient(cfg.jira, self.state_mgr)
+
+        # 1. Testa deteccao de subtarefa e heranca de status has_dds na listagem
+        tickets = client.get_my_assigned_tickets()
+        self.assertEqual(len(tickets), 1)
+        t = tickets[0]
+        self.assertEqual(t["key"], "CHILD-101")
+        self.assertEqual(t["parent_key"], "PARENT-500")
+        self.assertTrue(t["is_subtask"])
+        self.assertTrue(t["has_dds"])
+        self.assertTrue(t["dds_from_parent"])
+
+        # 2. Testa heranca completa de DDS do ticket pai no get_ticket_dds_details
+        details = client.get_ticket_dds_details("CHILD-101")
+        self.assertEqual(details["key"], "CHILD-101")
+        self.assertEqual(details["parent_key"], "PARENT-500")
+        self.assertTrue(details["dds_inherited_from_parent"])
+        self.assertTrue(len(details["dds_links"]) > 0)
+        self.assertIn("DDS_Pai.docx", details["dds_links"][0]["url"])
+        self.assertEqual(len(details["attachments"]), 1)
+        self.assertEqual(details["attachments"][0]["name"], "especificacao_pai.pdf")
+        self.assertEqual(details["movidesk_ticket"], "99999")
+
+    def test_web_markup_parent_dds_inheritance(self):
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        self.assertIn('modal-ticket-parent-badge', HTML_PAGE)
+        self.assertIn('dds-parent-inherited-alert', HTML_PAGE)
+        self.assertIn('dds-parent-alert-key', HTML_PAGE)
+        self.assertIn('dds-parent-alert-summary', HTML_PAGE)
+        self.assertIn('dds-parent-alert-link', HTML_PAGE)
+        self.assertIn('badge-parent', HTML_PAGE)
+        self.assertIn('DDS NO PAI', HTML_PAGE)
+
+        self.assertIn('.badge-parent', THEME_CSS)
+        self.assertIn('.parent-info-banner', THEME_CSS)
+        self.assertIn('.parent-link-pill', THEME_CSS)
+
+    def test_web_markup_tree_hierarchy_view(self):
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        # Elementos HTML da arvore e alternador de modos
+        self.assertIn('btn-view-tree', HTML_PAGE)
+        self.assertIn('btn-view-grid', HTML_PAGE)
+        self.assertIn('tickets-view-mode-toggle', HTML_PAGE)
+        self.assertIn('tree-actions-bar', HTML_PAGE)
+        self.assertIn('setTicketsViewMode', HTML_PAGE)
+        self.assertIn('toggleTreeGroup', HTML_PAGE)
+        self.assertIn('expandAllTreeGroups', HTML_PAGE)
+        self.assertIn('collapseAllTreeGroups', HTML_PAGE)
+        self.assertIn('renderTicketsTree', HTML_PAGE)
+        self.assertIn('renderSingleTicketCard', HTML_PAGE)
+
+        # Classes CSS da arvore
+        self.assertIn('.tickets-tree-container', THEME_CSS)
+        self.assertIn('.tree-parent-group', THEME_CSS)
+        self.assertIn('.tree-parent-card', THEME_CSS)
+        self.assertIn('.tree-parent-header', THEME_CSS)
+        self.assertIn('.tree-parent-title', THEME_CSS)
+        self.assertIn('.tree-chevron-btn', THEME_CSS)
+        self.assertIn('.tree-children-container', THEME_CSS)
+        self.assertIn('.tree-child-card', THEME_CSS)
+        self.assertIn('.tree-child-title', THEME_CSS)
+        self.assertIn('.tree-independent-section', THEME_CSS)
+
+    def test_estruturar_conteudo_dds_full_sections(self):
+        from jira_client import estruturar_conteudo_dds
+
+        dds_sample = """
+        DDS – Documento de Detalhamento da Solicitação
+        Solicitação Nº
+        TICKET-445566
+        Dados do Solicitante
+        Nome do solicitante / Setor:
+        Carlos Eduardo / Comercial
+        Código / Empresa Cliente:
+        12345 - CONSISA INFORMATICA LTDA
+        Nome do contato na Empresa Cliente:
+        Carlos Eduardo
+        Data:
+        10/01/2025
+        Selecione o Tipo desta Solicitação:
+        CORREÇÃO (erros no sistema)
+        [X] ALTERAÇÃO (alterações de legislação, melhorias de rotinas existentes)
+        IMPLEMENTAÇÃO (novas funcionalidades)
+        Sistema / Módulo:
+        Consisa BI
+        Opção (caminho da funcionalidade no sistema):
+        Financeiro > DRE Gerencial
+        Versão atual do sistema:
+        2025.1.0
+        Empresa / Filial:
+        01 / 0001
+        Detalhar com clareza quais são as necessidades do cliente:
+        Ajustar o cálculo de deduções da receita bruta no relatório gerencial.
+        Resultado Esperado:
+        Cálculo apurado de acordo com a regra contábil da nova instrução normativa.
+
+        Preenchido pelo Suporte:
+        Nome: Lucas Suporte
+        Data: 11/01/2025
+        Testado na base de homologação com divergência confirmada no somatório.
+
+        Preenchido pela Análise de Negócios
+        Nome: Jhonatan Reiss
+        Data: 12/01/2025
+        Ajustar a formula do campo vlr_deducao no cubo DRE.
+
+        Preenchido pelo Desenvolvimento (dados necessários para encaminhamento ao teste de implementação)
+        Nome: Caio Desenvolvedor
+        Data: 15/01/2025
+        Alterada a procedure SP_BI_CALC_DEDUCAO e atualizada a unit uDREView.pas.
+
+        Revisão final
+        Padrão de codificação
+        Todos os códigos incluídos apenas para fins de testes foram devidamente retirados?
+        Sim
+        Todas as variáveis foram devidamente inicializadas?
+        Sim
+        Interface
+        A ordem de tabulação dos campos está correta?
+        Sim
+
+        Recomendações ao teste de implementação:
+        Executar a consolidação do período 01/2025 e comparar com o extrato analítico da filial 01.
+
+        Preenchido pelo Teste de Implementação
+        Nome: Jhonatan Homologador
+        Data: 18/01/2025
+        Executados testes no ambiente de homologação com 3 cenários de deduções fiscais.
+
+        Resultado (release ou divergência entre o esperado e o que o sistema está fazendo):
+        1. Validação do cálculo de deduções aprovada sem divergências.
+        2. Extrato analítico conferido com a contabilidade.
+        3. Liberado para release de versão mensal.
+        """
+
+        res = estruturar_conteudo_dds(dds_sample)
+        self.assertTrue(res["has_structured_data"])
+        self.assertEqual(res["solicitacao"], "TICKET-445566")
+        self.assertEqual(res["solicitante"], "Carlos Eduardo / Comercial")
+        self.assertEqual(res["empresa"], "12345 - CONSISA INFORMATICA LTDA")
+        self.assertEqual(res["tipo"], "ALTERAÇÃO")
+        self.assertEqual(res["sistema"], "Consisa BI")
+        self.assertEqual(res["opcao"], "Financeiro > DRE Gerencial")
+        self.assertIn("Ajustar o cálculo", res["necessidade_cliente"])
+        self.assertIn("Cálculo apurado", res["resultado_esperado"])
+
+        # Valida Suporte
+        self.assertEqual(res["suporte"]["responsavel"], "Lucas Suporte")
+        self.assertEqual(res["suporte"]["data"], "11/01/2025")
+        self.assertIn("Testado na base", res["suporte"]["detalhamento"])
+
+        # Valida Analise de Negocios
+        self.assertEqual(res["analise_negocios"]["responsavel"], "Jhonatan Reiss")
+        self.assertEqual(res["analise_negocios"]["data"], "12/01/2025")
+
+        # Valida Desenvolvimento (Caio)
+        self.assertEqual(res["desenvolvimento"]["responsavel"], "Caio Desenvolvedor")
+        self.assertEqual(res["desenvolvimento"]["data"], "15/01/2025")
+        self.assertIn("SP_BI_CALC_DEDUCAO", res["desenvolvimento"]["detalhamento"])
+        self.assertIn("Executar a consolidação", res["desenvolvimento"]["recomendacoes"])
+
+        # Valida Checklist
+        self.assertTrue(len(res["checklist"]) >= 3)
+
+        # Valida Teste de Implementacao (Jhonatan)
+        self.assertEqual(res["teste_implementacao"]["responsavel"], "Jhonatan Homologador")
+        self.assertEqual(res["teste_implementacao"]["data"], "18/01/2025")
+        self.assertIn("3 cenários de deduções", res["teste_implementacao"]["detalhamento"])
+
+        # Valida Resultado da Homologacao
+        self.assertEqual(res["resultado_homologacao"]["tipo"], "Release")
+        self.assertIn("Liberado para release", res["resultado_homologacao"]["detalhamento"])
+
+    def test_web_markup_dds_full_sections_and_sharepoint_embed(self):
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        # Sub-aba e painel de SharePoint Embed
+        self.assertIn('subtab-btn-sharepoint', HTML_PAGE)
+        self.assertIn('modal-view-sharepoint', HTML_PAGE)
+        self.assertIn('modal-sharepoint-iframe', HTML_PAGE)
+        self.assertIn('modal-sp-external-link', HTML_PAGE)
+        self.assertIn('dds-sharepoint-callout-banner', HTML_PAGE)
+        self.assertIn('reloadSharepointIframe', HTML_PAGE)
+        self.assertIn('ensureSharepointIframeLoaded', HTML_PAGE)
+
+        # Novos cards executivos na visao estruturada da DDS
+        self.assertIn('dds-card-suporte', HTML_PAGE)
+        self.assertIn('dds-struct-suporte', HTML_PAGE)
+        self.assertIn('dds-card-desenvolvimento', HTML_PAGE)
+        self.assertIn('dds-struct-dev', HTML_PAGE)
+        self.assertIn('dds-struct-dev-rec', HTML_PAGE)
+        self.assertIn('dds-card-teste', HTML_PAGE)
+        self.assertIn('dds-struct-teste', HTML_PAGE)
+        self.assertIn('dds-card-resultado-homologacao', HTML_PAGE)
+        self.assertIn('dds-struct-resultado-homologacao', HTML_PAGE)
+
+        # Classes CSS adicionadas
+        self.assertIn('.dds-sp-callout-banner', THEME_CSS)
+        self.assertIn('.sharepoint-embed-toolbar', THEME_CSS)
+        self.assertIn('.sharepoint-embed-note', THEME_CSS)
+        self.assertIn('.sharepoint-hub-container', THEME_CSS)
+        self.assertIn('.sharepoint-reader-box', THEME_CSS)
+        self.assertIn('.sharepoint-reader-content', THEME_CSS)
+
+    def test_modal_no_horizontal_overflow_css(self):
+        from web_assets import THEME_CSS
+        # Garante que classes criticas do modal previnem overflow horizontal
+        self.assertIn('.modal-body {', THEME_CSS)
+        self.assertIn('overflow-x: hidden !important;', THEME_CSS)
+        self.assertIn('.ticket-modal {', THEME_CSS)
+        self.assertIn('.dds-view-container {', THEME_CSS)
+
+    def test_subtask_dds_enrichment_logic(self):
+        from jira_client import estruturar_conteudo_dds
+        sample_raw = """
+        DDS - Documento de Detalhamento da Solicitação
+        Solicitação Nº 379353
+        Nome do solicitante / Setor: Julio Schmidt
+        Código / Empresa Cliente: 5550003 - Fortaleza
+        Detalhar com clareza quais são as necessidades: Ajustar visão de BI no Balancete.
+        Resultado Esperado: BI Saldo anterior correto.
+        Preenchido pela Análise de Negócios
+        Nome: Jhonatan Reiss
+        Data: 07/01/2026
+        Adaptar visões atuais do Consisa BI.
+        """
+        struct = estruturar_conteudo_dds(sample_raw)
+        self.assertTrue(struct["has_structured_data"])
+        self.assertEqual(struct["solicitacao"], "379353")
+        self.assertEqual(struct["analise_negocios"]["responsavel"], "Jhonatan Reiss")
+        # Sem preenchimento inicial no rascunho
+        self.assertEqual(struct["desenvolvimento"]["detalhamento"], "")
+
+        # Simula o enriquecimento por subtarefa
+        dev_notes = ["d_calendario acumulado saldo anterior e saldo atual ajustado", "tabela calculada criada"]
+        struct["desenvolvimento"]["detalhamento"] = "\n".join(dev_notes)
+        struct["desenvolvimento"]["responsavel"] = "Caio Dias"
+        struct["desenvolvimento"]["data"] = "19/01/2026"
+        struct["teste_implementacao"]["detalhamento"] = "Testes de homologacao realizados"
+        struct["teste_implementacao"]["responsavel"] = "Jhonatan Reiss"
+        struct["resultado_homologacao"]["detalhamento"] = "1. Calculo ajustado\n2. Filtros validados\n3. Release liberado"
+
+        self.assertEqual(struct["desenvolvimento"]["responsavel"], "Caio Dias")
+        self.assertIn("tabela calculada", struct["desenvolvimento"]["detalhamento"])
+        self.assertEqual(struct["teste_implementacao"]["responsavel"], "Jhonatan Reiss")
+        self.assertIn("Release liberado", struct["resultado_homologacao"]["detalhamento"])
+
+    def test_docx_consisa_table_extraction_logo_filter_and_inline_images(self):
+        import io
+        import zipfile
+        from jira_client import extrair_documento_docx_completo
+
+        docx_buf = io.BytesIO()
+        with zipfile.ZipFile(docx_buf, "w") as zf:
+            rels_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                <Relationship Id="rIdLogo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+                <Relationship Id="rIdDevImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image2.png"/>
+                <Relationship Id="rIdTestImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image3.png"/>
+            </Relationships>
+            """
+            doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+                <w:body>
+                    <w:tbl>
+                        <w:tr>
+                            <w:tc><w:p><w:r><w:drawing><a:graphic><a:graphicData><a:blip r:embed="rIdLogo"/></a:graphicData></a:graphic></w:drawing></w:r></w:p></w:tc>
+                            <w:tc><w:p><w:r><w:t>DDS - Documento de Detalhamento da Solicitação</w:t></w:r></w:p></w:tc>
+                            <w:tc><w:p><w:r><w:t>Solicitação Nº</w:t></w:r></w:p><w:p><w:r><w:t>379353</w:t></w:r></w:p></w:tc>
+                        </w:tr>
+                    </w:tbl>
+                    <w:tbl>
+                        <w:tr>
+                            <w:tc><w:p><w:r><w:t>Especificação dos dados (Período, Nº Nota, Empregado etc.):</w:t></w:r></w:p><w:p><w:r><w:t>-</w:t></w:r></w:p></w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc>
+                                <w:p><w:r><w:t>Detalhar com clareza quais são as necessidades do cliente:</w:t></w:r></w:p>
+                                <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Ajustar saldo anterior</w:t></w:r><w:r><w:t> na visão de Balancete.</w:t></w:r></w:p>
+                            </w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc><w:p><w:r><w:t>Preenchido pela Análise de Sistemas</w:t></w:r></w:p></w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc><w:p><w:r><w:t>Nome: Matheus Bellaver</w:t></w:r></w:p></w:tc>
+                            <w:tc><w:p><w:r><w:t>Data: //</w:t></w:r></w:p></w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc><w:p><w:r><w:t>Criar view auxiliar para conferência contábil.</w:t></w:r></w:p></w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc><w:p><w:r><w:t>Preenchido pelo Desenvolvimento (dados necessários para encaminhamento ao teste de implementação)</w:t></w:r></w:p></w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc><w:p><w:r><w:t>Nome: Caio Dias</w:t></w:r></w:p></w:tc>
+                            <w:tc><w:p><w:r><w:t>Data: 19/01/2026</w:t></w:r></w:p></w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc>
+                                <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Medida DAX corrigida</w:t></w:r><w:r><w:t> conforme print abaixo:</w:t></w:r></w:p>
+                                <w:p><w:r><w:drawing><a:graphic><a:graphicData><a:blip r:embed="rIdDevImg"/></a:graphicData></a:graphic></w:drawing></w:r></w:p>
+                            </w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc><w:p><w:r><w:t>Preenchido pelo Teste de Implementação</w:t></w:r></w:p></w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc><w:p><w:r><w:t>Nome: Jhonatan Reiss</w:t></w:r></w:p></w:tc>
+                            <w:tc><w:p><w:r><w:t>Data: 20/01/2026</w:t></w:r></w:p></w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc>
+                                <w:p><w:r><w:t>Conferido o resultado parcial na filial 01 e anexada evidência:</w:t></w:r></w:p>
+                                <w:p><w:r><w:drawing><a:graphic><a:graphicData><a:blip r:embed="rIdTestImg"/></a:graphicData></a:graphic></w:drawing></w:r></w:p>
+                            </w:tc>
+                        </w:tr>
+                        <w:tr>
+                            <w:tc>
+                                <w:p><w:r><w:t>Resultado (release ou divergência entre o esperado e o que o sistema está fazendo):</w:t></w:r></w:p>
+                                <w:p><w:r><w:t>1. Saldo anterior conferido com razão contábil.</w:t></w:r></w:p>
+                                <w:p><w:r><w:t>2. Aprovado para release.</w:t></w:r></w:p>
+                            </w:tc>
+                        </w:tr>
+                    </w:tbl>
+                </w:body>
+            </w:document>
+            """
+            zf.writestr("word/_rels/document.xml.rels", rels_xml)
+            zf.writestr("word/document.xml", doc_xml)
+            zf.writestr("word/media/image1.png", b"\x89PNG\r\n\x1a\nlogo_consisa")
+            zf.writestr("word/media/image2.png", b"\x89PNG\r\n\x1a\nprint_caio_dev")
+            zf.writestr("word/media/image3.png", b"\x89PNG\r\n\x1a\nprint_jhonatan_teste")
+
+        parsed = extrair_documento_docx_completo(docx_buf.getvalue())
+        emb = parsed["embedded_images"]
+        # image1.png (logo do cabecalho Table 0 Row 0 Col 0) deve ser ignorado!
+        self.assertEqual(len(emb), 2)
+        self.assertEqual(emb[0]["filename"], "image2.png")
+        self.assertEqual(emb[0]["section"], "Desenvolvimento")
+        self.assertEqual(emb[1]["filename"], "image3.png")
+        self.assertEqual(emb[1]["section"], "Teste de Implementação")
+
+        sdds = parsed["structured_dds"]
+        self.assertIsNotNone(sdds)
+        self.assertTrue(sdds["has_structured_data"])
+        self.assertEqual(sdds["solicitacao"], "379353")
+        # Placeholder '-' e '//' devem ficar vazios
+        self.assertEqual(sdds["especificacao_dados"], "")
+        self.assertEqual(sdds["analise_sistemas"]["responsavel"], "Matheus Bellaver")
+        self.assertEqual(sdds["analise_sistemas"]["data"], "")
+        self.assertIn("Criar view auxiliar", sdds["analise_sistemas"]["detalhamento"])
+
+        # Negrito e marcadores de imagem inline preservados
+        self.assertIn("**Ajustar saldo anterior**", sdds["necessidade_cliente"])
+        self.assertEqual(sdds["desenvolvimento"]["responsavel"], "Caio Dias")
+        self.assertIn("**Medida DAX corrigida**", sdds["desenvolvimento"]["detalhamento"])
+        self.assertIn("[[DOCX_IMG:docx-emb-1]]", sdds["desenvolvimento"]["detalhamento"])
+
+        # Teste de implementacao nao pode truncar na palavra 'resultado' minuscula no meio da frase
+        self.assertEqual(sdds["teste_implementacao"]["responsavel"], "Jhonatan Reiss")
+        self.assertIn("anexada evidência", sdds["teste_implementacao"]["detalhamento"])
+        self.assertIn("[[DOCX_IMG:docx-emb-2]]", sdds["teste_implementacao"]["detalhamento"])
+
+        self.assertEqual(sdds["resultado_homologacao"]["tipo"], "Release")
+        self.assertIn("Aprovado para release", sdds["resultado_homologacao"]["detalhamento"])
+        self.assertIn("docx-render-table", parsed["document_html"])
+        self.assertIn('data-docx-img-id="docx-emb-1"', parsed["document_html"])
+
+    @patch("urllib.request.urlopen")
+    def test_no_fake_homologacao_or_dev_leak_on_tickets_with_subtasks(self, mock_urlopen):
+        import json
+
+        mock_issue = {
+            "key": "CONSISABI-380",
+            "fields": {
+                "summary": "Ajuste painel BI",
+                "status": {"name": "Em Andamento"},
+                "priority": {"name": "Normal"},
+                "issuetype": {"name": "Solicitação"},
+                "description": (
+                    "DDS - Documento de Detalhamento da Solicitação\n"
+                    "Solicitação Nº 390111\n"
+                    "Especificação dos dados: -\n"
+                    "Detalhar com clareza quais são as necessidades do cliente:\n"
+                    "Criar filtro por regional.\n"
+                    "Resultado Esperado:\n"
+                    "Permitir análise regional.\n"
+                    "Preenchido pela Análise de Sistemas\n"
+                    "Nome: Matheus Bellaver\n"
+                    "Data: //\n"
+                    "Incluir dimensão d_regional.\n"
+                ),
+                "subtasks": [
+                    {
+                        "key": "CONSISABI-414",
+                        "fields": {
+                            "summary": "Subtarefa Desenvolvimento",
+                            "status": {"name": "Concluído"},
+                            "issuetype": {"name": "Desenvolvimento"},
+                        },
+                    },
+                    {
+                        "key": "CONSISABI-415",
+                        "fields": {
+                            "summary": "Subtarefa Testes",
+                            "status": {"name": "Backlog"},
+                            "issuetype": {"name": "Teste"},
+                        },
+                    },
+                ],
+                "attachment": [],
+                "comment": {"comments": []},
+            },
+        }
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps(mock_issue).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        cfg = BotConfig(notifications_enabled=False)
+        client = JiraClient(cfg.jira, self.state_mgr)
+        details = client.get_ticket_dds_details("CONSISABI-380")
+        sdds = details["structured_dds"]
+
+        self.assertTrue(sdds["has_structured_data"])
+        self.assertEqual(sdds["especificacao_dados"], "")
+        self.assertEqual(sdds["analise_sistemas"]["responsavel"], "Matheus Bellaver")
+        self.assertEqual(sdds["analise_sistemas"]["data"], "")
+        # Garante ausencia absoluta de dados sinteticos / vazados de outros tickets
+        self.assertEqual(sdds["desenvolvimento"]["detalhamento"], "")
+        self.assertEqual(sdds["teste_implementacao"]["detalhamento"], "")
+        self.assertEqual(sdds["resultado_homologacao"]["detalhamento"], "")
+        self.assertNotIn("saldo anterior acumulado", json.dumps(details, ensure_ascii=False).lower())
+
+    @patch("urllib.request.urlopen")
+    def test_sharepoint_manager_encoding_and_manual_docx_override(self, mock_urlopen):
+        import io
+        import json
+        import zipfile
+        from sharepoint_client import SharePointManager, build_candidate_share_ids, encode_sharepoint_sharing_url
+
+        sp_url = "https://consisasistemas.sharepoint.com/:w:/s/documentacao/IQD3R_iJ6S6z?e=zQejff"
+        sid = encode_sharepoint_sharing_url(sp_url)
+        self.assertTrue(sid.startswith("u!"))
+        self.assertNotIn("=", sid)
+
+        cands = build_candidate_share_ids(sp_url + "&action=embedview")
+        self.assertTrue(len(cands) >= 2)
+        self.assertEqual(cands[0], sid)
+
+        sp_mgr = SharePointManager(base_dir=self.test_dir)
+        st = sp_mgr.get_status()
+        self.assertFalse(st["connected"])
+        self.assertNotIn("access_token", json.dumps(st))
+
+        # Cria .docx completo para testar importacao manual sobrepondo descricao/anexo
+        docx_buf = io.BytesIO()
+        with zipfile.ZipFile(docx_buf, "w") as zf:
+            zf.writestr(
+                "word/document.xml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body>
+                    <w:p><w:r><w:t>Solicitação Nº 379353</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Detalhar com clareza quais são as necessidades do cliente:</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Necessidade completa importada via DOCX.</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Preenchido pelo Desenvolvimento</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Nome: Caio Dias</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Data: 19/01/2026</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Implementação completa sincronizada.</w:t></w:r></w:p>
+                  </w:body>
+                </w:document>""",
+            )
+        save_res = sp_mgr.save_manual_docx("CONSISABI-325", "DDS-379353.docx", docx_buf.getvalue())
+        self.assertTrue(save_res["success"])
+
+        mock_issue = {
+            "key": "CONSISABI-325",
+            "fields": {
+                "summary": "TICKET-379353 - Ajuste Balancete",
+                "status": {"name": "Concluído"},
+                "priority": {"name": "Normal"},
+                "issuetype": {"name": "Solicitação"},
+                "description": "Rascunho antigo",
+                "customfield_12600": sp_url,
+                "attachment": [],
+                "comment": {"comments": []},
+            },
+        }
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps(mock_issue).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        cfg = BotConfig(notifications_enabled=False)
+        client = JiraClient(cfg.jira, self.state_mgr)
+        details = client.get_ticket_dds_details("CONSISABI-325")
+        self.assertEqual(details["dds_source"], "manual_docx")
+        self.assertEqual(details["structured_dds"]["desenvolvimento"]["responsavel"], "Caio Dias")
+        self.assertIn("Implementação completa sincronizada", details["structured_dds"]["desenvolvimento"]["detalhamento"])
+
+    def test_web_rich_text_sharepoint_viewer_and_no_undefined_render_fn(self):
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        self.assertIn("formatDdsRichText", HTML_PAGE)
+        self.assertIn("formatInlineRichSegments", HTML_PAGE)
+        self.assertIn("sharepoint-doc-viewer", HTML_PAGE)
+        self.assertIn("dds-card-analise-sistemas", HTML_PAGE)
+        self.assertIn("dds-card-team-leader", HTML_PAGE)
+        self.assertIn("startSharepointLogin", HTML_PAGE)
+        self.assertIn("handleManualDocxUpload", HTML_PAGE)
+        self.assertNotIn("renderDdsStructuredView(", HTML_PAGE)
+
+        self.assertIn(".docx-visual-paper", THEME_CSS)
+        self.assertIn(".docx-render-table", THEME_CSS)
+        self.assertIn(".dds-inline-figure", THEME_CSS)
+        self.assertIn(".sp-auth-panel", THEME_CSS)
+
+    def test_single_table_consisa_docx_with_4col_checklist_and_correcao_keyword(self):
+        import io
+        import zipfile
+        from jira_client import extrair_documento_docx_completo
+
+        docx_buf = io.BytesIO()
+        with zipfile.ZipFile(docx_buf, "w") as zf:
+            zf.writestr(
+                "word/document.xml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body>
+                    <w:tbl>
+                      <w:tr>
+                        <w:tc><w:p><w:r><w:t>DDS – Documento de Detalhamento da Solicitação</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Solicitação Nº</w:t></w:r></w:p><w:p><w:r><w:t>380000</w:t></w:r></w:p></w:tc>
+                      </w:tr>
+                      <w:tr>
+                        <w:tc><w:p><w:r><w:t>Código / Empresa Cliente:</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Nome do contato na Empresa Cliente:</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Data:</w:t></w:r></w:p><w:p><w:r><w:t>09/03/2026</w:t></w:r></w:p></w:tc>
+                      </w:tr>
+                      <w:tr>
+                        <w:tc><w:p><w:r><w:t>CORREÇÃO (erros no sistema)</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t></w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>ALTERAÇÃO (melhorias)</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>X</w:t></w:r></w:p></w:tc>
+                      </w:tr>
+                      <w:tr>
+                        <w:tc><w:p><w:r><w:t>Detalhar com clareza quais são as necessidades do cliente, não deixando margem para interpretação incorreta. compreensão.</w:t></w:r></w:p></w:tc>
+                      </w:tr>
+                      <w:tr>
+                        <w:tc>
+                          <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>-  O que:</w:t></w:r><w:r><w:t> Descreva a necessidade específica.</w:t></w:r></w:p>
+                          <w:p><w:r><w:t>Como a correção paliativa já foi feita, precisamos reestruturar os filtros definitivamente.</w:t></w:r></w:p>
+                        </w:tc>
+                      </w:tr>
+                      <w:tr>
+                        <w:tc><w:p><w:r><w:t>Preenchido pelo Team Leader</w:t></w:r></w:p></w:tc>
+                      </w:tr>
+                      <w:tr>
+                        <w:tc><w:p><w:r><w:t>1</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Requisito</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Entendimento do Team Leader</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Cartão</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Pacote</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Fonte</w:t></w:r></w:p></w:tc>
+                        <w:tc><w:p><w:r><w:t>Implementação</w:t></w:r></w:p></w:tc>
+                      </w:tr>
+                      <w:tr>
+                        <w:tc><w:p><w:r><w:t>Preenchido pelo Desenvolvimento</w:t></w:r></w:p></w:tc>
+                      </w:tr>
+                      <w:tr>
+                        <w:tc>
+                          <w:tbl>
+                            <w:tr><w:tc><w:p><w:r><w:t>Revisão final</w:t></w:r></w:p></w:tc></w:tr>
+                            <w:tr>
+                              <w:tc><w:p><w:r><w:t></w:t></w:r></w:p></w:tc>
+                              <w:tc><w:p><w:r><w:t>Categoria</w:t></w:r></w:p></w:tc>
+                              <w:tc><w:p><w:r><w:t>Descrição</w:t></w:r></w:p></w:tc>
+                              <w:tc><w:p><w:r><w:t>Revisão</w:t></w:r></w:p></w:tc>
+                            </w:tr>
+                            <w:tr>
+                              <w:tc><w:p><w:r><w:t></w:t></w:r></w:p></w:tc>
+                              <w:tc><w:p><w:r><w:t>Padrão de codificação</w:t></w:r></w:p></w:tc>
+                              <w:tc><w:p><w:r><w:t>Todos os códigos de teste foram retirados?</w:t></w:r></w:p></w:tc>
+                              <w:tc><w:p><w:r><w:t>Sim</w:t></w:r></w:p></w:tc>
+                            </w:tr>
+                            <w:tr>
+                              <w:tc><w:p><w:r><w:t></w:t></w:r></w:p></w:tc>
+                              <w:tc><w:p><w:r><w:t>SQL</w:t></w:r></w:p></w:tc>
+                              <w:tc><w:p><w:r><w:t>Pergunta sem resposta preenchida?</w:t></w:r></w:p></w:tc>
+                              <w:tc><w:p><w:r><w:t></w:t></w:r></w:p></w:tc>
+                            </w:tr>
+                          </w:tbl>
+                        </w:tc>
+                      </w:tr>
+                    </w:tbl>
+                  </w:body>
+                </w:document>""",
+            )
+
+        parsed = extrair_documento_docx_completo(docx_buf.getvalue())
+        sdds = parsed["structured_dds"]
+        self.assertIsNotNone(sdds)
+        self.assertEqual(sdds["solicitacao"], "380000")
+        self.assertEqual(sdds["empresa"], "")
+        self.assertEqual(sdds["contato"], "")
+        self.assertEqual(sdds["data_solicitacao"], "09/03/2026")
+        self.assertEqual(sdds["tipo"], "ALTERAÇÃO")
+        self.assertIn("correção paliativa já foi feita", sdds["necessidade_cliente"])
+        self.assertNotIn("Descreva a necessidade", sdds["necessidade_cliente"])
+        self.assertEqual(sdds["team_leader"]["detalhamento"], "")
+        self.assertEqual(len(sdds["checklist"]), 1)
+        self.assertEqual(sdds["checklist"][0]["categoria"], "Padrão de codificação")
+        self.assertEqual(sdds["checklist"][0]["pergunta"], "Todos os códigos de teste foram retirados?")
+        self.assertEqual(sdds["checklist"][0]["resposta"], "Sim")
+
+    def test_detect_and_import_from_downloads_by_key_and_pasted_text(self):
+        import io
+        import zipfile
+        from pathlib import Path
+        from sharepoint_client import SharePointManager
+
+        sp_mgr = SharePointManager(base_dir=self.test_dir)
+
+        # 1. Teste de Colar Texto da DDS
+        paste_txt = (
+            "DDS - Documento de Detalhamento da Solicitação\n"
+            "Solicitação Nº 379353\n"
+            "Nome do solicitante / Setor: Julio Schmidt / Consisanet\n"
+            "Código / Empresa Cliente: 5550003/ Fortaleza\n"
+            "Data: 07/01/2026\n"
+            "CORREÇÃO (erros no sistema)\nX\n"
+            "Detalhar com clareza quais são as necessidades do cliente:\n"
+            "Ajustar visão do BI no BALANCETE quanto ao saldo anterior.\n"
+            "Preenchido pelo Desenvolvimento\n"
+            "Nome: Caio Dias\n"
+            "Data: 19/01/2026\n"
+            "Implementação com filtros ajustados no modelo tabular.\n"
+        )
+        res_paste = sp_mgr.save_pasted_text("CONSISABI-325", paste_txt)
+        self.assertTrue(res_paste["success"])
+        loaded_paste = sp_mgr.load_pasted_text("CONSISABI-325")
+        self.assertEqual(loaded_paste, paste_txt.strip())
+
+        # 2. Teste de Deteccao de Arquivo .docx em Downloads (mockando pasta)
+        mock_dl = Path(self.test_dir) / "MockDownloads"
+        mock_dl.mkdir(parents=True, exist_ok=True)
+        docx_file = mock_dl / "DDS-379353.docx"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("word/document.xml", "<w:document><w:body/></w:document>")
+        docx_file.write_bytes(buf.getvalue())
+
+        with patch("os.environ.get", return_value=str(self.test_dir)):
+            # Simula USERPROFILE\Downloads
+            real_dl = Path(self.test_dir) / "Downloads"
+            real_dl.mkdir(parents=True, exist_ok=True)
+            real_target = real_dl / "DDS-379353.docx"
+            real_target.write_bytes(buf.getvalue())
+
+            det_res = sp_mgr.detect_and_import_from_downloads("CONSISABI-325", ticket_summary="TICKET-379353 - Ajuste Balancete")
+            self.assertTrue(det_res.get("success"))
+            self.assertEqual(det_res.get("filename"), "DDS-379353.docx")
+
+    def test_ui_offline_toolbar_and_no_forced_sp_auth(self):
+        from web_panel import HTML_PAGE
+
+        self.assertIn("dds-offline-toolbar", HTML_PAGE)
+        self.assertIn("detectDdsFromDownloads", HTML_PAGE)
+        self.assertIn("openPasteDdsModal", HTML_PAGE)
+        self.assertIn("modal-paste-dds", HTML_PAGE)
+        self.assertIn("setupDdsDragAndDrop", HTML_PAGE)
+        self.assertIn("/api/jira/dds/detect-download", HTML_PAGE)
+        self.assertIn("/api/jira/dds/paste", HTML_PAGE)
+
+    def test_sharepoint_login_profiles_and_client_ids(self):
+        from unittest.mock import MagicMock
+        from sharepoint_client import (
+            SharePointManager,
+            MS_GRAPH_CLI_CLIENT_ID,
+            AZURE_CLI_CLIENT_ID,
+            SHAREPOINT_SCOPES,
+        )
+
+        sp_mgr = SharePointManager(base_dir=self.test_dir)
+
+        # 1. Perfil Graph CLI (Padrao / Recomendado)
+        mock_app_graph = MagicMock()
+        mock_app_graph.initiate_device_flow.return_value = {
+            "user_code": "GRAPH123",
+            "verification_uri": "https://microsoft.com/devicelogin",
+        }
+        with patch("msal.PublicClientApplication", return_value=mock_app_graph) as mock_pca:
+            res_graph = sp_mgr.start_login(mode="device", profile="graph_cli")
+            self.assertEqual(res_graph["mode"], "device")
+            self.assertEqual(res_graph["user_code"], "GRAPH123")
+            self.assertEqual(res_graph["client_id"], MS_GRAPH_CLI_CLIENT_ID)
+            self.assertEqual(mock_pca.call_args[0][0], MS_GRAPH_CLI_CLIENT_ID)
+            self.assertEqual(mock_pca.call_args[1]["authority"], "https://login.microsoftonline.com/organizations")
+            mock_app_graph.initiate_device_flow.assert_called_with(scopes=SHAREPOINT_SCOPES)
+
+        # 2. Perfil Azure CLI
+        mock_app_az = MagicMock()
+        mock_app_az.initiate_device_flow.return_value = {
+            "user_code": "AZURE456",
+            "verification_uri": "https://microsoft.com/devicelogin",
+        }
+        with patch("msal.PublicClientApplication", return_value=mock_app_az) as mock_pca:
+            res_az = sp_mgr.start_login(mode="device", profile="azure_cli")
+            self.assertEqual(res_az["user_code"], "AZURE456")
+            self.assertEqual(res_az["client_id"], AZURE_CLI_CLIENT_ID)
+            self.assertEqual(mock_pca.call_args[0][0], AZURE_CLI_CLIENT_ID)
+            self.assertEqual(mock_pca.call_args[1]["authority"], "https://login.microsoftonline.com/organizations")
+
+        # 3. Perfil Custom Client ID
+        mock_app_custom = MagicMock()
+        mock_app_custom.initiate_device_flow.return_value = {
+            "user_code": "CUST789",
+            "verification_uri": "https://microsoft.com/devicelogin",
+        }
+        custom_cid = "12345678-aaaa-bbbb-cccc-123456789abc"
+        with patch("msal.PublicClientApplication", return_value=mock_app_custom) as mock_pca:
+            res_custom = sp_mgr.start_login(mode="device", profile="custom", custom_client_id=custom_cid)
+            self.assertEqual(res_custom["user_code"], "CUST789")
+            self.assertEqual(res_custom["client_id"], custom_cid)
+            self.assertEqual(mock_pca.call_args[0][0], custom_cid)
+            self.assertEqual(mock_pca.call_args[1]["authority"], "https://login.microsoftonline.com/organizations")
+
+    def test_ui_sharepoint_profiles_and_automatic_sync_controls(self):
+        from web_panel import HTML_PAGE
+
+        self.assertIn("sp_profile_radio", HTML_PAGE)
+        self.assertIn("graph_cli", HTML_PAGE)
+        self.assertIn("azure_cli", HTML_PAGE)
+        self.assertIn("sp-custom-client-id-input", HTML_PAGE)
+        self.assertIn("showSharepointConnectPanel", HTML_PAGE)
+        self.assertIn("closeSharepointConnectPanel", HTML_PAGE)
+        self.assertIn("triggerSharepointLoginFromProfile", HTML_PAGE)
+        self.assertIn("getSelectedSpProfile", HTML_PAGE)
+
+
 if __name__ == "__main__":
     unittest.main()
 

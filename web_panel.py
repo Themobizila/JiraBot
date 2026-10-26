@@ -11,6 +11,7 @@ Servidor HTTP nativo (Standard Library) com interface grafica Web completa para:
 
 from __future__ import annotations
 
+import base64
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -34,6 +35,7 @@ from engine import BotEngine, format_duration
 from history import WEEKDAYS_PT, generate_report
 from jira_client import JiraClient
 from review_dialog import get_fallback_description, show_pre_exit_popup
+from sharepoint_client import SharePointManager
 from web_assets import (
     ANALYTICS_JS,
     BRAND_TITLE_ICONS_HTML,
@@ -637,47 +639,85 @@ HTML_PAGE = r"""<!DOCTYPE html>
     </div>
   </div>
 
-  <nav class="nav-menu">
+  <nav class="nav-menu" id="sidebar-nav-menu">
+    <div class="nav-section-label">Visão Geral</div>
     <button class="nav-btn active" data-tab="tab-dashboard" title="Painel do Dia e Horários" onclick="switchTab('tab-dashboard', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-      <span class="nav-label">Painel do Dia e Horários</span>
+      <span class="nav-label">Painel do Dia</span>
     </button>
     <button class="nav-btn" data-tab="tab-analytics" title="Dashboard Analítico" onclick="switchTab('tab-analytics', this)">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>
       <span class="nav-label">Dashboard Analítico</span>
     </button>
-    <button class="nav-btn" data-tab="tab-weekly" title="Visualização Semanal" onclick="switchTab('tab-weekly', this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      <span class="nav-label">Visualização Semanal</span>
-    </button>
-    <button class="nav-btn" data-tab="tab-worklogs" title="Lançamentos do Jira" onclick="switchTab('tab-worklogs', this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-      <span class="nav-label">Lançamentos do Jira</span>
-    </button>
-    <button class="nav-btn" data-tab="tab-batch" title="Lançamentos em Lote" onclick="switchTab('tab-batch', this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-      <span class="nav-label">Lançamentos em Lote</span>
-    </button>
-    <button class="nav-btn" data-tab="tab-profiles" title="Perfis de Turno e Janelas" onclick="switchTab('tab-profiles', this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      <span class="nav-label">Perfis de Turno e Janelas</span>
-    </button>
-    <button class="nav-btn" data-tab="tab-alerts" title="Avisos e Notificações" onclick="switchTab('tab-alerts', this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-      <span class="nav-label">Avisos e Notificações</span>
-    </button>
-    <button class="nav-btn" data-tab="tab-reports" title="Relatórios e Banco de Horas" onclick="switchTab('tab-reports', this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-      <span class="nav-label">Relatórios e Banco de Horas</span>
-    </button>
-  </nav>
 
-  <div class="nav-bottom">
-  <button class="nav-btn" data-tab="tab-settings" title="Configurações e Atualização" onclick="switchTab('tab-settings', this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    <span class="nav-label">Configurações e Atualização</span>
-  </button>
-  </div>
+    <div class="nav-group is-open" id="nav-group-tickets">
+      <button type="button" class="nav-group-toggle" onclick="toggleNavGroup('nav-group-tickets')" aria-expanded="true" title="Menus de Tickets">
+        <div class="nav-group-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M9 14l2 2 4-4"/></svg>
+          <span class="nav-label">Tickets</span>
+        </div>
+        <svg class="nav-group-caret" viewBox="0 0 24 24" width="14" height="14"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+      <div class="nav-group-items">
+        <button class="nav-btn nav-sub-btn" data-tab="tab-tickets" title="Meus Tickets Jira & DDS" onclick="switchTab('tab-tickets', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
+          <span class="nav-label">Meus Tickets & DDS</span>
+        </button>
+        <button class="nav-btn nav-sub-btn" data-tab="tab-worklogs" title="Lançamentos do Jira" onclick="switchTab('tab-worklogs', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="14 2 14 8 20 8"/><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+          <span class="nav-label">Lançamentos do Jira</span>
+        </button>
+        <button class="nav-btn nav-sub-btn" data-tab="tab-batch" title="Lançamentos em Lote" onclick="switchTab('tab-batch', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+          <span class="nav-label">Lançamentos em Lote</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="nav-group is-open" id="nav-group-jornada">
+      <button type="button" class="nav-group-toggle" onclick="toggleNavGroup('nav-group-jornada')" aria-expanded="true" title="Menus de Jornada">
+        <div class="nav-group-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span class="nav-label">Jornada</span>
+        </div>
+        <svg class="nav-group-caret" viewBox="0 0 24 24" width="14" height="14"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+      <div class="nav-group-items">
+        <button class="nav-btn nav-sub-btn" data-tab="tab-weekly" title="Visualização Semanal" onclick="switchTab('tab-weekly', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span class="nav-label">Visualização Semanal</span>
+        </button>
+        <button class="nav-btn nav-sub-btn" data-tab="tab-reports" title="Relatórios e Banco de Horas" onclick="switchTab('tab-reports', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span class="nav-label">Relatórios & Banco</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="nav-group" id="nav-group-perfil">
+      <button type="button" class="nav-group-toggle" onclick="toggleNavGroup('nav-group-perfil')" aria-expanded="false" title="Menus de Perfil e Ajustes">
+        <div class="nav-group-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span class="nav-label">Perfil</span>
+        </div>
+        <svg class="nav-group-caret" viewBox="0 0 24 24" width="14" height="14"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+      <div class="nav-group-items">
+        <button class="nav-btn nav-sub-btn" data-tab="tab-profiles" title="Perfis de Turno e Janelas" onclick="switchTab('tab-profiles', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span class="nav-label">Perfis de Turno</span>
+        </button>
+        <button class="nav-btn nav-sub-btn" data-tab="tab-alerts" title="Avisos e Notificações" onclick="switchTab('tab-alerts', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="nav-label">Avisos & Alertas</span>
+        </button>
+        <button class="nav-btn nav-sub-btn" data-tab="tab-settings" title="Configurações e Atualização" onclick="switchTab('tab-settings', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span class="nav-label">Configurações</span>
+        </button>
+      </div>
+    </div>
+  </nav>
 
   <div class="sidebar-lofi-wrap" id="sidebar-lofi-wrap">
     __LOFI_SCENES__
@@ -881,8 +921,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <div class="card-title">Trocar Ticket Ativo e Definir Descrição</div>
           </div>
           <div class="form-group">
-            <label>Chave do Ticket Ativo (ex: CONSISABI-427, ATIVDIV-32)</label>
-            <input type="text" id="switch-issue-input" class="form-control" placeholder="Ex: CONSISABI-427">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <label style="margin:0;">Chave do Ticket Ativo (ex: CONSISABI-442, ATIVDIV-32)</label>
+              <button type="button" class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:11px;" onclick="switchTab('tab-tickets')">Ver Meus Tickets & DDS</button>
+            </div>
+            <input type="text" id="switch-issue-input" class="form-control" placeholder="Ex: CONSISABI-442" style="margin-top:4px;">
           </div>
           <div class="form-group">
             <label>Descrição da Atividade Realizada no Ticket</label>
@@ -1052,6 +1095,91 @@ HTML_PAGE = r"""<!DOCTYPE html>
             </div>
           </div>
           <div id="an-chart"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB: MEUS TICKETS & DDS (JIRA) ==================== -->
+    <section id="tab-tickets" class="tab-pane">
+      <div class="card">
+        <div class="card-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+          <div>
+            <div class="card-title">Meus Tickets Atribuídos no Jira Cloud</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top:2px;">
+              Visualize suas demandas em aberto, consulte a especificação e DDS do SharePoint e inicie o contador com um clique.
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn btn-outline btn-sm" id="btn-refresh-tickets" onclick="loadMyTickets(true)" title="Recarregar tickets do Jira Cloud">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Atualizar do Jira
+            </button>
+          </div>
+        </div>
+
+        <!-- Barra de Filtros e Busca -->
+        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:14px;">
+          <div style="flex:1; min-width:240px; position:relative;">
+            <input type="text" id="tickets-search-input" class="form-control" placeholder="Buscar por chave, título ou número Movidesk..." oninput="filterTicketsList()">
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm btn-outline ticket-filter-btn active" data-status="open" onclick="setTicketsFilter('open')">A Fazer / Em Andamento</button>
+            <button type="button" class="btn btn-sm btn-outline ticket-filter-btn" data-status="all" onclick="setTicketsFilter('all')">Todos</button>
+            <button type="button" class="btn btn-sm btn-outline ticket-filter-btn" data-status="done" onclick="setTicketsFilter('done')">Concluídos</button>
+          </div>
+          <!-- Seletor de Modo: Arvore Hierarquica vs Grade Plana -->
+          <div class="btn-group" id="tickets-view-mode-toggle" style="margin-left:auto; display:flex; gap:4px;">
+            <button type="button" class="btn btn-sm btn-outline active" id="btn-view-tree" onclick="setTicketsViewMode('tree')" title="Visualização em Árvore Hierárquica (Tickets Pai agrupando subtarefas)">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><line x1="10" y1="6" x2="14" y2="6"/><line x1="6.5" y1="10" x2="6.5" y2="17.5"/><line x1="6.5" y1="17.5" x2="14" y2="17.5"/></svg>
+              Árvore
+            </button>
+            <button type="button" class="btn btn-sm btn-outline" id="btn-view-grid" onclick="setTicketsViewMode('grid')" title="Visualização em Grade clássica">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+              Grade
+            </button>
+          </div>
+        </div>
+
+        <!-- Barra de Acoes da Arvore (Expandir/Recolher) -->
+        <div id="tree-actions-bar" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; font-size:12px; color:var(--text-muted);">
+          <div id="tree-summary-label">
+            Organização hierárquica por Demanda Principal e Subtarefas
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:2px 8px;" onclick="expandAllTreeGroups()">
+              Expandir Todos
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:2px 8px;" onclick="collapseAllTreeGroups()">
+              Recolher Todos
+            </button>
+          </div>
+        </div>
+
+        <!-- Grade de Resumo de Contadores -->
+        <div class="grid-4" style="margin-bottom:20px;">
+          <div class="stat-card" style="padding:12px 16px;">
+            <div class="stat-label">Total Carregado</div>
+            <div class="stat-value" id="kpi-tickets-total" style="font-size:20px;">-</div>
+          </div>
+          <div class="stat-card" style="padding:12px 16px;">
+            <div class="stat-label">Em Desenvolvimento / Execução</div>
+            <div class="stat-value" id="kpi-tickets-in-progress" style="font-size:20px; color:var(--primary);">-</div>
+          </div>
+          <div class="stat-card" style="padding:12px 16px;">
+            <div class="stat-label">A Fazer / Backlog</div>
+            <div class="stat-value" id="kpi-tickets-todo" style="font-size:20px; color:var(--warning);">-</div>
+          </div>
+          <div class="stat-card" style="padding:12px 16px;">
+            <div class="stat-label">Com DDS / SharePoint</div>
+            <div class="stat-value" id="kpi-tickets-dds" style="font-size:20px; color:var(--info);">-</div>
+          </div>
+        </div>
+
+        <!-- Container de Cards de Tickets -->
+        <div id="tickets-list-container" class="tickets-grid">
+          <div style="text-align:center; padding:40px; color:var(--text-muted); grid-column: 1 / -1;">
+            Carregando seus tickets do Jira...
+          </div>
         </div>
       </div>
     </section>
@@ -2056,6 +2184,610 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- ==================== MODAL: DETALHES DO TICKET E DDS (SHAREPOINT) ==================== -->
+<div class="modal-backdrop" id="ticket-dds-modal">
+  <div class="modal-dialog" id="ticket-dds-dialog" style="max-width: 820px; transition: all 0.25s ease;">
+    <div class="modal-header" style="align-items:flex-start;">
+      <div>
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+          <span class="badge" id="modal-ticket-key-badge" style="background:var(--primary-light); color:var(--primary); font-size:12px; font-weight:700;">KEY</span>
+          <span class="badge" id="modal-ticket-status-badge">Status</span>
+          <span class="badge" id="modal-ticket-priority-badge">Prioridade</span>
+          <span class="badge-parent" id="modal-ticket-parent-badge" style="display:none;"></span>
+        </div>
+        <h3 id="modal-ticket-title" style="margin:0; font-size:16px; line-height:1.4;">Título do Ticket</h3>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+        <button type="button" class="btn btn-outline btn-sm" id="modal-dds-fullscreen-btn" onclick="toggleModalFullscreen()" title="Alternar Tela Cheia / Modo Leitura" style="display:flex; align-items:center; gap:5px;">
+          <svg class="ico-fs-expand" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+          <svg class="ico-fs-compress" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/></svg>
+          <span id="modal-fs-label" style="font-size:12px;">Tela Cheia</span>
+        </button>
+        <button class="btn btn-outline btn-sm" onclick="closeTicketDdsModal()">Fechar</button>
+      </div>
+    </div>
+
+    <!-- Navegação Interna por Sub-abas do Modal -->
+    <div style="padding: 10px 20px 0; background: var(--bg-card); border-bottom: 1px solid var(--border-color);">
+      <div class="modal-subtabs" style="margin-bottom:0; border-bottom:none;">
+        <button type="button" class="modal-subtab-btn active" id="subtab-btn-dds" onclick="switchModalSubtab('dds')">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          DDS & Especificação
+        </button>
+        <button type="button" class="modal-subtab-btn" id="subtab-btn-sharepoint" onclick="switchModalSubtab('sharepoint')" style="display:none;">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Documento Completo &amp; SharePoint
+        </button>
+        <button type="button" class="modal-subtab-btn" id="subtab-btn-timeline" onclick="switchModalSubtab('timeline')">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Quem Mandou o Quê (<span id="modal-comments-count">0</span>)
+        </button>
+        <button type="button" class="modal-subtab-btn" id="subtab-btn-images" onclick="switchModalSubtab('images')">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          Imagens & Evidências (<span id="modal-images-count">0</span>)
+        </button>
+        <button type="button" class="modal-subtab-btn" id="subtab-btn-desc" onclick="switchModalSubtab('desc')">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          Descrição Jira
+        </button>
+        <button type="button" class="modal-subtab-btn" id="subtab-btn-attach" onclick="switchModalSubtab('attach')">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          Anexos Gerais (<span id="modal-attachments-count">0</span>)
+        </button>
+      </div>
+    </div>
+    
+    <div class="modal-body" style="max-height: calc(85vh - 170px); overflow-y: auto; padding: 18px 20px;">
+      <input type="file" id="dds-manual-docx-input" accept=".docx" style="display:none;" onchange="handleManualDocxUpload(event)">
+
+      <!-- Barra de Acoes Rapidas da DDS (100% independente de TI, drag & drop e deteccao automatica) -->
+      <div class="dds-offline-toolbar" id="dds-offline-toolbar">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; flex:1;">
+          <span style="font-size:12px; font-weight:700; color:var(--text-main);">DDS Completa:</span>
+          <button type="button" class="btn btn-outline btn-sm" onclick="detectDdsFromDownloads()" title="Verificar se o arquivo .docx da DDS foi baixado na pasta Downloads">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Detectar em Downloads
+          </button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="triggerManualDocxUpload()" title="Carregar arquivo .docx salvo no seu computador">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="12" y2="12"/><line x1="15" y1="15" x2="12" y2="12"/></svg>
+            Importar .docx Local
+          </button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="openPasteDdsModal()" title="Colar texto copiado do Word Online da DDS">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Colar Texto da DDS
+          </button>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <a id="dds-top-sharepoint-btn" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="display:none; align-items:center; gap:6px;" title="Abrir DDS no Word Online usando o navegador corporativo">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            Abrir no SharePoint (Navegador)
+          </a>
+        </div>
+      </div>
+
+      <!-- Caixa de Conexao Microsoft 365 para Sincronizacao Automatica de DDS -->
+      <div class="sp-auth-panel" id="sp-device-flow-box" style="display:none; flex-direction:column; gap:10px; border-left:3px solid #38bdf8; background:rgba(14, 165, 233, 0.05); padding:12px 14px; border-radius:6px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+            <strong style="font-size:13px; color:var(--text-main);">Sincronizacao Automatica com SharePoint Online (Microsoft 365)</strong>
+          </div>
+          <button type="button" class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:11px;" onclick="closeSharepointConnectPanel()">Fechar</button>
+        </div>
+        <div style="font-size:12px; color:var(--text-muted); line-height:1.45;">
+          Conecte uma unica vez para sincronizar automaticamente as alteracoes de Desenvolvimento, Testes e imagens das DDSs sem precisar baixar arquivos manualmente a cada atualizacao.
+          O perfil padrao utiliza o <strong>Microsoft Graph CLI</strong> com escopo de leitura restrito (<code>Files.Read</code>), resolvendo o erro <code>AADSTS65002</code> sem necessidade de chamado de TI.
+        </div>
+        
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; background:rgba(0,0,0,0.15); padding:6px 10px; border-radius:4px;">
+          <span style="font-size:11.5px; font-weight:600; color:var(--text-main);">Perfil de Conexao:</span>
+          <label style="font-size:11.5px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; color:var(--text-main);">
+            <input type="radio" name="sp_profile_radio" value="graph_cli" checked onchange="onSpProfileRadioChange(this.value)">
+            Microsoft Graph CLI (Recomendado)
+          </label>
+          <label style="font-size:11.5px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; color:var(--text-main);">
+            <input type="radio" name="sp_profile_radio" value="azure_cli" onchange="onSpProfileRadioChange(this.value)">
+            Azure CLI
+          </label>
+          <label style="font-size:11.5px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; color:var(--text-main);">
+            <input type="radio" name="sp_profile_radio" value="custom" onchange="onSpProfileRadioChange(this.value)">
+            App ID Personalizado
+          </label>
+        </div>
+
+        <div id="sp-custom-client-id-row" style="display:none;">
+          <div style="font-size:11px; color:var(--text-muted); margin-bottom:3px;">Informe o Client ID (Application ID) cadastrado no Azure AD da empresa:</div>
+          <input type="text" id="sp-custom-client-id-input" placeholder="ex: 12345678-abcd-ef01-2345-6789abcdef01" style="width:100%; max-width:440px; font-size:11.5px; padding:4px 8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-card); color:var(--text-main);">
+        </div>
+
+        <div class="sp-device-code-box" style="margin-top:2px;">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <span style="font-size:12px; color:var(--text-muted);">Codigo de Autorizacao:</span>
+            <span class="sp-device-code-token" id="sp-device-user-code">--------</span>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="copyAndOpenMicrosoftDeviceLogin()">
+              Copiar Codigo e Abrir Microsoft
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="triggerSharepointLoginFromProfile()" title="Gerar novo codigo usando o perfil selecionado">
+              Gerar Novo Codigo
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="startSharepointLogin('interactive')" title="Tentar autenticacao direta no navegador local">
+              Login Direto (SSO)
+            </button>
+          </div>
+        </div>
+        <div id="sp-device-flow-status" style="font-size:11.5px; color:var(--text-muted);">Aguardando confirmacao do codigo no navegador...</div>
+      </div>
+
+      <!-- Visao 1: Leitor Dedicado e Especificacao de DDS Integral Nativamente -->
+      <div id="modal-view-dds" class="modal-view-pane">
+        <!-- Alerta de Heranca de DDS do Ticket Pai -->
+        <div class="parent-info-banner" id="dds-parent-inherited-alert" style="display:none;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="color:#c084fc;"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span>Subtarefa técnica: especificação oficial obtida do Ticket Pai <strong id="dds-parent-alert-key" style="color:#c084fc;">-</strong> <span id="dds-parent-alert-summary" style="color:var(--text-muted); font-size:11.5px;"></span></span>
+          </div>
+          <a id="dds-parent-alert-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; flex-shrink:0;">
+            Ver Pai no Jira
+          </a>
+        </div>
+
+        <!-- Banner Movidesk (Quem Abriu / Solicitante / Empresa) -->
+        <div class="movidesk-banner" id="modal-dds-movidesk-banner">
+          <div class="movidesk-field">
+            <span class="movidesk-label">Solicitante Movidesk</span>
+            <span class="movidesk-val" id="dds-mov-solicitante">-</span>
+          </div>
+          <div class="movidesk-field">
+            <span class="movidesk-label">Empresa / Cliente</span>
+            <span class="movidesk-val" id="dds-mov-empresa">-</span>
+          </div>
+          <div class="movidesk-field" style="max-width:140px;">
+            <span class="movidesk-label">Ticket Chamado</span>
+            <span class="movidesk-val" id="dds-mov-ticket" style="color:var(--primary);">-</span>
+          </div>
+          <div class="movidesk-field">
+            <span class="movidesk-label">Aberto Por</span>
+            <span class="movidesk-val" id="dds-mov-aberto-por">-</span>
+          </div>
+        </div>
+
+        <!-- Painel de Sincronizacao e Conexao Microsoft 365 SharePoint -->
+        <div class="dds-sp-callout-banner" id="dds-sharepoint-callout-banner" style="display:none; flex-wrap:wrap;">
+          <div style="display:flex; align-items:flex-start; gap:10px; flex:1; min-width:260px;">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="color:#38bdf8; flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            <div style="font-size:12px; line-height:1.45;" id="dds-sp-callout-text">
+              <strong>Documento Vivo no SharePoint Online detectado.</strong> Conecte sua conta Microsoft 365 uma única vez para baixar automaticamente a DDS atualizada (com todas as etapas de Desenvolvimento, Testes, Resultado e capturas de tela embutidas) diretamente no painel.
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-sp-connect-banner" onclick="showSharepointConnectPanel()" style="font-size:11.5px; padding:5px 11px; white-space:nowrap;">
+              Conectar Microsoft 365
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="triggerManualDocxUpload()" style="font-size:11.5px; padding:5px 10px; white-space:nowrap;" title="Importar arquivo .docx baixado para ler todas as secoes e imagens">
+              Importar .docx
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="switchModalSubtab('sharepoint')" style="font-size:11.5px; padding:5px 10px; white-space:nowrap;">
+              Ver Documento
+            </button>
+          </div>
+        </div>
+
+        <div class="dds-viewer-container" id="dds-viewer-container">
+          <div class="dds-toolbar">
+            <div class="dds-toolbar-left" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <span id="dds-doc-title" style="font-size:13px; font-weight:700; color:var(--text-main);">DDS da Demanda</span>
+              <span class="badge" id="dds-source-badge" style="background:rgba(34,197,94,0.15); color:#22c55e;">DOCX NATIVO</span>
+              <span class="badge" id="dds-tipo-badge" style="display:none; font-weight:700;">-</span>
+            </div>
+            <div class="dds-toolbar-right" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-outline btn-sm" onclick="reloadSharepointContent()" title="Sincronizar novamente dados do Jira e SharePoint">
+                Sincronizar
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="triggerManualDocxUpload()" title="Carregar um arquivo .docx local para este chamado">
+                Importar .docx
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" id="btn-toggle-dds-mode" onclick="toggleDdsViewMode()" title="Alternar entre visualização estruturada e texto bruto da DDS">
+                Ver Texto Bruto
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="copyDdsText()" title="Copiar texto integral da DDS">
+                Copiar Texto
+              </button>
+              <a id="dds-sharepoint-btn" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="display:none;" title="Abrir link original no SharePoint da Microsoft">
+                Abrir no SharePoint
+              </a>
+            </div>
+          </div>
+
+          <div style="padding: 16px;">
+            <!-- Visao 1: Estruturada (Executiva, limpa de boilerplates) -->
+            <div id="dds-structured-view" class="dds-structured-container" style="display:none;">
+              <!-- Meta Grid do Sistema / Modulo -->
+              <div class="dds-meta-grid" id="dds-struct-meta-grid">
+                <div class="dds-meta-item">
+                  <span class="dds-meta-label">Sistema / Módulo</span>
+                  <span class="dds-meta-val" id="dds-struct-sistema">-</span>
+                </div>
+                <div class="dds-meta-item">
+                  <span class="dds-meta-label">Opção / Menu</span>
+                  <span class="dds-meta-val" id="dds-struct-opcao">-</span>
+                </div>
+                <div class="dds-meta-item">
+                  <span class="dds-meta-label">Versão Atual</span>
+                  <span class="dds-meta-val" id="dds-struct-versao">-</span>
+                </div>
+                <div class="dds-meta-item">
+                  <span class="dds-meta-label">Empresa / Filial</span>
+                  <span class="dds-meta-val" id="dds-struct-filial">-</span>
+                </div>
+              </div>
+
+              <!-- Card: Necessidade do Cliente -->
+              <div class="dds-section-card" id="dds-card-necessidade">
+                <div class="dds-section-header">
+                  <span class="dds-section-title">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    Necessidade do Cliente
+                  </span>
+                </div>
+                <div class="dds-section-body" id="dds-struct-necessidade">-</div>
+              </div>
+
+              <!-- Card: Resultado Esperado / Impacto -->
+              <div class="dds-section-card" id="dds-card-resultado">
+                <div class="dds-section-header">
+                  <span class="dds-section-title" style="color:var(--primary);">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                    Resultado Esperado e Motivação
+                  </span>
+                </div>
+                <div class="dds-section-body" id="dds-struct-resultado">-</div>
+              </div>
+
+              <!-- Card: Especificação dos Dados (se preenchido) -->
+              <div class="dds-section-card" id="dds-card-especificacao" style="display:none;">
+                <div class="dds-section-header">
+                  <span class="dds-section-title">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    Especificação dos Dados
+                  </span>
+                </div>
+                <div class="dds-section-body" id="dds-struct-especificacao">-</div>
+              </div>
+
+              <!-- Card: Suporte Técnico (se houver) -->
+              <div class="dds-section-card" id="dds-card-suporte" style="display:none;">
+                <div class="dds-section-header">
+                  <span class="dds-section-title" style="color:#fbbf24;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    Preenchido pelo Suporte Técnico
+                  </span>
+                  <span id="dds-struct-suporte-meta" style="font-size:11.5px; color:var(--text-muted);">-</span>
+                </div>
+                <div class="dds-section-body" id="dds-struct-suporte">-</div>
+              </div>
+
+              <!-- Card: Team Líder / Team Leader (se houver) -->
+              <div class="dds-section-card" id="dds-card-team-leader" style="display:none;">
+                <div class="dds-section-header">
+                  <span class="dds-section-title" style="color:#f59e0b;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    Preenchido pelo Team Líder / Team Leader
+                  </span>
+                  <span id="dds-struct-team-leader-meta" style="font-size:11.5px; color:var(--text-muted);">-</span>
+                </div>
+                <div class="dds-section-body" id="dds-struct-team-leader">-</div>
+              </div>
+
+              <!-- Card: Análise de Negócios (se houver) -->
+              <div class="dds-section-card" id="dds-card-analise" style="display:none;">
+                <div class="dds-section-header">
+                  <span class="dds-section-title" style="color:#38bdf8;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7.5" r="4"/><polyline points="17 11 19 13 23 9"/></svg>
+                    Análise de Negócios / Escopo Técnico
+                  </span>
+                  <span id="dds-struct-analise-meta" style="font-size:11.5px; color:var(--text-muted);">-</span>
+                </div>
+                <div class="dds-section-body" id="dds-struct-analise">-</div>
+              </div>
+
+              <!-- Card: Análise de Sistemas (se houver) -->
+              <div class="dds-section-card" id="dds-card-analise-sistemas" style="display:none;">
+                <div class="dds-section-header">
+                  <span class="dds-section-title" style="color:#06b6d4;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    Preenchido pela Análise de Sistemas
+                  </span>
+                  <span id="dds-struct-analise-sistemas-meta" style="font-size:11.5px; color:var(--text-muted);">-</span>
+                </div>
+                <div class="dds-section-body" id="dds-struct-analise-sistemas">-</div>
+              </div>
+
+              <!-- Card: Desenvolvimento & Implementação -->
+              <div class="dds-section-card" id="dds-card-desenvolvimento" style="display:none;">
+                <div class="dds-section-header">
+                  <span class="dds-section-title" style="color:#a855f7;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                    Preenchido pelo Desenvolvimento
+                  </span>
+                  <span id="dds-struct-dev-meta" style="font-size:11.5px; color:var(--text-muted);">-</span>
+                </div>
+                <div class="dds-section-body">
+                  <div id="dds-struct-dev">-</div>
+                  <div class="dds-section-subblock" id="dds-struct-dev-rec-wrap" style="display:none;">
+                    <div class="dds-section-subblock-title">Recomendações ao Teste de Implementação:</div>
+                    <div id="dds-struct-dev-rec">-</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Accordion: Checklist de Desenvolvimento e Revisão Final -->
+              <details class="dds-checklist-details" id="dds-card-checklist" style="display:none;">
+                <summary class="dds-checklist-summary">
+                  <span style="display:flex; align-items:center; gap:6px;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                    Checklist de Revisão Final (<span id="dds-checklist-count">0</span> itens)
+                  </span>
+                  <span style="font-size:11px; text-transform:none; font-weight:normal; color:var(--text-muted);">Clique para expandir/ocultar</span>
+                </summary>
+                <div style="padding:10px 16px; overflow-x:auto;">
+                  <table class="dds-checklist-table" id="dds-checklist-table">
+                    <thead>
+                      <tr>
+                        <th style="width:140px;">Categoria</th>
+                        <th>Item Verificado</th>
+                        <th style="width:120px;">Resposta</th>
+                      </tr>
+                    </thead>
+                    <tbody id="dds-checklist-tbody"></tbody>
+                  </table>
+                </div>
+              </details>
+
+              <!-- Card: Teste de Implementação -->
+              <div class="dds-section-card" id="dds-card-teste" style="display:none;">
+                <div class="dds-section-header">
+                  <span class="dds-section-title" style="color:#22c55e;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    Preenchido pelo Teste de Implementação
+                  </span>
+                  <span id="dds-struct-teste-meta" style="font-size:11.5px; color:var(--text-muted);">-</span>
+                </div>
+                <div class="dds-section-body" id="dds-struct-teste">-</div>
+              </div>
+
+              <!-- Card: Resultado da Homologação (Release ou Divergência) -->
+              <div class="dds-section-card" id="dds-card-resultado-homologacao" style="display:none;">
+                <div class="dds-section-header">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="dds-section-title" style="color:#f97316;">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                      Resultado da Homologação
+                    </span>
+                    <span class="badge" id="dds-struct-homolog-badge" style="background:rgba(34,197,94,0.15); color:#22c55e; font-weight:700;">Release</span>
+                  </div>
+                </div>
+                <div class="dds-section-body" id="dds-struct-resultado-homologacao">-</div>
+              </div>
+            </div>
+
+            <!-- Visao 2: Texto Bruto (Original da DDS) -->
+            <div id="dds-raw-view" style="display:none;">
+              <div id="dds-native-content" class="dds-native-viewer" style="white-space:normal; word-break:break-word;">Carregando especificação...</div>
+            </div>
+            
+            <!-- Imagens e Diagramas Integrados na DDS -->
+            <div id="dds-embedded-images-section" style="display:none; margin-top:16px;">
+              <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); margin-bottom:8px;">
+                Imagens e Diagramas Integrados na DDS
+              </div>
+              <div id="dds-embedded-images-grid" class="image-gallery-grid"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Visao 2: Quem Mandou o Que (Linha do Tempo de Comunicacoes e Mensagens) -->
+      <div id="modal-view-timeline" class="modal-view-pane" style="display:none;">
+        <div class="movidesk-banner" style="margin-bottom:14px;">
+          <div class="movidesk-field">
+            <span class="movidesk-label">Solicitante Identificado</span>
+            <span class="movidesk-val" id="timeline-mov-solicitante">-</span>
+          </div>
+          <div class="movidesk-field">
+            <span class="movidesk-label">Empresa / Setor</span>
+            <span class="movidesk-val" id="timeline-mov-empresa">-</span>
+          </div>
+          <div class="movidesk-field" style="max-width:140px;">
+            <span class="movidesk-label">Origem</span>
+            <span class="movidesk-val" style="color:#38bdf8;">Movidesk &bull; Jira</span>
+          </div>
+        </div>
+
+        <div id="modal-timeline-container" class="timeline-container">Carregando interações...</div>
+        <div id="modal-timeline-empty" style="display:none; padding:48px 20px; text-align:center; color:var(--text-muted); font-size:13px;">
+          Nenhum comentário ou comunicação registrada nesta demanda.
+        </div>
+      </div>
+
+      <!-- Visao 3: Galeria de Imagens e Evidencias -->
+      <div id="modal-view-images" class="modal-view-pane" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <span style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted);">
+            Imagens, Evidências e Prints Anexados
+          </span>
+          <span style="font-size:11.5px; color:var(--text-muted);">Clique na imagem para ampliar em tela cheia</span>
+        </div>
+        <div id="modal-images-grid" class="image-gallery-grid"></div>
+        <div id="modal-images-empty" style="display:none; padding:48px 20px; text-align:center; color:var(--text-muted); font-size:13px;">
+          Nenhuma imagem anexada a esta demanda no Jira.
+        </div>
+      </div>
+
+      <!-- Visao 4: Descricao Original do Jira -->
+      <div id="modal-view-desc" class="modal-view-pane" style="display:none;">
+        <div style="display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--text-muted); margin-bottom:16px; padding:10px 14px; background:var(--bg-subtle); border-radius:var(--radius); border:1px solid var(--border-color);">
+          <div>Responsável: <strong id="modal-ticket-assignee" style="color:var(--text-main);">-</strong></div>
+          <div>Relator: <strong id="modal-ticket-reporter" style="color:var(--text-main);">-</strong></div>
+          <div>Atualizado: <strong id="modal-ticket-updated" style="color:var(--text-main);">-</strong></div>
+          <div id="modal-ticket-movidesk-wrap" style="display:none;">Movidesk: <strong id="modal-ticket-movidesk" style="color:var(--primary);">-</strong></div>
+        </div>
+
+        <div id="modal-dds-section" style="margin-bottom: 16px;">
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            Links de Documentação Detectados
+          </div>
+          <div id="modal-dds-links-container" style="display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+
+        <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:8px;">
+          Descrição / Requisitos Brutos da Demanda
+        </div>
+        <div id="modal-ticket-description" style="background:var(--bg-subtle); border:1px solid var(--border-color); border-radius:var(--radius); padding:14px; font-size:13px; line-height:1.6; white-space:normal; word-break:break-word; max-height:360px; overflow-y:auto; color:var(--text-main); font-family:var(--font-body);">
+          Carregando detalhes...
+        </div>
+      </div>
+
+      <!-- Visao 5: Anexos Gerais (PDF, PBIX, Planilhas) -->
+      <div id="modal-view-attach" class="modal-view-pane" style="display:none;">
+        <div id="modal-attachments-section">
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:8px;">
+            Arquivos Anexados ao Ticket no Jira
+          </div>
+          <div id="modal-attachments-container" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+          <div id="modal-attachments-empty" style="display:none; padding:32px; text-align:center; color:var(--text-muted); font-size:13px;">
+            Nenhum arquivo não-imagem anexado a esta demanda no Jira.
+          </div>
+        </div>
+      </div>
+
+      <!-- Visao SharePoint: Visualizador Integrado de Documento Word (.docx) e Conexao SharePoint -->
+      <div id="modal-view-sharepoint" class="modal-view-pane" style="display:none;">
+        <div class="sharepoint-embed-toolbar">
+          <div class="sharepoint-embed-toolbar-left">
+            <span class="badge" style="background:rgba(14,165,233,0.15); color:#38bdf8; font-weight:700;">DOCUMENTO WORD &amp; SHAREPOINT</span>
+            <span id="modal-sp-doc-title" style="font-size:13px; font-weight:600; color:var(--text-main); text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:300px;">DDS Oficial</span>
+            <span class="badge" id="sp-hub-conn-badge" style="font-weight:700; font-size:11px;">Verificando...</span>
+          </div>
+          <div class="sharepoint-embed-toolbar-right">
+            <button type="button" class="btn btn-outline btn-sm" onclick="detectDdsFromDownloads()" title="Detectar arquivo .docx da DDS na pasta Downloads">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Detectar em Downloads
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="triggerManualDocxUpload()" title="Importar arquivo .docx local para visualizar tabelas e imagens">
+              Importar .docx
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="openPasteDdsModal()" title="Colar texto copiado do Word Online da DDS">
+              Colar Texto
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="reloadSharepointContent()" title="Recarregar e sincronizar versao mais recente">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Recarregar
+            </button>
+            <a id="modal-sp-folder-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="display:none; align-items:center; gap:6px;" title="Abrir pasta de documentacao oficial no SharePoint">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              Ver Pasta SharePoint
+            </a>
+            <a id="modal-sp-external-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="display:flex; align-items:center; gap:6px;" title="Abrir documento diretamente no Word Online (Office 365)">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              Abrir no Word Online
+            </a>
+          </div>
+        </div>
+
+        <div class="sharepoint-hub-container">
+          <div class="sharepoint-hub-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                <span style="font-weight:700; font-size:14px; color:var(--text-main);">Renderizador Nativo do Documento Word (.docx) e Sincronização Microsoft 365</span>
+              </div>
+              <span id="sp-hub-account-label" style="font-size:11.5px; color:var(--text-muted);"></span>
+            </div>
+            <div style="font-size:12.5px; color:var(--text-muted); line-height:1.5;" id="sp-hub-desc-text">
+              Como a Microsoft bloqueia iframes externos por política de segurança (CSP / X-Frame-Options SAMEORIGIN), o JiraBot baixa e renderiza nativamente o documento OpenXML (.docx) completo com tabelas, negritos e todas as capturas de tela clicáveis abaixo, sem barra de rolagem horizontal.
+            </div>
+            <div class="sharepoint-hub-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-sp-hub-connect" onclick="showSharepointConnectPanel()" style="display:none;">
+                Conectar Microsoft 365 (Sincronização Automática)
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" id="btn-sp-hub-disconnect" onclick="disconnectSharepointAccount()" style="display:none;">
+                Desconectar Microsoft 365
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="switchModalSubtab('dds')">
+                Ver em Formato Estruturado (Cards)
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="copySharepointText()">
+                Copiar Texto da DDS
+              </button>
+            </div>
+          </div>
+
+          <div class="sharepoint-reader-box">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <span style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted);">
+                Folha Integral Renderizada da DDS (Clique nas imagens para ampliar)
+              </span>
+              <span id="sharepoint-reader-stats" style="font-size:11px; color:var(--text-muted);">-</span>
+            </div>
+            <div id="sharepoint-doc-viewer" class="docx-visual-paper" onclick="handleDocxViewerClick(event)"></div>
+            <pre class="sharepoint-reader-content" id="sharepoint-reader-text" style="display:none;">Carregando conteudo sincronizado do documento...</pre>
+          </div>
+          <iframe id="modal-sharepoint-iframe" src="" style="display:none;" title="Sharepoint Service Frame"></iframe>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-top:1px solid var(--border-color);">
+      <a id="modal-ticket-jira-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm">
+        Abrir no Jira Cloud
+      </a>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn btn-outline btn-sm" onclick="closeTicketDdsModal()">Fechar</button>
+        <button type="button" class="btn btn-primary btn-sm" id="modal-btn-start-ticket" onclick="startTimerFromModal()">
+          Iniciar Trabalho no Bot
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: VISUALIZADOR DE IMAGENS (LIGHTBOX) ==================== -->
+<div class="modal-backdrop" id="image-lightbox-modal" onclick="closeImageLightbox()" style="z-index: 10000;">
+  <div style="max-width:92vw; max-height:92vh; display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative;" onclick="event.stopPropagation();">
+    <div style="display:flex; justify-content:space-between; width:100%; align-items:center; margin-bottom:10px; color:#ffffff;">
+      <span id="lightbox-image-title" style="font-size:14px; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,0.8);">-</span>
+      <button type="button" class="btn btn-outline btn-sm" onclick="closeImageLightbox()" style="color:#ffffff; border-color:rgba(255,255,255,0.4); background:rgba(0,0,0,0.4);">Fechar</button>
+    </div>
+    <img id="lightbox-image-preview" src="" alt="Imagem Ampliada" style="max-width:92vw; max-height:84vh; object-fit:contain; border-radius:6px; box-shadow:0 10px 40px rgba(0,0,0,0.7); background:rgba(0,0,0,0.3);">
+  </div>
+</div>
+
+<!-- ==================== MODAL: COLAR TEXTO DA DDS ==================== -->
+<div class="modal-backdrop" id="modal-paste-dds" style="display:none; z-index:10001;" onclick="closePasteDdsModal()">
+  <div class="modal-container" style="max-width:680px; width:92vw;" onclick="event.stopPropagation();">
+    <div class="modal-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#38bdf8" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span class="modal-title">Colar Conteúdo da DDS (Word Online)</span>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="closePasteDdsModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px;">
+      <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:10px; line-height:1.5;">
+        No Word Online ou no seu documento, selecione todo o texto (<strong>Ctrl + A</strong>), copie (<strong>Ctrl + C</strong>) e cole abaixo. O JiraBot estruturará automaticamente todas as etapas (Solicitante, Necessidade, Resultado, Desenvolvimento, Checklist e Homologação).
+      </div>
+      <textarea id="paste-dds-textarea" class="form-control" rows="12" style="font-family:var(--font-mono); font-size:12px; line-height:1.45;" placeholder="Cole aqui o texto copiado da DDS..."></textarea>
+    </div>
+    <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid var(--border-color);">
+      <button type="button" class="btn btn-outline btn-sm" onclick="closePasteDdsModal()">Cancelar</button>
+      <button type="button" class="btn btn-primary btn-sm" onclick="submitPastedDds()">Salvar e Estruturar DDS</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast-container"></div>
 
 <script>
@@ -2233,18 +2965,61 @@ async function apiCall(path, method = 'GET', body = null, retries = 2) {
   throw lastErr;
 }
 
+function toggleNavGroup(groupId) {
+  const group = document.getElementById(groupId);
+  if (!group) return;
+  const isOpen = group.classList.toggle('is-open');
+  const toggle = group.querySelector('.nav-group-toggle');
+  if (toggle) toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  try {
+    localStorage.setItem('jirabot_nav_group_' + groupId, isOpen ? '1' : '0');
+  } catch (e) {}
+}
+
+function initNavGroups() {
+  ['nav-group-tickets', 'nav-group-jornada', 'nav-group-perfil'].forEach(groupId => {
+    const group = document.getElementById(groupId);
+    if (!group) return;
+    let saved = null;
+    try {
+      saved = localStorage.getItem('jirabot_nav_group_' + groupId);
+    } catch (e) {}
+    // Por padrao, nav-group-tickets e nav-group-jornada iniciam abertos
+    const defaultOpen = (groupId === 'nav-group-tickets' || groupId === 'nav-group-jornada');
+    const shouldOpen = saved !== null ? (saved === '1') : defaultOpen;
+    if (shouldOpen) {
+      group.classList.add('is-open');
+      const toggle = group.querySelector('.nav-group-toggle');
+      if (toggle) toggle.setAttribute('aria-expanded', 'true');
+    } else {
+      group.classList.remove('is-open');
+      const toggle = group.querySelector('.nav-group-toggle');
+      if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    }
+  });
+}
+
 function switchTab(tabId, btnEl) {
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   const pane = document.getElementById(tabId);
   if (pane) pane.classList.add('active');
   const navBtn = btnEl || document.querySelector('.nav-btn[data-tab="' + tabId + '"]');
-  if (navBtn) navBtn.classList.add('active');
+  if (navBtn) {
+    navBtn.classList.add('active');
+    const parentGroup = navBtn.closest('.nav-group');
+    if (parentGroup && !parentGroup.classList.contains('is-open')) {
+      parentGroup.classList.add('is-open');
+      const toggle = parentGroup.querySelector('.nav-group-toggle');
+      if (toggle) toggle.setAttribute('aria-expanded', 'true');
+    }
+  }
   if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
   window.scrollTo({ top: 0, behavior: 'auto' });
 
   const titles = {
     'tab-dashboard': 'Painel do Dia e Controle de Expediente',
+    'tab-tickets': 'Meus Tickets Atribuídos & DDS (Jira)',
     'tab-analytics': 'Dashboard Analítico (Tickets, Tipos e Evolução)',
     'tab-alerts': 'Avisos e Notificações de Expediente',
     'tab-weekly': 'Visualização Semanal (Calendário e Status)',
@@ -2256,7 +3031,9 @@ function switchTab(tabId, btnEl) {
   };
   document.getElementById('page-title').textContent = titles[tabId] || 'JiraBot Web';
 
-  if (tabId === 'tab-weekly') {
+  if (tabId === 'tab-tickets') {
+    loadMyTickets();
+  } else if (tabId === 'tab-weekly') {
     const refInput = document.getElementById('weekly-ref-date');
     if (!refInput.value) refInput.value = new Date().toISOString().slice(0, 10);
     loadWeeklyView(refInput.value);
@@ -2790,6 +3567,1754 @@ async function confirmLogNow() {
   } catch (err) {
     showToast(err.message, 'error');
   }
+}
+
+/* ==================== MEUS TICKETS & DDS (JIRA) ==================== */
+let cachedMyTickets = [];
+let currentTicketsFilter = 'open';
+let currentModalTicketKey = '';
+let currentModalTicketSummary = '';
+
+async function loadMyTickets(forceRefresh = false) {
+  const container = document.getElementById('tickets-list-container');
+  if (!container) return;
+  container.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted); grid-column: 1 / -1;"><div class="spinner" style="margin:0 auto 12px auto;"></div>Consultando seus tickets no Jira Cloud...</div>';
+
+  try {
+    const q = new URLSearchParams({ status: currentTicketsFilter });
+    if (forceRefresh) q.set('refresh', '1');
+    const res = await apiCall('/api/jira/my-tickets?' + q.toString());
+    cachedMyTickets = res.tickets || [];
+
+    // Contadores
+    document.getElementById('kpi-tickets-total').textContent = cachedMyTickets.length;
+    const inProg = cachedMyTickets.filter(t => t.status_category === 'indeterminate' || t.status.toLowerCase().includes('desenvolvimento') || t.status.toLowerCase().includes('execu')).length;
+    const todo = cachedMyTickets.filter(t => t.status_category === 'new' || t.status.toLowerCase().includes('fazer') || t.status.toLowerCase().includes('backlog')).length;
+    const ddsCount = cachedMyTickets.filter(t => t.has_dds).length;
+
+    document.getElementById('kpi-tickets-in-progress').textContent = inProg;
+    document.getElementById('kpi-tickets-todo').textContent = todo;
+    document.getElementById('kpi-tickets-dds').textContent = ddsCount;
+
+    renderTicketsList();
+  } catch (err) {
+    container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--danger); grid-column: 1 / -1;">Falha ao carregar tickets: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function setTicketsFilter(filterName) {
+  currentTicketsFilter = filterName;
+  document.querySelectorAll('.ticket-filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-status') === filterName);
+  });
+  loadMyTickets();
+}
+
+function filterTicketsList() {
+  renderTicketsList();
+}
+
+let ticketsViewMode = 'tree';
+let collapsedTreeParents = new Set();
+
+function setTicketsViewMode(mode) {
+  ticketsViewMode = mode;
+  const btnTree = document.getElementById('btn-view-tree');
+  const btnGrid = document.getElementById('btn-view-grid');
+  const actionsBar = document.getElementById('tree-actions-bar');
+  if (btnTree) btnTree.classList.toggle('active', mode === 'tree');
+  if (btnGrid) btnGrid.classList.toggle('active', mode === 'grid');
+  if (actionsBar) actionsBar.style.display = (mode === 'tree') ? 'flex' : 'none';
+  renderTicketsList();
+}
+
+function toggleTreeGroup(parentKey) {
+  const container = document.getElementById('tree-children-' + parentKey);
+  const chevron = document.getElementById('tree-chevron-' + parentKey);
+  if (!container) return;
+  const isCollapsed = container.classList.toggle('collapsed');
+  if (chevron) chevron.classList.toggle('collapsed', isCollapsed);
+  if (isCollapsed) {
+    collapsedTreeParents.add(parentKey);
+  } else {
+    collapsedTreeParents.delete(parentKey);
+  }
+}
+
+function expandAllTreeGroups() {
+  collapsedTreeParents.clear();
+  document.querySelectorAll('.tree-children-container').forEach(el => el.classList.remove('collapsed'));
+  document.querySelectorAll('.tree-chevron-btn').forEach(btn => btn.classList.remove('collapsed'));
+}
+
+function collapseAllTreeGroups() {
+  document.querySelectorAll('.tree-children-container').forEach(el => {
+    el.classList.add('collapsed');
+    const pKey = el.id.replace('tree-children-', '');
+    collapsedTreeParents.add(pKey);
+  });
+  document.querySelectorAll('.tree-chevron-btn').forEach(btn => btn.classList.add('collapsed'));
+}
+
+function renderSingleTicketCard(t, activeTicketBot) {
+  const isCurrentActive = activeTicketBot && t.key.toUpperCase() === activeTicketBot;
+  const activeClass = isCurrentActive ? 'ticket-card is-active-bot' : 'ticket-card';
+
+  let statusBadgeClass = 'badge-idle';
+  const sLower = t.status.toLowerCase();
+  if (sLower.includes('desenvolvimento') || sLower.includes('execu') || t.status_category === 'indeterminate') {
+    statusBadgeClass = 'badge-running';
+  } else if (sLower.includes('conclu') || t.status_category === 'done') {
+    statusBadgeClass = 'badge-success';
+  }
+
+  const ddsBadgeHtml = t.has_dds
+    ? (t.dds_from_parent
+        ? `<span class="badge-dds" style="background:rgba(147,51,234,0.16); color:#c084fc; border-color:rgba(168,85,247,0.35);" title="DDS herdada do ticket pai ${escapeHtml(t.parent_key || '')}"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> DDS NO PAI</span>`
+        : '<span class="badge-dds" title="DDS ou Especificação vinculada"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> DDS VINCULADA</span>'
+      )
+    : '';
+
+  const parentBadgeHtml = t.parent_key
+    ? `<span class="badge-parent" title="Subtarefa do ticket pai ${escapeHtml(t.parent_key)}: ${escapeHtml(t.parent_summary || '')}">Pai: ${escapeHtml(t.parent_key)}</span>`
+    : '';
+
+  const movideskBadgeHtml = t.movidesk_ticket
+    ? `<span class="badge" style="background:rgba(255,255,255,0.06); font-size:10px;">Movidesk #${escapeHtml(t.movidesk_ticket)}</span>`
+    : '';
+
+  const startBtnHtml = isCurrentActive
+    ? '<span class="badge-active-pulse">ATIVO NO CRONÔMETRO</span>'
+    : `<button type="button" class="btn btn-primary btn-sm" onclick="startTicketFromCard('${escapeHtml(t.key)}', '${escapeHtml(t.summary.replace(/'/g, "\\'"))}')" title="Começar a trabalhar e iniciar o contador neste ticket">Iniciar no Bot</button>`;
+
+  return `
+    <div class="${activeClass}">
+      <div>
+        <div class="ticket-card-header">
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <a href="${escapeHtml(t.url)}" target="_blank" rel="noopener noreferrer" class="ticket-key-link" title="Abrir no Jira">
+              ${escapeHtml(t.key)}
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </a>
+            <span class="badge ${statusBadgeClass}">${escapeHtml(t.status)}</span>
+            ${ddsBadgeHtml}
+          </div>
+          <div style="display:flex; gap:4px; align-items:center;">
+            ${movideskBadgeHtml}
+            <span class="badge" style="font-size:10px; background:rgba(255,255,255,0.05);">${escapeHtml(t.priority)}</span>
+          </div>
+        </div>
+
+        <h4 class="ticket-card-title" title="${escapeHtml(t.summary)}">${escapeHtml(t.summary)}</h4>
+
+        <div class="ticket-card-meta" style="margin-top:8px;">
+          <span>Tipo: <strong>${escapeHtml(t.issue_type)}</strong></span>
+          ${parentBadgeHtml ? `<span>&bull;</span> ${parentBadgeHtml}` : ''}
+          <span>&bull;</span>
+          <span>Atualizado: <strong>${escapeHtml(t.updated)}</strong></span>
+        </div>
+      </div>
+
+      <div class="ticket-card-footer">
+        <button type="button" class="btn btn-outline btn-sm" onclick="openTicketDdsModal('${escapeHtml(t.key)}')" title="Ver detalhes completos, requisitos e documentos DDS">
+          Ver DDS / Detalhes
+        </button>
+        <div>
+          ${startBtnHtml}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTicketsTree(container, filtered, activeTicketBot) {
+  const allKnownParents = new Map();
+  cachedMyTickets.forEach(t => {
+    if (t.parent_key) {
+      if (!allKnownParents.has(t.parent_key)) {
+        allKnownParents.set(t.parent_key, {
+          key: t.parent_key,
+          summary: t.parent_summary || 'Demanda Principal',
+          ticket: null
+        });
+      }
+    }
+  });
+
+  cachedMyTickets.forEach(t => {
+    if (allKnownParents.has(t.key)) {
+      allKnownParents.get(t.key).ticket = t;
+      allKnownParents.get(t.key).summary = t.summary;
+    }
+  });
+
+  const activeGroups = new Map();
+  const independentTickets = [];
+
+  filtered.forEach(t => {
+    if (t.parent_key) {
+      const pKey = t.parent_key;
+      if (!activeGroups.has(pKey)) {
+        const known = allKnownParents.get(pKey);
+        activeGroups.set(pKey, {
+          key: pKey,
+          summary: known ? known.summary : (t.parent_summary || 'Demanda Principal'),
+          ticket: known ? known.ticket : null,
+          children: []
+        });
+      }
+      activeGroups.get(pKey).children.push(t);
+    } else if (allKnownParents.has(t.key)) {
+      if (!activeGroups.has(t.key)) {
+        activeGroups.set(t.key, {
+          key: t.key,
+          summary: t.summary,
+          ticket: t,
+          children: []
+        });
+      } else {
+        activeGroups.get(t.key).ticket = t;
+        activeGroups.get(t.key).summary = t.summary;
+      }
+    } else {
+      independentTickets.push(t);
+    }
+  });
+
+  const summaryEl = document.getElementById('tree-summary-label');
+  if (summaryEl) {
+    summaryEl.textContent = `${activeGroups.size} demanda(s) principal(is) • ${independentTickets.length} individual(is)`;
+  }
+
+  let html = '';
+
+  activeGroups.forEach(group => {
+    const pKey = group.key;
+    const isCollapsed = collapsedTreeParents.has(pKey);
+    const parentTicket = group.ticket;
+    const parentUrl = parentTicket ? parentTicket.url : (cachedMyTickets[0] ? cachedMyTickets[0].url.replace(cachedMyTickets[0].key, pKey) : '#');
+    const parentStatus = parentTicket ? parentTicket.status : 'Principal';
+    const parentStatusCat = parentTicket ? parentTicket.status_category : '';
+    let statusBadgeClass = 'badge-idle';
+    if (parentStatus.toLowerCase().includes('desenvolvimento') || parentStatus.toLowerCase().includes('execu') || parentStatusCat === 'indeterminate') {
+      statusBadgeClass = 'badge-running';
+    } else if (parentStatus.toLowerCase().includes('conclu') || parentStatusCat === 'done') {
+      statusBadgeClass = 'badge-success';
+    }
+
+    const parentHasDds = parentTicket ? parentTicket.has_dds : (group.children.some(c => c.has_dds));
+    const parentDdsBadge = parentHasDds
+      ? '<span class="badge-dds" title="DDS ou Especificação vinculada"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> DDS VINCULADA</span>'
+      : '';
+
+    const isParentActive = parentTicket && activeTicketBot && parentTicket.key.toUpperCase() === activeTicketBot;
+    const parentStartBtn = parentTicket
+      ? (isParentActive
+          ? '<span class="badge-active-pulse">ATIVO NO CRONÔMETRO</span>'
+          : `<button type="button" class="btn btn-primary btn-sm" onclick="startTicketFromCard('${escapeHtml(parentTicket.key)}', '${escapeHtml(parentTicket.summary.replace(/'/g, "\\'"))}')" title="Iniciar cronômetro nesta demanda pai">Iniciar no Bot</button>`)
+      : '';
+
+    const childrenCardsHtml = group.children.map(child => {
+      const isChildActive = activeTicketBot && child.key.toUpperCase() === activeTicketBot;
+      let cStatusClass = 'badge-idle';
+      const cStatusLower = child.status.toLowerCase();
+      if (cStatusLower.includes('desenvolvimento') || cStatusLower.includes('execu') || child.status_category === 'indeterminate') {
+        cStatusClass = 'badge-running';
+      } else if (cStatusLower.includes('conclu') || child.status_category === 'done') {
+        cStatusClass = 'badge-success';
+      }
+
+      const childStartBtn = isChildActive
+        ? '<span class="badge-active-pulse" style="font-size:9.5px;">ATIVO</span>'
+        : `<button type="button" class="btn btn-primary btn-sm" style="font-size:11px; padding:3px 8px;" onclick="startTicketFromCard('${escapeHtml(child.key)}', '${escapeHtml(child.summary.replace(/'/g, "\\'"))}')" title="Começar a trabalhar nesta subtarefa">Iniciar no Bot</button>`;
+
+      return `
+        <div class="tree-child-card ${isChildActive ? 'is-active-bot' : ''}">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap;">
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <a href="${escapeHtml(child.url)}" target="_blank" rel="noopener noreferrer" class="ticket-key-link" style="font-size:12px;" title="Abrir no Jira">
+                ${escapeHtml(child.key)}
+                <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+              <span class="badge ${cStatusClass}" style="font-size:10.5px;">${escapeHtml(child.status)}</span>
+              <span class="badge" style="font-size:10px; background:rgba(255,255,255,0.06);">${escapeHtml(child.priority)}</span>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px;" onclick="openTicketDdsModal('${escapeHtml(child.key)}')" title="Ver DDS e requisitos desta subtarefa">
+                Ver DDS
+              </button>
+              ${childStartBtn}
+            </div>
+          </div>
+          <div class="tree-child-title" title="${escapeHtml(child.summary)}">
+            ${escapeHtml(child.summary)}
+          </div>
+          <div class="tree-child-meta">
+            <span>Tipo: <strong>${escapeHtml(child.issue_type)}</strong></span>
+            <span>&bull;</span>
+            <span>Atualizado: <strong>${escapeHtml(child.updated)}</strong></span>
+            ${child.movidesk_ticket ? `<span>&bull;</span> <span>Movidesk: <strong>#${escapeHtml(child.movidesk_ticket)}</strong></span>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    html += `
+      <div class="tree-parent-group" data-parent-key="${escapeHtml(pKey)}">
+        <div class="tree-parent-card" onclick="toggleTreeGroup('${escapeHtml(pKey)}')">
+          <div class="tree-parent-header">
+            <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0; flex-wrap:wrap;">
+              <button type="button" class="tree-chevron-btn ${isCollapsed ? 'collapsed' : ''}" id="tree-chevron-${escapeHtml(pKey)}" onclick="event.stopPropagation(); toggleTreeGroup('${escapeHtml(pKey)}')" title="Expandir/Recolher subtarefas">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <a href="${escapeHtml(parentUrl)}" target="_blank" rel="noopener noreferrer" class="ticket-key-link" style="font-size:13px; font-weight:700;" onclick="event.stopPropagation();" title="Abrir Demanda Principal no Jira">
+                ${escapeHtml(pKey)}
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+              <span class="badge ${statusBadgeClass}">${escapeHtml(parentStatus)}</span>
+              ${parentDdsBadge}
+              <span class="badge" style="background:rgba(147,51,234,0.18); color:#c084fc; font-weight:700;">
+                ${group.children.length} subtarefa(s) vinculada(s)
+              </span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;" onclick="event.stopPropagation();">
+              <button type="button" class="btn btn-outline btn-sm" onclick="openTicketDdsModal('${escapeHtml(pKey)}')" title="Ver DDS / Especificação da Demanda Principal">
+                Ver DDS do Pai
+              </button>
+              ${parentStartBtn}
+            </div>
+          </div>
+          <div class="tree-parent-title">
+            ${escapeHtml(group.summary)}
+          </div>
+        </div>
+
+        <div class="tree-children-container ${isCollapsed ? 'collapsed' : ''}" id="tree-children-${escapeHtml(pKey)}">
+          ${childrenCardsHtml || '<div style="font-size:12px; color:var(--text-muted); padding:4px 0;">Nenhuma subtarefa atribuída a você neste grupo sob os filtros atuais.</div>'}
+        </div>
+      </div>
+    `;
+  });
+
+  if (independentTickets.length > 0) {
+    html += `
+      <div class="tree-independent-section">
+        <div class="tree-section-header">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          Demandas Individuais e Tarefas Diretas (${independentTickets.length})
+        </div>
+        <div class="tickets-grid">
+          ${independentTickets.map(t => renderSingleTicketCard(t, activeTicketBot)).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+}
+
+function renderTicketsList() {
+  const container = document.getElementById('tickets-list-container');
+  if (!container) return;
+
+  const search = (document.getElementById('tickets-search-input').value || '').trim().toLowerCase();
+  const activeTicketBot = appState && appState.today ? (appState.today.target_issue || '').toUpperCase() : '';
+
+  const filtered = cachedMyTickets.filter(t => {
+    if (!search) return true;
+    return (
+      (t.key || '').toLowerCase().includes(search) ||
+      (t.summary || '').toLowerCase().includes(search) ||
+      (t.status || '').toLowerCase().includes(search) ||
+      (t.parent_key || '').toLowerCase().includes(search) ||
+      (t.parent_summary || '').toLowerCase().includes(search) ||
+      (t.movidesk_ticket || '').toLowerCase().includes(search)
+    );
+  });
+
+  if (filtered.length === 0) {
+    container.className = 'tickets-grid';
+    container.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted); grid-column: 1 / -1;">Nenhum ticket encontrado para os filtros atuais.</div>';
+    return;
+  }
+
+  if (ticketsViewMode === 'tree') {
+    container.className = 'tickets-tree-container';
+    renderTicketsTree(container, filtered, activeTicketBot);
+  } else {
+    container.className = 'tickets-grid';
+    container.innerHTML = filtered.map(t => renderSingleTicketCard(t, activeTicketBot)).join('');
+  }
+}
+
+let currentModalDdsLinks = [];
+let currentSelectedDdsIndex = 0;
+let currentModalDdsText = '';
+let currentModalDocHtml = '';
+let currentSharepointStatus = {};
+let currentSpVerificationUri = 'https://microsoft.com/devicelogin';
+let currentSpDeviceCode = '';
+let spPollTimer = null;
+let ddsViewMode = 'structured';
+let currentModalImages = [];
+let currentSharepointEmbedUrl = '';
+
+function stripInternalDdsTokens(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/\[\[DOCX_IMG:[^\]]+\]\]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function findModalImageIndex(tokenOrName) {
+  if (!tokenOrName || !Array.isArray(currentModalImages) || currentModalImages.length === 0) return -1;
+  const clean = String(tokenOrName).trim();
+  const cleanLow = clean.toLowerCase();
+  let idx = currentModalImages.findIndex(img => (img.id || '') === clean);
+  if (idx !== -1) return idx;
+  idx = currentModalImages.findIndex(img => (img.name || '').toLowerCase() === cleanLow);
+  if (idx !== -1) return idx;
+  idx = currentModalImages.findIndex(img => (img.name || '').toLowerCase().endsWith(cleanLow));
+  return idx;
+}
+
+function buildInlineFigureHtml(imgIdx) {
+  if (imgIdx < 0 || imgIdx >= currentModalImages.length) return '';
+  const img = currentModalImages[imgIdx];
+  const src = escapeHtml(img.thumbnail_url || img.proxy_url || img.url || '');
+  const name = escapeHtml(img.name || 'Evidência');
+  const author = escapeHtml(img.author || 'DDS');
+  return (
+    '<figure class="dds-inline-figure" onclick="openImageLightboxByIndex(' + imgIdx + ')">' +
+      '<img src="' + src + '" alt="' + name + '" class="dds-inline-img" loading="lazy">' +
+      '<figcaption class="dds-inline-caption">' + name + ' &bull; ' + author + ' (Clique para ampliar)</figcaption>' +
+    '</figure>'
+  );
+}
+
+function formatInlineRichSegments(rawLine) {
+  if (!rawLine) return '';
+  const placeholders = [];
+  const stash = (htmlFrag) => {
+    const key = '@@JBPH' + placeholders.length + '@@';
+    placeholders.push(htmlFrag);
+    return key;
+  };
+
+  let working = String(rawLine);
+
+  // 1. Codigo inline `...`
+  working = working.replace(/`([^`\n]+)`/g, (_, codeTxt) => {
+    return stash('<code class="dds-inline-code">' + escapeHtml(codeTxt) + '</code>');
+  });
+
+  // 2. Links no padrao Jira [Texto|https://...] ou [https://...]
+  working = working.replace(/\[([^\]|\n]+)\|(https?:\/\/[^\]\s]+)\]/g, (_, label, url) => {
+    const cleanLabel = escapeHtml(label.replace(/\*\*/g, '').trim() || url);
+    return stash('<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer" class="dds-rich-link">' + cleanLabel + '</a>');
+  });
+
+  // 3. Links Markdown [Texto](https://...)
+  working = working.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+    const cleanLabel = escapeHtml(label.replace(/\*\*/g, '').trim() || url);
+    return stash('<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer" class="dds-rich-link">' + cleanLabel + '</a>');
+  });
+
+  // 4. URLs soltas no texto
+  working = working.replace(/(^|[\s(])(https?:\/\/[^\s<>)\]]+)/g, (_, prefix, url) => {
+    const cleanUrl = url.replace(/[.,;]+$/, '');
+    const trailing = url.slice(cleanUrl.length);
+    return prefix + stash('<a href="' + escapeHtml(cleanUrl) + '" target="_blank" rel="noopener noreferrer" class="dds-rich-link">' + escapeHtml(cleanUrl) + '</a>') + trailing;
+  });
+
+  // 5. Escapa todo o restante contra XSS
+  let safe = escapeHtml(working);
+
+  // 6. Negrito duplo **texto**
+  safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+  // 7. Negrito simples *texto* (padrao Jira Wiki / Word)
+  safe = safe.replace(/(^|[\s(\[{])\*([^\s*][^*]*?[^\s*]|[^\s*])\*(?=$|[\s)\]}.,;:!?])/g, '$1<strong>$2</strong>');
+
+  // 8. Destaque de @Mencoes
+  safe = safe.replace(/(^|[\s(\[{])(@[A-ZÀ-Ú][a-zA-ZÀ-ú0-9_.\-]+(?:\s+[A-ZÀ-Ú][a-zA-ZÀ-ú0-9_.\-]+){0,2})/g, '$1<span class="mention-pill">$2</span>');
+
+  // 9. Restaura fragmentos protegidos
+  safe = safe.replace(/@@JBPH(\d+)@@/g, (_, idxStr) => placeholders[Number(idxStr)] || '');
+  return safe;
+}
+
+function formatDdsRichText(rawText) {
+  if (!rawText) return '';
+  let normalized = String(rawText).replace(/\r\n/g, '\n');
+
+  // Protege blocos de codigo ```...``` e {code}...{code}
+  const codeBlocks = [];
+  normalized = normalized.replace(/```([\s\S]*?)```|\{code(?::[^}]*)?\}([\s\S]*?)\{code\}/gi, (_, g1, g2) => {
+    const content = (g1 !== undefined ? g1 : g2) || '';
+    const token = '@@JBCODE' + codeBlocks.length + '@@';
+    codeBlocks.push('<pre class="dds-code-block">' + escapeHtml(content.trim()) + '</pre>');
+    return '\n' + token + '\n';
+  });
+
+  // Garante que marcadores de imagem [[DOCX_IMG:...]] fiquem em sua propria linha
+  normalized = normalized.replace(/\[\[DOCX_IMG:([^\]]+)\]\]/g, '\n[[DOCX_IMG:$1]]\n');
+
+  // Suporta sintaxe de imagem Jira !arquivo.png|thumbnail! em linha propria
+  normalized = normalized.replace(/!([^!\n|]+?\.(?:png|jpg|jpeg|gif|webp))(?:\|[^!\n]*)?!/gi, '\n[[JIRA_IMG:$1]]\n');
+
+  const lines = normalized.split('\n');
+  const htmlParts = [];
+  let prevWasBlank = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      if (!prevWasBlank && htmlParts.length > 0) {
+        prevWasBlank = true;
+      }
+      continue;
+    }
+    prevWasBlank = false;
+
+    const mCode = trimmed.match(/^@@JBCODE(\d+)@@$/);
+    if (mCode) {
+      htmlParts.push(codeBlocks[Number(mCode[1])] || '');
+      continue;
+    }
+
+    const mDocxImg = trimmed.match(/^\[\[DOCX_IMG:([^\]]+)\]\]$/);
+    if (mDocxImg) {
+      const idx = findModalImageIndex(mDocxImg[1]);
+      if (idx !== -1) {
+        htmlParts.push(buildInlineFigureHtml(idx));
+      }
+      continue;
+    }
+
+    const mJiraImg = trimmed.match(/^\[\[JIRA_IMG:([^\]]+)\]\]$/);
+    if (mJiraImg) {
+      const idx = findModalImageIndex(mJiraImg[1]);
+      if (idx !== -1) {
+        htmlParts.push(buildInlineFigureHtml(idx));
+      } else {
+        htmlParts.push('<div class="dds-rich-p"><span class="dds-inline-code">Anexo: ' + escapeHtml(mJiraImg[1]) + '</span></div>');
+      }
+      continue;
+    }
+
+    const mHeading = trimmed.match(/^#{1,4}\s+(.+)$/);
+    if (mHeading) {
+      htmlParts.push('<div class="dds-rich-heading">' + formatInlineRichSegments(mHeading[1]) + '</div>');
+      continue;
+    }
+
+    const mBullet = trimmed.match(/^(?:[-•]|\*(?=\s))\s+(.+)$/);
+    if (mBullet) {
+      htmlParts.push(
+        '<div class="dds-rich-bullet">' +
+          '<span class="dds-bullet-dot">&bull;</span>' +
+          '<span>' + formatInlineRichSegments(mBullet[1]) + '</span>' +
+        '</div>'
+      );
+      continue;
+    }
+
+    const mNum = trimmed.match(/^(\d+[.)])\s+(.+)$/);
+    if (mNum) {
+      htmlParts.push(
+        '<div class="dds-rich-num">' +
+          '<span class="dds-num-idx">' + escapeHtml(mNum[1]) + '</span>' +
+          '<span>' + formatInlineRichSegments(mNum[2]) + '</span>' +
+        '</div>'
+      );
+      continue;
+    }
+
+    htmlParts.push('<div class="dds-rich-p">' + formatInlineRichSegments(trimmed) + '</div>');
+  }
+
+  return htmlParts.join('');
+}
+
+function toggleDdsViewMode() {
+  const structView = document.getElementById('dds-structured-view');
+  const rawView = document.getElementById('dds-raw-view');
+  const btn = document.getElementById('btn-toggle-dds-mode');
+  if (!structView || !rawView) return;
+
+  if (ddsViewMode === 'structured') {
+    ddsViewMode = 'raw';
+    structView.style.display = 'none';
+    rawView.style.display = 'block';
+    if (btn) btn.textContent = 'Ver Estruturado';
+  } else {
+    ddsViewMode = 'structured';
+    structView.style.display = 'flex';
+    rawView.style.display = 'none';
+    if (btn) btn.textContent = 'Ver Texto Bruto';
+  }
+}
+
+function formatCommentBody(bodyText, mentions, disclaimerNote) {
+  if (!bodyText) return '';
+  let rendered = formatDdsRichText(bodyText);
+
+  if (Array.isArray(mentions)) {
+    mentions.forEach(m => {
+      if (!m) return;
+      const safeM = escapeHtml(m);
+      const token = '@' + safeM;
+      if (!rendered.includes('>' + token + '<')) {
+        const re = new RegExp('(@' + safeM.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')\\b', 'g');
+        rendered = rendered.replace(re, '<span class="mention-pill">$1</span>');
+      }
+    });
+  }
+
+  if (disclaimerNote) {
+    rendered += `
+      <details style="margin-top:10px; font-size:11.5px; color:var(--text-muted); border-top:1px dashed var(--border-color); padding-top:6px;">
+        <summary style="cursor:pointer; font-weight:600;">Termo de Atendimento e LGPD (Mensagem Automática)</summary>
+        <div style="padding:6px 0; white-space:pre-wrap; color:var(--text-muted);">${escapeHtml(disclaimerNote)}</div>
+      </details>
+    `;
+  }
+  return rendered;
+}
+
+function switchModalSubtab(subtab) {
+  const tabs = ['dds', 'sharepoint', 'timeline', 'images', 'desc', 'attach'];
+  tabs.forEach(t => {
+    const btn = document.getElementById('subtab-btn-' + t);
+    const pane = document.getElementById('modal-view-' + t);
+    if (btn) btn.classList.toggle('active', t === subtab);
+    if (pane) pane.style.display = (t === subtab) ? 'block' : 'none';
+  });
+  if (subtab === 'sharepoint') {
+    updateSharepointReaderContent();
+  }
+}
+
+function handleDocxViewerClick(event) {
+  const fig = event.target ? event.target.closest('[data-docx-img-id]') : null;
+  if (!fig) return;
+  const imgId = fig.getAttribute('data-docx-img-id') || '';
+  const idx = findModalImageIndex(imgId);
+  if (idx !== -1) {
+    openImageLightboxByIndex(idx);
+    return;
+  }
+  const imgEl = fig.querySelector('img');
+  if (imgEl && imgEl.src) {
+    openImageLightbox(imgEl.src, imgEl.alt || 'Evidência da DDS');
+  }
+}
+
+function updateSharepointReaderContent() {
+  const viewerEl = document.getElementById('sharepoint-doc-viewer');
+  const readerEl = document.getElementById('sharepoint-reader-text');
+  const statsEl = document.getElementById('sharepoint-reader-stats');
+  const connBadge = document.getElementById('sp-hub-conn-badge');
+  const accLabel = document.getElementById('sp-hub-account-label');
+  const btnConn = document.getElementById('btn-sp-hub-connect');
+  const btnDisc = document.getElementById('btn-sp-hub-disconnect');
+
+  const cleanPlain = stripInternalDdsTokens(currentModalDdsText || '');
+  if (readerEl) {
+    readerEl.textContent = cleanPlain || 'Nenhum conteúdo textual extraído disponível no momento.';
+  }
+
+  if (viewerEl) {
+    if (currentModalDocHtml) {
+      viewerEl.innerHTML = currentModalDocHtml;
+      viewerEl.style.display = 'block';
+      if (readerEl) readerEl.style.display = 'none';
+    } else if (currentModalDdsText) {
+      viewerEl.innerHTML = formatDdsRichText(currentModalDdsText);
+      viewerEl.style.display = 'block';
+      if (readerEl) readerEl.style.display = 'none';
+    } else {
+      viewerEl.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">Nenhum documento carregado no momento. Conecte sua conta Microsoft 365 ou importe o arquivo .docx para visualizar a folha integral.</div>';
+      viewerEl.style.display = 'block';
+    }
+  }
+
+  if (statsEl) {
+    const chars = cleanPlain.length;
+    const lines = cleanPlain ? cleanPlain.split('\n').length : 0;
+    const imgCount = Array.isArray(currentModalImages) ? currentModalImages.length : 0;
+    statsEl.textContent = lines + ' linhas | ' + chars + ' caracteres | ' + imgCount + ' evidência(s)';
+  }
+
+  const spSt = currentSharepointStatus || {};
+  if (connBadge) {
+    if (spSt.synced_live) {
+      connBadge.textContent = 'Sincronizado Ao Vivo (SharePoint)';
+      connBadge.style.background = 'rgba(34, 197, 94, 0.15)';
+      connBadge.style.color = '#22c55e';
+    } else if (spSt.connected) {
+      connBadge.textContent = 'Microsoft 365 Conectado';
+      connBadge.style.background = 'rgba(14, 165, 233, 0.15)';
+      connBadge.style.color = '#38bdf8';
+    } else if (spSt.has_sharepoint_link) {
+      connBadge.textContent = 'SharePoint Desconectado';
+      connBadge.style.background = 'rgba(234, 179, 8, 0.15)';
+      connBadge.style.color = '#eab308';
+    } else {
+      connBadge.textContent = 'Documento Local / Anexo Jira';
+      connBadge.style.background = 'rgba(148, 163, 184, 0.15)';
+      connBadge.style.color = 'var(--text-muted)';
+    }
+  }
+
+  if (accLabel) {
+    accLabel.textContent = spSt.connected && spSt.account ? ('Conta ativa: ' + spSt.account) : '';
+  }
+  if (btnConn) {
+    btnConn.style.display = (!spSt.connected && spSt.has_sharepoint_link) ? 'inline-flex' : 'none';
+  }
+  if (btnDisc) {
+    btnDisc.style.display = spSt.connected ? 'inline-flex' : 'none';
+  }
+}
+
+function ensureSharepointIframeLoaded() {
+  updateSharepointReaderContent();
+}
+
+function reloadSharepointIframe() {
+  reloadSharepointContent();
+}
+
+async function reloadSharepointContent() {
+  if (!currentModalTicketKey) return;
+  showToast('Sincronizando dados atualizados da DDS e SharePoint...', 'info');
+  try {
+    await openTicketDdsModal(currentModalTicketKey, true, true);
+    showToast('Dados da DDS sincronizados com sucesso!', 'success');
+  } catch (err) {
+    showToast('Falha ao recarregar DDS: ' + err.message, 'error');
+  }
+}
+
+function getSelectedSpProfile() {
+  const checked = document.querySelector('input[name="sp_profile_radio"]:checked');
+  return checked ? checked.value : 'graph_cli';
+}
+
+function getSpCustomClientId() {
+  const el = document.getElementById('sp-custom-client-id-input');
+  return el ? el.value.trim() : '';
+}
+
+function onSpProfileRadioChange(val) {
+  const row = document.getElementById('sp-custom-client-id-row');
+  if (row) {
+    row.style.display = (val === 'custom') ? 'block' : 'none';
+  }
+}
+
+function showSharepointConnectPanel() {
+  const box = document.getElementById('sp-device-flow-box');
+  if (box) {
+    box.style.display = 'flex';
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  startSharepointLogin('device');
+}
+
+function closeSharepointConnectPanel() {
+  const box = document.getElementById('sp-device-flow-box');
+  if (box) box.style.display = 'none';
+  stopSharepointPoll();
+}
+
+function triggerSharepointLoginFromProfile() {
+  const prof = getSelectedSpProfile();
+  const customCid = getSpCustomClientId();
+  startSharepointLogin('device', prof, customCid);
+}
+
+function stopSharepointPoll() {
+  if (spPollTimer) {
+    clearInterval(spPollTimer);
+    spPollTimer = null;
+  }
+}
+
+async function startSharepointLogin(mode = 'device', profile = null, customClientId = null) {
+  try {
+    const selProfile = profile || getSelectedSpProfile();
+    const selCustomCid = customClientId !== null ? customClientId : getSpCustomClientId();
+    const payload = {
+      mode: mode || 'device',
+      profile: selProfile,
+      custom_client_id: selCustomCid
+    };
+    const res = await apiCall('/api/sharepoint/connect', 'POST', payload);
+    if (res.error) throw new Error(res.error);
+
+    if (res.already_connected || res.connected) {
+      const box = document.getElementById('sp-device-flow-box');
+      if (box) box.style.display = 'none';
+      showToast(res.message || 'Conta Microsoft 365 ja conectada! Sincronizando...', 'success');
+      if (currentModalTicketKey) {
+        await openTicketDdsModal(currentModalTicketKey, true, true);
+      }
+      return;
+    }
+
+    const box = document.getElementById('sp-device-flow-box');
+    const statusEl = document.getElementById('sp-device-flow-status');
+    const codeEl = document.getElementById('sp-device-user-code');
+
+    if (res.mode === 'device' && res.user_code) {
+      currentSpDeviceCode = res.user_code;
+      currentSpVerificationUri = res.verification_uri || 'https://microsoft.com/devicelogin';
+      if (codeEl) codeEl.textContent = currentSpDeviceCode;
+      if (statusEl) statusEl.textContent = 'Aguardando confirmacao do codigo no navegador...';
+      if (box) box.style.display = 'flex';
+      copyAndOpenMicrosoftDeviceLogin();
+    } else {
+      if (statusEl) statusEl.textContent = 'Aguardando selecao da conta Microsoft no navegador...';
+      if (box) box.style.display = 'flex';
+      showToast(res.message || 'Conclua o login na janela do navegador.', 'info');
+    }
+
+    stopSharepointPoll();
+    spPollTimer = setInterval(pollSharepointAuthStatus, 3000);
+  } catch (err) {
+    showToast('Falha ao iniciar conexao Microsoft 365: ' + err.message, 'error');
+  }
+}
+
+function copyAndOpenMicrosoftDeviceLogin() {
+  if (currentSpDeviceCode && navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(currentSpDeviceCode).then(() => {
+      showToast('Código ' + currentSpDeviceCode + ' copiado! Cole na janela da Microsoft.', 'info');
+    }).catch(() => {});
+  }
+  if (currentSpVerificationUri) {
+    window.open(currentSpVerificationUri, '_blank', 'noopener,noreferrer');
+  }
+}
+
+async function pollSharepointAuthStatus() {
+  try {
+    const st = await apiCall('/api/sharepoint/status');
+    const box = document.getElementById('sp-device-flow-box');
+    const statusEl = document.getElementById('sp-device-flow-status');
+
+    if (st.connected) {
+      stopSharepointPoll();
+      if (box) box.style.display = 'none';
+      showToast('Microsoft 365 conectado (' + (st.account || 'corporativo') + ')! Baixando DDS ao vivo...', 'success');
+      if (currentModalTicketKey) {
+        await openTicketDdsModal(currentModalTicketKey, true, true);
+      }
+      return;
+    }
+
+    if (!st.auth_in_progress) {
+      stopSharepointPoll();
+      if (st.last_error) {
+        if (statusEl) statusEl.textContent = 'Atenção: ' + st.last_error;
+        showToast('Autenticação Microsoft não concluída: ' + st.last_error, 'warning');
+      }
+    }
+  } catch (_) {
+    // Ignora falha transitoria de rede durante o polling
+  }
+}
+
+async function disconnectSharepointAccount() {
+  try {
+    stopSharepointPoll();
+    const res = await apiCall('/api/sharepoint/disconnect', 'POST', {});
+    if (res.error) throw new Error(res.error);
+    showToast(res.message || 'Conta Microsoft 365 desconectada.', 'info');
+    if (currentModalTicketKey) {
+      await openTicketDdsModal(currentModalTicketKey, true, true);
+    }
+  } catch (err) {
+    showToast('Erro ao desconectar: ' + err.message, 'error');
+  }
+}
+
+function triggerManualDocxUpload() {
+  if (!currentModalTicketKey) {
+    showToast('Abra um ticket primeiro para importar o arquivo .docx.', 'warning');
+    return;
+  }
+  const inp = document.getElementById('dds-manual-docx-input');
+  if (inp) {
+    inp.value = '';
+    inp.click();
+  }
+}
+
+async function handleManualDocxUpload(event) {
+  const file = event && event.target && event.target.files ? event.target.files[0] : null;
+  if (!file || !currentModalTicketKey) return;
+  if (!file.name.toLowerCase().endsWith('.docx')) {
+    showToast('Selecione um arquivo Word no formato .docx.', 'warning');
+    return;
+  }
+
+  showToast('Importando e extraindo todas as seções e imagens de ' + file.name + '...', 'info');
+  try {
+    const b64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const commaIdx = result.indexOf(',');
+        resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+      };
+      reader.onerror = () => reject(new Error('Falha ao ler arquivo local.'));
+      reader.readAsDataURL(file);
+    });
+
+    const res = await apiCall('/api/jira/dds/upload', 'POST', {
+      key: currentModalTicketKey,
+      filename: file.name,
+      content_base64: b64
+    });
+    if (res.error) throw new Error(res.error);
+
+    showToast('Documento ' + file.name + ' importado com sucesso!', 'success');
+    await openTicketDdsModal(currentModalTicketKey, true, true);
+  } catch (err) {
+    showToast('Erro ao importar .docx: ' + err.message, 'error');
+  }
+}
+
+async function detectDdsFromDownloads(explicitFilename = '') {
+  if (!currentModalTicketKey) {
+    showToast('Abra um ticket primeiro para detectar a DDS.', 'warning');
+    return;
+  }
+  try {
+    showToast('Verificando pasta Downloads por arquivos .docx recentes...', 'info');
+    const summary = (currentModalTicketDetails && currentModalTicketDetails.summary) || '';
+    const payload = {
+      key: currentModalTicketKey,
+      summary: summary,
+      filename: explicitFilename || ''
+    };
+    const res = await apiCall('/api/jira/dds/detect-download', 'POST', payload);
+    if (res && res.success) {
+      showToast(res.message || 'Arquivo detectado e vinculado com sucesso!', 'success');
+      await openTicketDdsModal(currentModalTicketKey, true, true);
+      return;
+    }
+
+    if (res && res.candidates && res.candidates.length > 0) {
+      let candHtml = '<div style="margin-top:10px; display:flex; flex-direction:column; gap:6px;">';
+      res.candidates.forEach(c => {
+        const safeName = escapeHtml(c.filename);
+        const safeArg = c.filename.replace(/'/g, "\\'");
+        candHtml += `<button type="button" class="btn btn-outline btn-sm" style="text-align:left; justify-content:space-between; display:flex; padding:6px 10px;" onclick="detectDdsFromDownloads('${safeArg}')">
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:280px;"><strong>${safeName}</strong></span>
+          <span style="font-size:11px; color:var(--text-muted); flex-shrink:0;">${c.modified}</span>
+        </button>`;
+      });
+      candHtml += '</div>';
+      showToast('Nenhum arquivo com o número exato foi encontrado. Selecione na lista abaixo ou use Importar .docx.', 'warning');
+      const box = document.getElementById('sp-hub-desc-text');
+      if (box) {
+        box.innerHTML = '<strong>Arquivos .docx recentes encontrados em Downloads:</strong>' + candHtml;
+      }
+    } else {
+      showToast('Nenhum arquivo .docx recente encontrado na pasta Downloads. Baixe o documento no Word Online ou use "Importar .docx Local".', 'warning');
+    }
+  } catch (err) {
+    showToast('Erro ao verificar Downloads: ' + err.message, 'error');
+  }
+}
+
+function openPasteDdsModal() {
+  const m = document.getElementById('modal-paste-dds');
+  if (m) {
+    m.style.display = 'flex';
+    const ta = document.getElementById('paste-dds-textarea');
+    if (ta) {
+      ta.value = '';
+      ta.focus();
+    }
+  }
+}
+
+function closePasteDdsModal() {
+  const m = document.getElementById('modal-paste-dds');
+  if (m) m.style.display = 'none';
+}
+
+async function submitPastedDds() {
+  const ta = document.getElementById('paste-dds-textarea');
+  const txt = (ta && ta.value) || '';
+  if (!txt.trim() || txt.trim().length < 20) {
+    showToast('Cole o conteúdo completo da DDS antes de salvar.', 'warning');
+    return;
+  }
+  if (!currentModalTicketKey) return;
+  try {
+    showToast('Salvando e estruturando texto da DDS...', 'info');
+    const res = await apiCall('/api/jira/dds/paste', 'POST', {
+      key: currentModalTicketKey,
+      text: txt.trim(),
+    });
+    if (res && res.success) {
+      showToast('DDS estruturada e salva com sucesso!', 'success');
+      closePasteDdsModal();
+      await openTicketDdsModal(currentModalTicketKey, true, true);
+    } else {
+      showToast((res && res.error) || 'Falha ao salvar texto da DDS.', 'error');
+    }
+  } catch (err) {
+    showToast('Erro ao salvar texto: ' + err.message, 'error');
+  }
+}
+
+function setupDdsDragAndDrop() {
+  const modalContainer = document.querySelector('#modal-dds .modal-container');
+  if (!modalContainer || modalContainer._dragInitialized) return;
+  modalContainer._dragInitialized = true;
+
+  ['dragenter', 'dragover'].forEach(evtName => {
+    modalContainer.addEventListener(evtName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      modalContainer.classList.add('dds-drag-active');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach(evtName => {
+    modalContainer.addEventListener(evtName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      modalContainer.classList.remove('dds-drag-active');
+    });
+  });
+
+  modalContainer.addEventListener('drop', (e) => {
+    const dt = e.dataTransfer;
+    const files = dt && dt.files;
+    if (files && files.length > 0) {
+      const f = files[0];
+      if (f.name.toLowerCase().endsWith('.docx')) {
+        handleManualDocxUpload({ target: { files: [f] } });
+      } else {
+        showToast('Por favor, solte um arquivo .docx do Microsoft Word.', 'warning');
+      }
+    }
+  });
+}
+
+function copySharepointText() {
+  const cleanText = stripInternalDdsTokens(currentModalDdsText);
+  if (!cleanText) {
+    showToast('Nenhum texto disponível para cópia.', 'warning');
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cleanText).then(() => {
+      showToast('Texto da DDS copiado para a área de transferência!', 'success');
+    }).catch(() => {
+      showToast('Não foi possível copiar automaticamente.', 'error');
+    });
+  } else {
+    showToast('Cópia automática não suportada no navegador.', 'warning');
+  }
+}
+
+function toggleModalFullscreen() {
+  const dlg = document.getElementById('ticket-dds-dialog');
+  if (!dlg) return;
+  const isFs = dlg.classList.toggle('is-fullscreen');
+  const btn = document.getElementById('modal-dds-fullscreen-btn');
+  if (btn) {
+    const icoExpand = btn.querySelector('.ico-fs-expand');
+    const icoCompress = btn.querySelector('.ico-fs-compress');
+    const label = document.getElementById('modal-fs-label');
+    if (icoExpand) icoExpand.style.display = isFs ? 'none' : 'block';
+    if (icoCompress) icoCompress.style.display = isFs ? 'block' : 'none';
+    if (label) label.textContent = isFs ? 'Restaurar' : 'Tela Cheia';
+  }
+}
+
+function openImageLightboxByIndex(idx) {
+  if (idx < 0 || idx >= currentModalImages.length) return;
+  const item = currentModalImages[idx];
+  openImageLightbox(item.proxy_url || item.url, item.name || 'Imagem Ampliada');
+}
+
+function openImageLightbox(src, title) {
+  const modal = document.getElementById('image-lightbox-modal');
+  const img = document.getElementById('lightbox-image-preview');
+  const titleEl = document.getElementById('lightbox-image-title');
+  if (img) img.src = src;
+  if (titleEl) titleEl.textContent = title || 'Imagem Ampliada';
+  if (modal) modal.classList.add('open');
+}
+
+function closeImageLightbox() {
+  const modal = document.getElementById('image-lightbox-modal');
+  if (modal) modal.classList.remove('open');
+  const img = document.getElementById('lightbox-image-preview');
+  if (img) img.src = '';
+}
+
+function copyDdsText() {
+  const cleanText = stripInternalDdsTokens(currentModalDdsText);
+  if (!cleanText) {
+    showToast('Nenhum texto disponível para cópia.', 'warning');
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cleanText).then(() => {
+      showToast('Texto integral da DDS copiado com sucesso!', 'success');
+    }).catch(() => {
+      showToast('Não foi possível copiar automaticamente.', 'error');
+    });
+  } else {
+    showToast('Cópia automática não suportada no navegador.', 'warning');
+  }
+}
+
+async function startTicketFromCard(key, summary) {
+  try {
+    const res = await apiCall('/api/jira/start-ticket', 'POST', {
+      key: key,
+      comment: summary
+    });
+    showToast(res.message, 'success');
+    await loadDashboard(true);
+    renderTicketsList();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function getActiveModalSubtab() {
+  const tabs = ['dds', 'sharepoint', 'timeline', 'images', 'desc', 'attach'];
+  for (const t of tabs) {
+    const btn = document.getElementById('subtab-btn-' + t);
+    if (btn && btn.classList.contains('active')) return t;
+  }
+  return 'dds';
+}
+
+async function openTicketDdsModal(key, forceRefresh = false, preserveSubtab = false) {
+  const previousSubtab = preserveSubtab ? getActiveModalSubtab() : 'dds';
+  currentModalTicketKey = key;
+  if (!preserveSubtab) {
+    currentModalTicketSummary = '';
+    currentModalDdsLinks = [];
+    currentModalDdsText = '';
+    currentModalDocHtml = '';
+    currentModalImages = [];
+  }
+  const modal = document.getElementById('ticket-dds-modal');
+  if (!modal) return;
+
+  if (!preserveSubtab) {
+    document.getElementById('modal-ticket-key-badge').textContent = key;
+    document.getElementById('modal-ticket-status-badge').textContent = 'Carregando...';
+    document.getElementById('modal-ticket-priority-badge').textContent = '';
+    document.getElementById('modal-ticket-title').textContent = 'Consultando informações no Jira Cloud...';
+    document.getElementById('modal-ticket-description').textContent = 'Aguarde um instante...';
+    document.getElementById('dds-native-content').textContent = 'Consultando e extraindo especificação da DDS...';
+    document.getElementById('modal-timeline-container').innerHTML = '<div style="color:var(--text-muted); font-size:12px; padding:12px;">Consultando histórico de comunicações...</div>';
+    document.getElementById('modal-images-grid').innerHTML = '';
+    document.getElementById('modal-attachments-container').innerHTML = '';
+  }
+
+  modal.classList.add('open');
+
+  try {
+    const urlApi = '/api/jira/ticket-details?key=' + encodeURIComponent(key) + (forceRefresh ? '&refresh=1' : '');
+    const data = await apiCall(urlApi);
+    if (data.error) throw new Error(data.error);
+
+    // 0. Carrega imagens primeiro para permitir resolucao de miniaturas inline nas secoes da DDS
+    const images = data.images || [];
+    currentModalImages = images;
+    currentModalDocHtml = data.dds_document_html || '';
+    currentSharepointStatus = data.sharepoint_status || {};
+
+    currentModalTicketSummary = data.summary || '';
+    document.getElementById('modal-ticket-key-badge').textContent = data.key || key;
+    document.getElementById('modal-ticket-title').textContent = data.summary || 'Sem título';
+    document.getElementById('modal-ticket-status-badge').textContent = data.status || 'Status';
+    document.getElementById('modal-ticket-priority-badge').textContent = data.priority || 'Normal';
+    document.getElementById('modal-ticket-assignee').textContent = data.assignee || '-';
+    document.getElementById('modal-ticket-reporter').textContent = data.reporter || '-';
+    document.getElementById('modal-ticket-updated').textContent = (data.updated || '').slice(0, 10);
+    document.getElementById('modal-ticket-jira-link').href = data.url || '#';
+
+    // Badge do Ticket Pai (se for subtarefa)
+    const parentBadge = document.getElementById('modal-ticket-parent-badge');
+    if (data.parent_key) {
+      parentBadge.textContent = 'Subtarefa de: ' + data.parent_key;
+      parentBadge.title = data.parent_summary || '';
+      parentBadge.style.display = 'inline-flex';
+    } else {
+      parentBadge.style.display = 'none';
+    }
+
+    // 1. Dados do Movidesk
+    const mov = data.movidesk_info || {};
+    const solicitante = mov.solicitante || 'Não informado';
+    const empresa = mov.empresa || 'Não informada';
+    const ticketMov = mov.ticket || data.movidesk_ticket || '-';
+    const abertoPor = mov.aberto_por || data.reporter || '-';
+
+    const cleanMovNum = String(ticketMov).replace(/^#/, '').trim();
+    document.getElementById('dds-mov-solicitante').textContent = solicitante;
+    document.getElementById('dds-mov-empresa').textContent = empresa;
+    document.getElementById('dds-mov-ticket').textContent = (cleanMovNum && cleanMovNum !== '-') ? (cleanMovNum.toUpperCase().startsWith('TICKET') ? cleanMovNum : '#' + cleanMovNum) : '-';
+    document.getElementById('dds-mov-aberto-por').textContent = abertoPor;
+
+    document.getElementById('timeline-mov-solicitante').textContent = solicitante;
+    document.getElementById('timeline-mov-empresa').textContent = empresa;
+
+    if (data.movidesk_ticket) {
+      document.getElementById('modal-ticket-movidesk-wrap').style.display = 'block';
+      const mvStr = String(data.movidesk_ticket).replace(/^#/, '');
+      document.getElementById('modal-ticket-movidesk').textContent = mvStr.toUpperCase().startsWith('TICKET') ? mvStr : '#' + mvStr;
+    } else {
+      document.getElementById('modal-ticket-movidesk-wrap').style.display = 'none';
+    }
+
+    // 2. DDS Nativa e Especificacao
+    currentModalDdsLinks = data.dds_links || [];
+    currentModalDdsText = data.dds_extracted_text || data.description || 'Sem especificações cadastradas.';
+
+    document.getElementById('dds-doc-title').textContent = data.dds_doc_name || 'Especificação da Demanda';
+
+    // Alerta de Heranca do Ticket Pai
+    const parentAlert = document.getElementById('dds-parent-inherited-alert');
+    if (data.dds_inherited_from_parent && data.parent_key) {
+      if (parentAlert) {
+        parentAlert.style.display = 'flex';
+        document.getElementById('dds-parent-alert-key').textContent = data.parent_key;
+        document.getElementById('dds-parent-alert-summary').textContent = data.parent_summary ? ' - ' + data.parent_summary : '';
+        document.getElementById('dds-parent-alert-link').href = data.url ? data.url.replace(data.key, data.parent_key) : '#';
+      }
+    } else if (parentAlert) {
+      parentAlert.style.display = 'none';
+    }
+
+    const sourceBadge = document.getElementById('dds-source-badge');
+    if (data.dds_source === 'sharepoint_live') {
+      sourceBadge.textContent = 'SharePoint Online (Ao Vivo)';
+      sourceBadge.style.background = 'rgba(34, 197, 94, 0.18)';
+      sourceBadge.style.color = '#22c55e';
+    } else if (data.dds_source === 'parent_sharepoint_live') {
+      sourceBadge.textContent = `SharePoint Vivo do Pai (${data.parent_key || ''})`;
+      sourceBadge.style.background = 'rgba(34, 197, 94, 0.18)';
+      sourceBadge.style.color = '#22c55e';
+    } else if (data.dds_source === 'manual_docx' || data.dds_source === 'parent_manual_docx') {
+      sourceBadge.textContent = 'DOCX Completo Importado';
+      sourceBadge.style.background = 'rgba(14, 165, 233, 0.18)';
+      sourceBadge.style.color = '#38bdf8';
+    } else if (data.dds_source === 'docx_attachment') {
+      sourceBadge.textContent = 'Anexo DOCX do Jira';
+      sourceBadge.style.background = 'rgba(34, 197, 94, 0.15)';
+      sourceBadge.style.color = '#22c55e';
+    } else if (data.dds_source === 'parent_docx_attachment') {
+      sourceBadge.textContent = `DOCX Herdado do Pai (${data.parent_key || ''})`;
+      sourceBadge.style.background = 'rgba(147, 51, 234, 0.15)';
+      sourceBadge.style.color = '#c084fc';
+    } else if (data.dds_source === 'parent_jira_description') {
+      sourceBadge.textContent = `Requisitos do Pai (${data.parent_key || ''})`;
+      sourceBadge.style.background = 'rgba(147, 51, 234, 0.15)';
+      sourceBadge.style.color = '#c084fc';
+    } else if (data.dds_source === 'local_cache' || data.dds_source === 'parent_local_cache') {
+      sourceBadge.textContent = 'Cache Local';
+      sourceBadge.style.background = 'rgba(14, 165, 233, 0.15)';
+      sourceBadge.style.color = '#38bdf8';
+    } else {
+      sourceBadge.textContent = 'Requisitos do Jira';
+      sourceBadge.style.background = 'rgba(234, 179, 8, 0.15)';
+      sourceBadge.style.color = '#eab308';
+    }
+
+    document.getElementById('dds-native-content').innerHTML = formatDdsRichText(currentModalDdsText);
+
+    const spBtn = document.getElementById('dds-sharepoint-btn');
+    if (currentModalDdsLinks.length > 0 && currentModalDdsLinks[0].url) {
+      spBtn.href = currentModalDdsLinks[0].url;
+      spBtn.style.display = 'inline-flex';
+    } else {
+      spBtn.style.display = 'none';
+    }
+
+    // Configuracao de Documento Completo & SharePoint Hub
+    const spTabBtn = document.getElementById('subtab-btn-sharepoint');
+    const spCalloutBanner = document.getElementById('dds-sharepoint-callout-banner');
+    const spCalloutText = document.getElementById('dds-sp-callout-text');
+    const btnSpConnectBanner = document.getElementById('btn-sp-connect-banner');
+    const spExternalLink = document.getElementById('modal-sp-external-link');
+    const spDocTitle = document.getElementById('modal-sp-doc-title');
+
+    currentSharepointEmbedUrl = '';
+
+    const hasSp = !!(data.has_sharepoint_dds || (currentModalDdsLinks && currentModalDdsLinks.some(l => (l.url || '').toLowerCase().includes('sharepoint.com'))));
+    const firstSpLink = currentModalDdsLinks.find(l => (l.url || '').toLowerCase().includes('sharepoint.com'));
+
+    const spFolderBtn = document.getElementById('modal-sp-folder-link');
+    const folderSpLink = currentModalDdsLinks.find(l => (l.url || '').toLowerCase().includes('sharepoint.com') && (l.type === 'folder' || (l.url || '').includes(':f:')));
+    if (folderSpLink && spFolderBtn) {
+      spFolderBtn.href = folderSpLink.url;
+      spFolderBtn.style.display = 'inline-flex';
+    } else if (spFolderBtn) {
+      spFolderBtn.style.display = 'none';
+    }
+
+    const topSpBtn = document.getElementById('dds-top-sharepoint-btn');
+    if (topSpBtn) {
+      if (firstSpLink && firstSpLink.url) {
+        topSpBtn.href = firstSpLink.url;
+        topSpBtn.style.display = 'inline-flex';
+      } else {
+        topSpBtn.style.display = 'none';
+      }
+    }
+
+    if (hasSp || currentModalDocHtml) {
+      if (spTabBtn) spTabBtn.style.display = 'inline-flex';
+      if (firstSpLink) {
+        currentSharepointEmbedUrl = firstSpLink.embed_url || firstSpLink.url;
+        if (spExternalLink) {
+          spExternalLink.href = firstSpLink.url;
+          spExternalLink.style.display = 'inline-flex';
+        }
+        if (spDocTitle) spDocTitle.textContent = data.dds_doc_name || firstSpLink.title || 'DDS Oficial no SharePoint';
+      } else {
+        if (spExternalLink) spExternalLink.style.display = 'none';
+        if (spDocTitle) spDocTitle.textContent = data.dds_doc_name || 'Documento Completo da DDS';
+      }
+    } else {
+      if (spTabBtn) spTabBtn.style.display = 'none';
+    }
+
+    const spSt = currentSharepointStatus || {};
+    if (spCalloutBanner) {
+      if (hasSp && data.dds_source !== 'manual_docx' && data.dds_source !== 'parent_manual_docx' && data.dds_source !== 'pasted_text') {
+        spCalloutBanner.style.display = 'flex';
+        spCalloutBanner.style.background = 'rgba(14, 165, 233, 0.08)';
+        spCalloutBanner.style.borderColor = 'rgba(14, 165, 233, 0.25)';
+        if (btnSpConnectBanner) {
+          btnSpConnectBanner.style.display = spSt.connected ? 'none' : 'inline-flex';
+        }
+        if (spCalloutText) {
+          if (spSt.connected) {
+            spCalloutText.innerHTML = '<strong>Documento Vivo no SharePoint:</strong> Sincronizado automaticamente via Microsoft 365 (' + escapeHtml(spSt.account || 'Corporativo') + '). Todas as alteracoes de Desenvolvimento, Testes e evidencias sao lidas em tempo real.';
+          } else {
+            spCalloutText.innerHTML = '<strong>DDS editada no SharePoint Online:</strong> Para manter o documento sempre atualizado automaticamente sem precisar baixar manualmente a cada nova versao, clique em <strong>Conectar Microsoft 365</strong> (perfil Graph CLI pre-autorizado). Caso prefira modo offline, utilize <strong>Detectar em Downloads</strong> ou <strong>Importar .docx</strong>.';
+          }
+        }
+      } else {
+        spCalloutBanner.style.display = 'none';
+      }
+    }
+
+    // Mantem caixa de codigo Microsoft oculta por padrao para nao poluir o fluxo do usuario
+    const box = document.getElementById('sp-device-flow-box');
+    if (box) box.style.display = 'none';
+
+    setupDdsDragAndDrop();
+    updateSharepointReaderContent();
+
+    // 2.1 Renderizacao Estruturada da DDS com Formatacao Rica e Imagens Inline
+    const sdds = data.structured_dds || {};
+    const hasStruct = !!(sdds && sdds.has_structured_data);
+    const structView = document.getElementById('dds-structured-view');
+    const rawView = document.getElementById('dds-raw-view');
+    const toggleBtn = document.getElementById('btn-toggle-dds-mode');
+    const tipoBadge = document.getElementById('dds-tipo-badge');
+
+    const buildPersonDateMeta = (roleLabel, secObj) => {
+      const parts = [];
+      if (secObj && secObj.responsavel) parts.push(roleLabel + ': ' + secObj.responsavel);
+      if (secObj && secObj.data) parts.push('Data: ' + secObj.data);
+      return parts.join(' | ');
+    };
+
+    if (hasStruct) {
+      if (tipoBadge) {
+        const tipoVal = (sdds.tipo || '').toUpperCase();
+        if (tipoVal && tipoVal !== 'NÃO DEFINIDO') {
+          tipoBadge.textContent = tipoVal;
+          tipoBadge.style.display = 'inline-flex';
+          if (tipoVal.includes('CORRE')) {
+            tipoBadge.style.background = 'rgba(239, 68, 68, 0.15)';
+            tipoBadge.style.color = '#ef4444';
+            tipoBadge.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+          } else if (tipoVal.includes('ALTER')) {
+            tipoBadge.style.background = 'rgba(234, 179, 8, 0.15)';
+            tipoBadge.style.color = '#eab308';
+            tipoBadge.style.border = '1px solid rgba(234, 179, 8, 0.3)';
+          } else if (tipoVal.includes('IMPLEM')) {
+            tipoBadge.style.background = 'rgba(168, 85, 247, 0.15)';
+            tipoBadge.style.color = '#c084fc';
+            tipoBadge.style.border = '1px solid rgba(168, 85, 247, 0.3)';
+          } else {
+            tipoBadge.style.background = 'rgba(14, 165, 233, 0.15)';
+            tipoBadge.style.color = '#38bdf8';
+            tipoBadge.style.border = '1px solid rgba(14, 165, 233, 0.3)';
+          }
+        } else {
+          tipoBadge.style.display = 'none';
+        }
+      }
+
+      document.getElementById('dds-struct-sistema').textContent = sdds.sistema || '-';
+      document.getElementById('dds-struct-opcao').textContent = sdds.opcao || '-';
+      document.getElementById('dds-struct-versao').textContent = sdds.versao || '-';
+      document.getElementById('dds-struct-filial').textContent = sdds.empresa_filial || sdds.empresa || '-';
+
+      const necCard = document.getElementById('dds-card-necessidade');
+      if (sdds.necessidade_cliente) {
+        necCard.style.display = 'block';
+        document.getElementById('dds-struct-necessidade').innerHTML = formatDdsRichText(sdds.necessidade_cliente);
+      } else {
+        necCard.style.display = 'block';
+        document.getElementById('dds-struct-necessidade').innerHTML = '<span style="color:var(--text-muted);">Não detalhado nesta seção.</span>';
+      }
+
+      const resCard = document.getElementById('dds-card-resultado');
+      if (sdds.resultado_esperado) {
+        resCard.style.display = 'block';
+        document.getElementById('dds-struct-resultado').innerHTML = formatDdsRichText(sdds.resultado_esperado);
+      } else {
+        resCard.style.display = 'none';
+      }
+
+      const espCard = document.getElementById('dds-card-especificacao');
+      if (sdds.especificacao_dados) {
+        espCard.style.display = 'block';
+        document.getElementById('dds-struct-especificacao').innerHTML = formatDdsRichText(sdds.especificacao_dados);
+      } else {
+        espCard.style.display = 'none';
+      }
+
+      // Suporte Tecnico
+      const supCard = document.getElementById('dds-card-suporte');
+      const sup = sdds.suporte || {};
+      if (sup.detalhamento || sup.responsavel) {
+        supCard.style.display = 'block';
+        document.getElementById('dds-struct-suporte-meta').textContent = buildPersonDateMeta('Responsável', sup);
+        document.getElementById('dds-struct-suporte').innerHTML = sup.detalhamento
+          ? formatDdsRichText(sup.detalhamento)
+          : '<span style="color:var(--text-muted);">Encaminhado pelo suporte sem observações adicionais.</span>';
+      } else {
+        supCard.style.display = 'none';
+      }
+
+      // Team Lider / Team Leader
+      const tlCard = document.getElementById('dds-card-team-leader');
+      const tl = sdds.team_leader || {};
+      if (tlCard) {
+        if (tl.detalhamento || tl.responsavel) {
+          tlCard.style.display = 'block';
+          document.getElementById('dds-struct-team-leader-meta').textContent = buildPersonDateMeta('Responsável', tl);
+          document.getElementById('dds-struct-team-leader').innerHTML = tl.detalhamento
+            ? formatDdsRichText(tl.detalhamento)
+            : '<span style="color:var(--text-muted);">Revisado pelo Team Leader sem observações textuais.</span>';
+        } else {
+          tlCard.style.display = 'none';
+        }
+      }
+
+      // Analise de Negocios
+      const anCard = document.getElementById('dds-card-analise');
+      const an = sdds.analise_negocios || {};
+      if (an.detalhamento || an.responsavel) {
+        anCard.style.display = 'block';
+        document.getElementById('dds-struct-analise-meta').textContent = buildPersonDateMeta('Responsável', an);
+        document.getElementById('dds-struct-analise').innerHTML = an.detalhamento
+          ? formatDdsRichText(an.detalhamento)
+          : '<span style="color:var(--text-muted);">Sem detalhamento complementar na Análise de Negócios.</span>';
+      } else {
+        anCard.style.display = 'none';
+      }
+
+      // Analise de Sistemas
+      const asCard = document.getElementById('dds-card-analise-sistemas');
+      const asSec = sdds.analise_sistemas || {};
+      if (asCard) {
+        if (asSec.detalhamento || asSec.responsavel) {
+          asCard.style.display = 'block';
+          document.getElementById('dds-struct-analise-sistemas-meta').textContent = buildPersonDateMeta('Analista', asSec);
+          document.getElementById('dds-struct-analise-sistemas').innerHTML = asSec.detalhamento
+            ? formatDdsRichText(asSec.detalhamento)
+            : '<span style="color:var(--text-muted);">Sem detalhamento complementar na Análise de Sistemas.</span>';
+        } else {
+          asCard.style.display = 'none';
+        }
+      }
+
+      // Desenvolvimento & Implementacao
+      const devCard = document.getElementById('dds-card-desenvolvimento');
+      const dev = sdds.desenvolvimento || {};
+      if (dev.detalhamento || dev.responsavel || dev.recomendacoes) {
+        devCard.style.display = 'block';
+        document.getElementById('dds-struct-dev-meta').textContent = buildPersonDateMeta('Desenvolvedor', dev);
+        document.getElementById('dds-struct-dev').innerHTML = dev.detalhamento
+          ? formatDdsRichText(dev.detalhamento)
+          : '<span style="color:var(--text-muted);">Seção registrada sem texto técnico adicional.</span>';
+
+        const recWrap = document.getElementById('dds-struct-dev-rec-wrap');
+        if (dev.recomendacoes) {
+          recWrap.style.display = 'block';
+          document.getElementById('dds-struct-dev-rec').innerHTML = formatDdsRichText(dev.recomendacoes);
+        } else {
+          recWrap.style.display = 'none';
+        }
+      } else {
+        devCard.style.display = 'none';
+      }
+
+      const chkCard = document.getElementById('dds-card-checklist');
+      const chkItems = sdds.checklist || [];
+      if (chkItems.length > 0) {
+        chkCard.style.display = 'block';
+        document.getElementById('dds-checklist-count').textContent = String(chkItems.length);
+        const tbody = document.getElementById('dds-checklist-tbody');
+        tbody.innerHTML = chkItems.map(item => {
+          const resp = (item.resposta || '').toLowerCase();
+          let badgeHtml = '';
+          if (resp.startsWith('sim')) {
+            badgeHtml = '<span class="badge" style="background:rgba(34,197,94,0.15); color:#22c55e; font-weight:700;">Sim</span>';
+          } else if (resp.startsWith('não') || resp.startsWith('nao')) {
+            if (resp.includes('aplic')) {
+              badgeHtml = '<span class="badge" style="background:rgba(148,163,184,0.12); color:var(--text-muted);">Não aplicável</span>';
+            } else {
+              badgeHtml = '<span class="badge" style="background:rgba(239,68,68,0.15); color:#ef4444; font-weight:700;">Não</span>';
+            }
+          } else {
+            badgeHtml = `<span class="badge" style="background:var(--bg-subtle); color:var(--text-main);">${escapeHtml(item.resposta)}</span>`;
+          }
+          return `
+            <tr>
+              <td style="color:var(--text-muted); font-size:11.5px; font-weight:600;">${escapeHtml(item.categoria || 'Geral')}</td>
+              <td style="color:var(--text-main); font-weight:500;">${escapeHtml(item.pergunta || '')}</td>
+              <td>${badgeHtml}</td>
+            </tr>
+          `;
+        }).join('');
+      } else {
+        chkCard.style.display = 'none';
+      }
+
+      // Teste de Implementacao
+      const testeCard = document.getElementById('dds-card-teste');
+      const teste = sdds.teste_implementacao || {};
+      if (teste.detalhamento || teste.responsavel) {
+        testeCard.style.display = 'block';
+        document.getElementById('dds-struct-teste-meta').textContent = buildPersonDateMeta('Homologador', teste);
+        document.getElementById('dds-struct-teste').innerHTML = teste.detalhamento
+          ? formatDdsRichText(teste.detalhamento)
+          : '<span style="color:var(--text-muted);">Testes registrados sem observações adicionais.</span>';
+      } else {
+        testeCard.style.display = 'none';
+      }
+
+      // Resultado da Homologacao (Release ou Divergencia)
+      const homCard = document.getElementById('dds-card-resultado-homologacao');
+      const hom = sdds.resultado_homologacao || {};
+      if (hom.detalhamento) {
+        homCard.style.display = 'block';
+        document.getElementById('dds-struct-resultado-homologacao').innerHTML = formatDdsRichText(hom.detalhamento);
+        const homBadge = document.getElementById('dds-struct-homolog-badge');
+        if (homBadge) {
+          const isDiverg = hom.tipo === 'Divergência';
+          homBadge.textContent = isDiverg ? 'Divergência Apontada' : 'Release Homologado';
+          homBadge.style.background = isDiverg ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)';
+          homBadge.style.color = isDiverg ? '#ef4444' : '#22c55e';
+        }
+      } else {
+        homCard.style.display = 'none';
+      }
+
+      ddsViewMode = 'structured';
+      if (structView) structView.style.display = 'flex';
+      if (rawView) rawView.style.display = 'none';
+      if (toggleBtn) {
+        toggleBtn.style.display = 'inline-flex';
+        toggleBtn.textContent = 'Ver Texto Bruto';
+      }
+    } else {
+      if (tipoBadge) tipoBadge.style.display = 'none';
+      if (structView) structView.style.display = 'none';
+      if (rawView) rawView.style.display = 'block';
+      if (toggleBtn) toggleBtn.style.display = 'none';
+    }
+
+    // 3. Quem Mandou o Que (Timeline)
+    const comments = data.comments_timeline || [];
+    document.getElementById('modal-comments-count').textContent = String(comments.length);
+    const tlContainer = document.getElementById('modal-timeline-container');
+    const tlEmpty = document.getElementById('modal-timeline-empty');
+
+    if (comments.length > 0) {
+      tlEmpty.style.display = 'none';
+      tlContainer.innerHTML = comments.map(c => {
+        const isClient = c.is_movidesk || c.movidesk_sender;
+        const badgeLabel = isClient ? 'Solicitante / Cliente' : 'Equipe / Jira';
+        const badgeStyle = isClient
+          ? 'background:rgba(14,165,233,0.15); color:#38bdf8;'
+          : 'background:rgba(200,170,110,0.15); color:var(--primary);';
+        const authorDisplay = c.movidesk_sender
+          ? `${escapeHtml(c.movidesk_sender)} (via ${escapeHtml(c.author)})`
+          : escapeHtml(c.author);
+        const avatarHtml = c.avatar_url
+          ? `<img src="${escapeHtml(c.avatar_url)}" class="timeline-avatar" alt="Avatar">`
+          : `<div class="timeline-avatar">${escapeHtml((c.author || 'U').slice(0, 2).toUpperCase())}</div>`;
+        const dateDisplay = c.created ? c.created.replace('T', ' ').slice(0, 16) : '';
+        return `
+          <div class="timeline-card ${isClient ? 'client-msg' : 'team-msg'}">
+            ${avatarHtml}
+            <div class="timeline-content">
+              <div class="timeline-header">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span class="timeline-author">${authorDisplay}</span>
+                  <span class="timeline-badge" style="${badgeStyle}">${badgeLabel}</span>
+                </div>
+                <span class="timeline-date">${escapeHtml(dateDisplay)}</span>
+              </div>
+              <div class="timeline-body" style="white-space:normal;">${formatCommentBody(c.body, c.mentions, c.disclaimer_note)}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } else {
+      tlEmpty.style.display = 'block';
+      tlContainer.innerHTML = '';
+    }
+
+    // 4. Galeria de Imagens e Evidencias (sem logotipo de cabecalho)
+    document.getElementById('modal-images-count').textContent = String(images.length);
+    const imgGrid = document.getElementById('modal-images-grid');
+    const imgEmpty = document.getElementById('modal-images-empty');
+
+    if (images.length > 0) {
+      imgEmpty.style.display = 'none';
+      imgGrid.innerHTML = images.map((img, idx) => `
+        <div class="image-card">
+          <div class="image-card-thumb-wrap" onclick="openImageLightboxByIndex(${idx})">
+            <img src="${escapeHtml(img.thumbnail_url || img.proxy_url || img.url)}" class="image-card-thumb" alt="${escapeHtml(img.name)}" loading="lazy">
+          </div>
+          <div class="image-card-info">
+            <div class="image-card-title" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</div>
+            <div class="image-card-meta">${Math.round((img.size || 0) / 1024)} KB &bull; ${escapeHtml(img.author || 'Demanda')}</div>
+          </div>
+        </div>
+      `).join('');
+
+      const embeddedImgs = images.filter(i => i.is_embedded);
+      const embSection = document.getElementById('dds-embedded-images-section');
+      const embGrid = document.getElementById('dds-embedded-images-grid');
+      if (embeddedImgs.length > 0) {
+        embSection.style.display = 'block';
+        embGrid.innerHTML = embeddedImgs.map(img => {
+          const origIdx = currentModalImages.findIndex(i => i.id === img.id);
+          const clickCall = origIdx !== -1 ? `openImageLightboxByIndex(${origIdx})` : ``;
+          return `
+            <div class="image-card">
+              <div class="image-card-thumb-wrap" onclick="${clickCall}">
+                <img src="${escapeHtml(img.thumbnail_url || img.proxy_url || img.url)}" class="image-card-thumb" alt="${escapeHtml(img.name)}" loading="lazy">
+              </div>
+              <div class="image-card-info">
+                <div class="image-card-title" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</div>
+                <div class="image-card-meta">${Math.round((img.size || 0) / 1024)} KB &bull; ${escapeHtml(img.author || 'Integrada no DOCX')}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } else {
+        embSection.style.display = 'none';
+      }
+    } else {
+      imgEmpty.style.display = 'block';
+      imgGrid.innerHTML = '';
+      document.getElementById('dds-embedded-images-section').style.display = 'none';
+    }
+
+    // 5. Descricao Original Jira (com formatacao rica e links clicaveis)
+    const descText = data.description || 'Sem descrição cadastrada.';
+    document.getElementById('modal-ticket-description').innerHTML = formatDdsRichText(descText);
+
+    const ddsContainer = document.getElementById('modal-dds-links-container');
+    if (currentModalDdsLinks.length > 0) {
+      ddsContainer.innerHTML = currentModalDdsLinks.map(l => `
+        <div class="dds-link-card">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="color:#38bdf8;">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </span>
+            <div>
+              <strong style="font-size:13px; display:block;">${escapeHtml(l.title)}</strong>
+              <span style="font-size:11px; color:var(--text-muted); word-break:break-all;">${escapeHtml(l.url)}</span>
+            </div>
+          </div>
+          <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">
+            Abrir no SharePoint
+          </a>
+        </div>
+      `).join('');
+    } else {
+      ddsContainer.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding:8px 0;">Nenhum link direto de DDS ou SharePoint detectado nos campos da demanda.</div>';
+    }
+
+    // 6. Anexos Gerais
+    const attContainer = document.getElementById('modal-attachments-container');
+    const attEmpty = document.getElementById('modal-attachments-empty');
+    const attCount = document.getElementById('modal-attachments-count');
+    const attachments = data.attachments || [];
+    attCount.textContent = String(attachments.length);
+
+    if (attachments.length > 0) {
+      attEmpty.style.display = 'none';
+      attContainer.innerHTML = attachments.map(a => `
+        <a href="${escapeHtml(a.proxy_url || a.url)}" target="_blank" rel="noopener noreferrer" class="badge" style="background:var(--bg-card); border:1px solid var(--border-color); padding:7px 12px; text-decoration:none; color:var(--text-main); font-size:12px; display:inline-flex; align-items:center; gap:6px;">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          ${escapeHtml(a.name)} (${Math.round((a.size || 0) / 1024)} KB)
+        </a>
+      `).join('');
+    } else {
+      attEmpty.style.display = 'block';
+      attContainer.innerHTML = '';
+    }
+
+    const targetTab = (preserveSubtab && (previousSubtab !== 'sharepoint' || hasSp || currentModalDocHtml))
+      ? previousSubtab
+      : 'dds';
+    switchModalSubtab(targetTab);
+  } catch (err) {
+    document.getElementById('dds-native-content').textContent = 'Erro ao carregar detalhes: ' + err.message;
+  }
+}
+
+function closeTicketDdsModal() {
+  stopSharepointPoll();
+  const modal = document.getElementById('ticket-dds-modal');
+  if (modal) modal.classList.remove('open');
+  const iframe = document.getElementById('modal-sharepoint-iframe');
+  if (iframe) iframe.src = '';
+  currentSharepointEmbedUrl = '';
+}
+
+async function startTimerFromModal() {
+  if (!currentModalTicketKey) return;
+  await startTicketFromCard(currentModalTicketKey, currentModalTicketSummary);
+  closeTicketDdsModal();
 }
 
 /* ==================== WORKLOGS DO JIRA E MULTI-SELECAO EM LOTE ==================== */
@@ -4404,6 +6929,7 @@ async function refreshAll() {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  initNavGroups();
   loadDashboard(true);
   setInterval(() => {
     loadDashboard(false);
@@ -4594,6 +7120,89 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 self._send_json({"worklogs": worklogs})
                 return
 
+            if path == "/api/jira/my-tickets":
+                status_filter = (query.get("status", ["open"])[0] or "open").strip()
+                q_text = (query.get("q", [""])[0] or "").strip()
+                limit_str = (query.get("limit", ["50"])[0] or "50").strip()
+                try:
+                    limit = int(limit_str)
+                except ValueError:
+                    limit = 50
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+                tickets = client.get_my_assigned_tickets(max_results=limit, status_filter=status_filter, query_text=q_text)
+                state = state_mgr.load_state()
+                active_issue = (state.target_issue or cfg.jira.default_issue or "").strip().upper()
+                self._send_json({
+                    "success": True,
+                    "tickets": tickets,
+                    "total": len(tickets),
+                    "active_ticket": active_issue,
+                    "timer_running": state.status == "RUNNING"
+                })
+                return
+
+            if path == "/api/jira/ticket-details":
+                issue_key = (query.get("key", [""])[0] or "").strip()
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket não informada."}, status_code=400)
+                    return
+                force_refresh = (query.get("refresh", ["0"])[0] or "0").strip().lower() in ("1", "true", "yes")
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+                details = client.get_ticket_dds_details(issue_key, force_refresh=force_refresh)
+                self._send_json(details)
+                return
+
+            if path == "/api/sharepoint/status":
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                self._send_json(sp_mgr.get_status())
+                return
+
+            if path == "/api/jira/attachment":
+                raw_url = (query.get("url", [""])[0] or "").strip()
+                if not raw_url:
+                    self._send_json({"error": "URL do anexo não informada."}, status_code=400)
+                    return
+                cfg = BotConfig.load()
+                jira_base = cfg.jira.get_clean_base_url().lower()
+                clean_target = raw_url.lower()
+                if not (clean_target.startswith(jira_base) or "atlassian.net" in clean_target or "atlassian.com" in clean_target):
+                    self._send_json({"error": "Acesso não autorizado para esta URL."}, status_code=403)
+                    return
+
+                try:
+                    import requests
+
+                    email = cfg.jira.get_clean_email()
+                    token = cfg.jira.get_clean_token()
+                    resp = requests.get(raw_url, auth=(email, token), timeout=25, stream=True)
+                    if resp.status_code != 200:
+                        self._send_json({"error": f"Erro {resp.status_code} ao buscar anexo no Jira."}, status_code=resp.status_code)
+                        return
+
+                    c_type = resp.headers.get("Content-Type", "application/octet-stream")
+                    c_disp = resp.headers.get("Content-Disposition", "")
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", c_type)
+                    if c_disp:
+                        self.send_header("Content-Disposition", c_disp)
+                    self.send_header("Cache-Control", "public, max-age=3600")
+                    self.end_headers()
+
+                    for chunk in resp.iter_content(chunk_size=16384):
+                        if chunk:
+                            self.wfile.write(chunk)
+                    return
+                except Exception as e:
+                    logger.error(f"Erro ao transmitir anexo do Jira: {e}")
+                    self._send_json({"error": f"Falha ao carregar anexo: {e}"}, status_code=500)
+                    return
+
             self._send_json({"error": "Rota não encontrada"}, status_code=404)
         except Exception as e:
             logger.exception("Erro em GET %s", path)
@@ -4613,6 +7222,96 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 cfg.theme = theme if theme in allowed else "auto"
                 cfg.save()
                 self._send_json({"success": True, "theme": cfg.theme})
+                return
+
+            if path == "/api/sharepoint/connect":
+                mode = (body.get("mode") or "device").strip().lower()
+                if mode not in ("device", "interactive"):
+                    mode = "device"
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                profile = (body.get("profile") or "graph_cli").strip().lower()
+                custom_client_id = (body.get("custom_client_id") or "").strip()
+                res = sp_mgr.start_login(
+                    mode=mode,
+                    login_hint=cfg.jira.get_clean_email(),
+                    profile=profile,
+                    custom_client_id=custom_client_id,
+                )
+                if not res.get("success"):
+                    self._send_json({"error": res.get("error", "Falha ao iniciar autenticação Microsoft 365.")}, status_code=400)
+                    return
+                self._send_json(res)
+                return
+
+            if path == "/api/sharepoint/disconnect":
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                res = sp_mgr.disconnect()
+                if not res.get("success"):
+                    self._send_json({"error": res.get("error", "Falha ao desconectar conta Microsoft 365.")}, status_code=400)
+                    return
+                self._send_json(res)
+                return
+
+            if path == "/api/jira/dds/upload":
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                filename = (body.get("filename") or f"DDS-{issue_key}.docx").strip()
+                b64_content = (body.get("content_base64") or "").strip()
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket inválida."}, status_code=400)
+                    return
+                if not b64_content:
+                    self._send_json({"error": "Conteúdo do arquivo .docx não informado."}, status_code=400)
+                    return
+                if len(b64_content) > 34 * 1024 * 1024:
+                    self._send_json({"error": "Arquivo muito grande (limite de 25 MB)."}, status_code=400)
+                    return
+                try:
+                    raw_bytes = base64.b64decode(b64_content)
+                except Exception:
+                    self._send_json({"error": "Falha ao decodificar arquivo .docx em base64."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                res = sp_mgr.save_manual_docx(issue_key=issue_key, filename=filename, content_bytes=raw_bytes)
+                if not res.get("success"):
+                    self._send_json({"error": res.get("error", "Arquivo .docx inválido.")}, status_code=400)
+                    return
+                self._send_json(res)
+                return
+
+            if path == "/api/jira/dds/detect-download":
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                summary = (body.get("summary") or "").strip()
+                explicit_filename = (body.get("filename") or "").strip()
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket inválida."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                res = sp_mgr.detect_and_import_from_downloads(
+                    issue_key=issue_key,
+                    ticket_summary=summary,
+                    explicit_filename=explicit_filename,
+                )
+                self._send_json(res)
+                return
+
+            if path == "/api/jira/dds/paste":
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                text = (body.get("text") or "").strip()
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket inválida."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                res = sp_mgr.save_pasted_text(issue_key=issue_key, text=text)
+                if not res.get("success"):
+                    self._send_json({"error": res.get("error", "Texto inválido.")}, status_code=400)
+                    return
+                self._send_json(res)
                 return
 
             if path == "/api/update":
@@ -4831,6 +7530,36 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         "worklog_ids": created_ids,
                     })
                     return
+
+            if path == "/api/jira/start-ticket":
+                issue_key = clean_jira_issue_key(body.get("issue_key") or body.get("key") or "")
+                comment = (body.get("comment") or "").strip()
+                if not issue_key:
+                    self._send_json({"error": "Chave de ticket inválida."}, status_code=400)
+                    return
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                client = JiraClient(cfg.jira, state_mgr)
+                engine = BotEngine(config=cfg, state_manager=state_mgr)
+
+                if not comment:
+                    comment = client.get_issue_summary(issue_key) or "Desenvolvimento / Atividade em andamento"
+
+                engine.switch_ticket(issue_key, comment=comment)
+
+                state = state_mgr.load_state()
+                if state.status != "RUNNING":
+                    engine.manual_start()
+                    state = state_mgr.load_state()
+
+                self._send_json({
+                    "success": True,
+                    "active_ticket": issue_key,
+                    "active_comment": comment,
+                    "status": state.status,
+                    "message": f"Contador iniciado com sucesso no ticket {issue_key}!"
+                })
+                return
 
             # Criacao em Lote (Multiplos Dias / Semanas / Multiplos Tickets)
             if path == "/api/worklogs/batch-create":
