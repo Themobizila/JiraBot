@@ -2375,6 +2375,37 @@ Não aplicável
         self.assertIn("triggerSharepointLoginFromProfile", HTML_PAGE)
         self.assertIn("getSelectedSpProfile", HTML_PAGE)
 
+    def test_updater_sync_pip_dependencies_and_git_auto_restart(self):
+        from unittest.mock import MagicMock
+        from updater import sync_pip_dependencies, perform_update
+
+        # 1. Teste de execucao do pip
+        mock_proc_ok = MagicMock()
+        mock_proc_ok.returncode = 0
+        mock_proc_ok.stdout = "Successfully installed"
+        mock_proc_ok.stderr = ""
+        with patch("subprocess.run", return_value=mock_proc_ok) as mock_sub:
+            ok, msg = sync_pip_dependencies()
+            self.assertTrue(ok)
+            self.assertIn("sincronizadas com sucesso", msg)
+
+        # 2. Teste de perform_update em modo Git com sync_deps
+        mock_status_ok = MagicMock()
+        mock_status_ok.returncode = 0
+        mock_status_ok.stdout = ""
+
+        mock_git_ok = MagicMock()
+        mock_git_ok.returncode = 0
+        mock_git_ok.stdout = "Updating eed6b51..7beb37c\nFast-forward"
+        mock_git_ok.stderr = ""
+
+        with patch("subprocess.run", side_effect=[mock_status_ok, mock_git_ok, mock_proc_ok]):
+            res = perform_update(update_source="", sync_deps=True)
+            self.assertTrue(res.get("success"))
+            self.assertTrue(res.get("requires_restart"))
+            self.assertIn("Git", res.get("message"))
+            self.assertIn("sincronizadas com sucesso", res.get("message"))
+
 
 if __name__ == "__main__":
     unittest.main()

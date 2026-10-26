@@ -15,8 +15,9 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import urllib.request
 import zipfile
 
@@ -196,7 +197,32 @@ def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
-def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
+def sync_pip_dependencies(timeout: int = 120) -> Tuple[bool, str]:
+    """
+    Instala ou atualiza automaticamente as dependencias declaradas em requirements.txt
+    utilizando o executavel Python do ambiente em execucao.
+    """
+    req_file = APP_DIR / "requirements.txt"
+    if not req_file.exists():
+        return True, "requirements.txt nao encontrado."
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", str(req_file), "--quiet"],
+            cwd=str(APP_DIR),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if proc.returncode == 0:
+            return True, "Dependencias do requirements.txt sincronizadas com sucesso."
+        err = (proc.stderr or proc.stdout or "").strip()
+        return False, f"Aviso ao instalar dependencias: {err[:200]}"
+    except Exception as e:
+        return False, f"Falha na execucao do pip: {e}"
+
+
+def perform_update(update_source: Optional[str] = None, sync_deps: bool = True) -> Dict[str, Any]:
     """
     Executa a atualização dos arquivos do aplicativo preservando 100% das configurações
     individuais e tokens de cada usuário em %USERPROFILE%\\.jirabot.
@@ -248,11 +274,18 @@ def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
                 "updated_count": 0,
                 "message": "Nenhum arquivo precisou ser atualizado. Você já possui a versão mais recente!",
             }
+
+        pip_msg = ""
+        if sync_deps:
+            ok_pip, p_text = sync_pip_dependencies()
+            pip_msg = f"\n{p_text}"
+
         return {
             "success": True,
             "updated_count": len(updated_files),
             "updated_files": updated_files,
-            "message": f"Aplicativo atualizado com sucesso! {len(updated_files)} arquivo(s) atualizado(s) ({', '.join(updated_files)}). Suas configurações pessoais e token foram preservados.",
+            "requires_restart": True,
+            "message": f"Aplicativo atualizado com sucesso! {len(updated_files)} arquivo(s) atualizado(s) ({', '.join(updated_files)}).{pip_msg}\nSuas configurações pessoais e token foram preservados.",
         }
 
     # Modo 2: URL HTTP/HTTPS apontando para um pacote .zip
@@ -285,11 +318,17 @@ def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
                         shutil.copy2(remote_f, local_f)
                         updated_files.append(str(rel))
 
+            pip_msg = ""
+            if sync_deps:
+                ok_pip, p_text = sync_pip_dependencies()
+                pip_msg = f"\n{p_text}"
+
             return {
                 "success": True,
                 "updated_count": len(updated_files),
                 "updated_files": updated_files,
-                "message": f"Atualização via pacote ZIP concluída! {len(updated_files)} arquivo(s) atualizado(s). Configurações individuais preservadas.",
+                "requires_restart": True,
+                "message": f"Atualização via pacote ZIP concluída! {len(updated_files)} arquivo(s) atualizado(s).{pip_msg}\nConfigurações individuais preservadas.",
             }
         except Exception as e:
             return {"success": False, "message": f"Falha ao baixar/extrair pacote de atualização: {e}"}
@@ -306,9 +345,16 @@ def perform_update(update_source: Optional[str] = None) -> Dict[str, Any]:
             )
             if proc.returncode == 0:
                 out = (proc.stdout or "").strip()
+                pip_msg = ""
+                if sync_deps:
+                    ok_pip, p_text = sync_pip_dependencies()
+                    pip_msg = f"\n{p_text}"
+
                 return {
                     "success": True,
-                    "message": f"Atualização via Git concluída com sucesso!\n{out}\nSuas configurações pessoais em ~/.jirabot foram preservadas.",
+                    "mode": "git",
+                    "requires_restart": True,
+                    "message": f"Atualização via Git concluída com sucesso!\n{out}{pip_msg}\nSuas configurações pessoais em ~/.jirabot foram preservadas.",
                 }
             return {
                 "success": False,
