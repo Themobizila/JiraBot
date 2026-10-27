@@ -359,6 +359,107 @@ class TestWebPanelAndShiftSchedule(unittest.TestCase):
         self.assertEqual(summary["lunch_end_hm"], "13:30")
         self.assertEqual(summary["end_hm"], "15:30")
 
+    def test_apply_shift_schedule_preserves_multiple_tickets_when_adjusting_lunch(self):
+        from storage import TimeInterval
+        state = DailyState(
+            date_str="2026-10-27",
+            status="RUNNING",
+            target_issue="TASK-4",
+            intervals=[
+                TimeInterval(start="2026-10-27T07:45:00", end="2026-10-27T09:30:00", issue_key="TASK-1", comment="Atividade 1"),
+                TimeInterval(start="2026-10-27T09:30:00", end="2026-10-27T11:00:00", issue_key="TASK-2", comment="Atividade 2"),
+                TimeInterval(start="2026-10-27T11:00:00", end="2026-10-27T12:00:00", issue_key="TASK-3", comment="Atividade 3"),
+                TimeInterval(start="2026-10-27T13:30:00", end=None, issue_key="TASK-4", comment="Atividade 4"),
+            ]
+        )
+        res = state.apply_shift_schedule(
+            start_hm="07:45",
+            lunch_start_hm="12:00",
+            lunch_end_hm="13:00",
+            end_hm="17:30",
+            default_issue="ATIVDIV-32",
+        )
+        self.assertTrue(res.get("success"))
+
+        # 1. Garante que todos os 4 tickets continuam presentes e na mesma ordem
+        self.assertEqual(len(state.intervals), 4)
+        self.assertEqual(state.intervals[0].issue_key, "TASK-1")
+        self.assertEqual(state.intervals[1].issue_key, "TASK-2")
+        self.assertEqual(state.intervals[2].issue_key, "TASK-3")
+        self.assertEqual(state.intervals[3].issue_key, "TASK-4")
+
+        # 2. Garante que os comentarios originais foram preservados
+        self.assertEqual(state.intervals[0].comment, "Atividade 1")
+        self.assertEqual(state.intervals[1].comment, "Atividade 2")
+        self.assertEqual(state.intervals[2].comment, "Atividade 3")
+        self.assertEqual(state.intervals[3].comment, "Atividade 4")
+
+        # 3. Garante que os intervalos intermediarios da manha continuam com os mesmos horarios
+        self.assertEqual(state.intervals[0].start, "2026-10-27T07:45:00")
+        self.assertEqual(state.intervals[0].end, "2026-10-27T09:30:00")
+        self.assertEqual(state.intervals[1].start, "2026-10-27T09:30:00")
+        self.assertEqual(state.intervals[1].end, "2026-10-27T11:00:00")
+        self.assertEqual(state.intervals[2].start, "2026-10-27T11:00:00")
+        self.assertEqual(state.intervals[2].end, "2026-10-27T12:00:00")
+
+        # 4. Garante que a tarde iniciou as 13:00 (ganhou 30 min) e encerrou as 17:30 sob TASK-4
+        self.assertEqual(state.intervals[3].start, "2026-10-27T13:00:00")
+        self.assertEqual(state.intervals[3].end, "2026-10-27T17:30:00")
+
+        # 5. Valida os tempos por ticket via get_seconds_by_issue
+        by_issue = state.get_seconds_by_issue()
+        self.assertIn("TASK-1", by_issue)
+        self.assertIn("TASK-2", by_issue)
+        self.assertIn("TASK-3", by_issue)
+        self.assertIn("TASK-4", by_issue)
+        self.assertEqual(by_issue["TASK-1"], 6300)   # 1h 45m
+        self.assertEqual(by_issue["TASK-2"], 5400)   # 1h 30m
+        self.assertEqual(by_issue["TASK-3"], 3600)   # 1h 00m
+        self.assertEqual(by_issue["TASK-4"], 16200)  # 4h 30m (13:00 as 17:30)
+
+        # 6. Total acumulado bate exatamente 8h 45m (31500 segundos)
+        self.assertEqual(state.get_total_seconds(), 31500)
+
+    def test_apply_shift_schedule_preserves_tickets_when_adjusting_start_and_end(self):
+        from storage import TimeInterval
+        state = DailyState(
+            date_str="2026-10-27",
+            status="RUNNING",
+            target_issue="TASK-4",
+            intervals=[
+                TimeInterval(start="2026-10-27T07:45:00", end="2026-10-27T09:30:00", issue_key="TASK-1", comment="Atividade 1"),
+                TimeInterval(start="2026-10-27T09:30:00", end="2026-10-27T11:00:00", issue_key="TASK-2", comment="Atividade 2"),
+                TimeInterval(start="2026-10-27T11:00:00", end="2026-10-27T12:00:00", issue_key="TASK-3", comment="Atividade 3"),
+                TimeInterval(start="2026-10-27T13:00:00", end="2026-10-27T17:30:00", issue_key="TASK-4", comment="Atividade 4"),
+            ]
+        )
+        res = state.apply_shift_schedule(
+            start_hm="07:30",
+            lunch_start_hm="12:00",
+            lunch_end_hm="13:00",
+            end_hm="18:00",
+        )
+        self.assertTrue(res.get("success"))
+
+        # Inicio da primeira tarefa antecipou para 07:30
+        self.assertEqual(state.intervals[0].start, "2026-10-27T07:30:00")
+        self.assertEqual(state.intervals[0].end, "2026-10-27T09:30:00")
+        self.assertEqual(state.intervals[0].issue_key, "TASK-1")
+
+        # Tarefas intermediarias inalteradas
+        self.assertEqual(state.intervals[1].start, "2026-10-27T09:30:00")
+        self.assertEqual(state.intervals[1].end, "2026-10-27T11:00:00")
+        self.assertEqual(state.intervals[1].issue_key, "TASK-2")
+
+        self.assertEqual(state.intervals[2].start, "2026-10-27T11:00:00")
+        self.assertEqual(state.intervals[2].end, "2026-10-27T12:00:00")
+        self.assertEqual(state.intervals[2].issue_key, "TASK-3")
+
+        # Ultima tarefa estendeu para 18:00
+        self.assertEqual(state.intervals[3].start, "2026-10-27T13:00:00")
+        self.assertEqual(state.intervals[3].end, "2026-10-27T18:00:00")
+        self.assertEqual(state.intervals[3].issue_key, "TASK-4")
+
     def test_worklog_schedule_persistence_and_inference(self):
         # 1. Inferencia automatica para worklog de 6h iniciado as 07:45
         wl = {
