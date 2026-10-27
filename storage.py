@@ -50,6 +50,9 @@ class TimeInterval:
     def to_dict(self) -> Dict[str, Any]:
         return {"start": self.start, "end": self.end, "issue_key": self.issue_key, "comment": self.comment}
 
+    def copy(self) -> TimeInterval:
+        return TimeInterval(start=self.start, end=self.end, issue_key=self.issue_key, comment=self.comment)
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> TimeInterval:
         return cls(start=data["start"], end=data.get("end"), issue_key=clean_jira_issue_key(data.get("issue_key")), comment=data.get("comment"))
@@ -303,31 +306,166 @@ class DailyState:
         default_issue: str = "",
     ) -> Dict[str, Any]:
         """
-        Aplica os horarios de inicio, pausa de almoco, retorno e encerramento ao estado do dia atual,
-        recalculando os intervalos e preservando o ticket ativo.
+        Aplica os horarios de inicio, pausa de almoco, retorno e encerramento ao estado do dia atual.
+        Quando ja existirem multiplos intervalos e tickets registrados no dia, preserva integralmente
+        a atribuicao de cada ticket e ajusta cirurgicamente apenas os limites do expediente (inicio,
+        divisa de almoco e saida). Caso o dia esteja vazio, gera os intervalos padrao com o ticket ativo.
         """
         active_key = (self.target_issue or default_issue or "ATIVDIV-32").strip().upper()
         active_comment = self.get_issue_comment(active_key)
 
-        calc = calculate_shift_schedule(
-            date_str=self.date_str,
-            start_hm=start_hm,
-            lunch_start_hm=lunch_start_hm,
-            lunch_end_hm=lunch_end_hm,
-            end_hm=end_hm,
-            issue_key=active_key,
-            comment=active_comment,
-        )
-        if not calc.get("success"):
+        target_date = (self.date_str or date.today().isoformat())[:10]
+        start_dt = _parse_hm(target_date, start_hm)
+        if not start_dt:
+            return {"success": False, "message": "Horário de início inválido. Use o formato HH:MM (ex: 07:45)."}
+
+        lunch_s_dt = _parse_hm(target_date, lunch_start_hm)
+        lunch_e_dt = _parse_hm(target_date, lunch_end_hm)
+        end_dt = _parse_hm(target_date, end_hm)
+
+        if lunch_s_dt and lunch_s_dt < start_dt:
+            return {"success": False, "message": "A pausa de almoço não pode ser anterior ao horário de início."}
+        if lunch_s_dt and lunch_e_dt and lunch_e_dt < lunch_s_dt:
+            return {"success": False, "message": "O retorno do almoço não pode ser anterior à saída para almoço."}
+        if end_dt and lunch_e_dt and end_dt < lunch_e_dt:
+            return {"success": False, "message": "O horário de encerramento não pode ser anterior ao retorno do almoço."}
+        if end_dt and not lunch_e_dt and end_dt < start_dt:
+            return {"success": False, "message": "O horário de encerramento não pode ser anterior ao início."}
+
+        # Caso 1: Nao ha intervalos registrados ainda no dia -> gera intervalos padrao
+        if not self.intervals:
+            calc = calculate_shift_schedule(
+                date_str=self.date_str,
+                start_hm=start_hm,
+                lunch_start_hm=lunch_start_hm,
+                lunch_end_hm=lunch_end_hm,
+                end_hm=end_hm,
+                issue_key=active_key,
+                comment=active_comment,
+            )
+            if not calc.get("success"):
+                return calc
+            self.intervals = calc["intervals"]
+            self.status = calc["status"]
+            if not self.target_issue and active_key:
+                self.target_issue = active_key
+            self.last_event = "WEB_SCHEDULE_UPDATED"
+            self.last_event_time = datetime.now().isoformat()
             return calc
 
-        self.intervals = calc["intervals"]
-        self.status = calc["status"]
+        # Caso 2: Ja existem intervalos registrados (com um ou varios tickets)
+        # Identifica a divisao entre manha e tarde
+        morning_intervals: List[TimeInterval] = []
+        afternoon_intervals: List[TimeInterval] = []
+
+        best_gap_idx = -1
+        best_gap_sec = -1
+        for i in range(len(self.intervals) - 1):
+            cur_end_str = self.intervals[i].end
+            nxt_start_str = self.intervals[i + 1].start
+            if cur_end_str and nxt_start_str:
+                try:
+                    ce = datetime.fromisoformat(cur_end_str)
+                    ns = datetime.fromisoformat(nxt_start_str)
+                    gap = (ns - ce).total_seconds()
+                    if gap > best_gap_sec:
+                        best_gap_sec = gap
+                        best_gap_idx = i
+                except Exception:
+                    pass
+
+        if best_gap_idx >= 0 and best_gap_sec >= 900:
+            morning_intervals = [i.copy() for i in self.intervals[:best_gap_idx + 1]]
+            afternoon_intervals = [i.copy() for i in self.intervals[best_gap_idx + 1:]]
+        else:
+            ref_lunch_s = lunch_s_dt or datetime(start_dt.year, start_dt.month, start_dt.day, 12, 0)
+            for inter in self.intervals:
+                try:
+                    i_st = datetime.fromisoformat(inter.start)
+                    if i_st < ref_lunch_s:
+                        morning_intervals.append(inter.copy())
+                    else:
+                        afternoon_intervals.append(inter.copy())
+                except Exception:
+                    morning_intervals.append(inter.copy())
+
+        if not morning_intervals and afternoon_intervals:
+            morning_intervals = afternoon_intervals
+            afternoon_intervals = []
+
+        # 1. Ajusta o inicio do expediente (start_hm) no primeiro intervalo da manha
+        if morning_intervals:
+            morning_intervals[0].start = start_dt.isoformat()
+            if morning_intervals[0].end:
+                try:
+                    m0_end = datetime.fromisoformat(morning_intervals[0].end)
+                    if m0_end < start_dt:
+                        morning_intervals[0].end = (start_dt + timedelta(minutes=5)).isoformat()
+                except Exception:
+                    pass
+
+        # 2. Ajusta a saida para almoco (lunch_start_hm) no ultimo intervalo da manha
+        if lunch_s_dt and morning_intervals:
+            morning_intervals[-1].end = lunch_s_dt.isoformat()
+
+        # 3. Ajusta o retorno do almoco (lunch_end_hm) no primeiro intervalo da tarde
+        if lunch_e_dt:
+            if afternoon_intervals:
+                afternoon_intervals[0].start = lunch_e_dt.isoformat()
+                if afternoon_intervals[0].end:
+                    try:
+                        a0_end = datetime.fromisoformat(afternoon_intervals[0].end)
+                        if a0_end < lunch_e_dt:
+                            afternoon_intervals[0].end = (lunch_e_dt + timedelta(minutes=5)).isoformat()
+                    except Exception:
+                        pass
+            else:
+                afternoon_intervals.append(
+                    TimeInterval(
+                        start=lunch_e_dt.isoformat(),
+                        end=end_dt.isoformat() if end_dt else None,
+                        issue_key=active_key,
+                        comment=active_comment,
+                    )
+                )
+
+        # 4. Ajusta o encerramento do expediente (end_hm) no ultimo intervalo
+        if end_dt:
+            if afternoon_intervals:
+                afternoon_intervals[-1].end = end_dt.isoformat()
+            elif morning_intervals:
+                morning_intervals[-1].end = end_dt.isoformat()
+            new_status = "COMPLETED"
+        else:
+            if lunch_s_dt and not lunch_e_dt:
+                new_status = "PAUSED_LUNCH"
+            elif afternoon_intervals and afternoon_intervals[-1].end is None:
+                new_status = "RUNNING"
+            elif morning_intervals and morning_intervals[-1].end is None:
+                new_status = "RUNNING"
+            else:
+                new_status = self.status
+
+        combined = morning_intervals + afternoon_intervals
+        if combined:
+            self.intervals = combined
+            self.status = new_status
+
         if not self.target_issue and active_key:
             self.target_issue = active_key
         self.last_event = "WEB_SCHEDULE_UPDATED"
         self.last_event_time = datetime.now().isoformat()
-        return calc
+
+        tot_sec = self.get_total_seconds()
+        shift_times = self.get_shift_times_summary()
+
+        return {
+            "success": True,
+            "status": self.status,
+            "total_seconds": tot_sec,
+            "shift_times": shift_times,
+            "message": "Horários do expediente atualizados com sucesso!",
+        }
 
     def to_dict(self) -> Dict[str, Any]:
         return {

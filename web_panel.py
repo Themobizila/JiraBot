@@ -2256,6 +2256,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             Colar Texto da DDS
           </button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="openFillDdsModal()" style="display:inline-flex; align-items:center; gap:6px; background:#8b5cf6; border-color:#7c3aed;" title="Preencher secao de Desenvolvimento e Checklist de Revisao de Codigo">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Preencher DDS
+          </button>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
           <a id="dds-top-sharepoint-btn" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="display:none; align-items:center; gap:6px;" title="Abrir DDS no Word Online usando o navegador corporativo">
@@ -2762,6 +2766,132 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <button type="button" class="btn btn-outline btn-sm" onclick="closeImageLightbox()" style="color:#ffffff; border-color:rgba(255,255,255,0.4); background:rgba(0,0,0,0.4);">Fechar</button>
     </div>
     <img id="lightbox-image-preview" src="" alt="Imagem Ampliada" style="max-width:92vw; max-height:84vh; object-fit:contain; border-radius:6px; box-shadow:0 10px 40px rgba(0,0,0,0.7); background:rgba(0,0,0,0.3);">
+  </div>
+</div>
+
+<!-- ==================== MODAL: PREENCHIMENTO ESTRUTURADO DA DDS (OPCAO 1) ==================== -->
+<div class="modal-backdrop" id="modal-fill-dds" style="display:none; z-index:10002;" onclick="closeFillDdsModal()">
+  <div class="modal-container" style="max-width:860px; width:95vw; max-height:90vh; display:flex; flex-direction:column;" onclick="event.stopPropagation();">
+    <div class="modal-header" style="flex-shrink:0;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#8b5cf6" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        <span class="modal-title">Preenchimento Rápido da DDS: <strong id="fill-dds-ticket-key" style="color:#8b5cf6;">-</strong></span>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="closeFillDdsModal()">&times;</button>
+    </div>
+
+    <div class="modal-body" style="padding:16px 20px; overflow-y:auto; flex:1;">
+      <!-- Seletor de Papel -->
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border-color);">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="font-size:12px; font-weight:700; color:var(--text-main);">Etapa do Preenchimento:</span>
+          <label style="font-size:12px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; color:var(--text-main);">
+            <input type="radio" name="fill_role_radio" value="desenvolvimento" checked onchange="onFillRoleChange(this.value)">
+            Desenvolvimento & Revisão Técnica
+          </label>
+          <label style="font-size:12px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; color:var(--text-main);">
+            <input type="radio" name="fill_role_radio" value="homologacao" onchange="onFillRoleChange(this.value)">
+            Teste de Implementação & Homologação
+          </label>
+        </div>
+        <div id="fill-saved-notice" style="font-size:11px; color:var(--text-muted);"></div>
+      </div>
+
+      <!-- Bloco 1: Campos do Desenvolvimento -->
+      <div id="fill-section-dev" style="display:block;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Nome do Desenvolvedor *</label>
+            <input type="text" id="fill-dev-nome" class="form-control" style="font-size:12.5px;" placeholder="ex: João Moura">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Data de Conclusão *</label>
+            <input type="text" id="fill-dev-data" class="form-control" style="font-size:12.5px;" placeholder="DD/MM/AAAA">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Pacote / Cartão / Branch</label>
+            <input type="text" id="fill-dev-pacote" class="form-control" style="font-size:12.5px;" placeholder="ex: CNET-2026.01 / Pacote 45">
+          </div>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Detalhamento da Implementação *</label>
+          <textarea id="fill-dev-detalhes" class="form-control" rows="4" style="font-size:12px; line-height:1.45;" placeholder="Descreva claramente o que foi alterado no código ou banco de dados..."></textarea>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Recomendações ao Teste de Implementação</label>
+          <textarea id="fill-dev-rec" class="form-control" rows="2" style="font-size:12px; line-height:1.45;" placeholder="Orientações e parâmetros de teste para a equipe de homologação..."></textarea>
+        </div>
+
+        <!-- Bloco de Checklist Oficial de Revisao de Codigo -->
+        <div style="background:var(--bg-subtle); border:1px solid var(--border-color); border-radius:6px; padding:12px 14px; margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+            <div>
+              <strong style="font-size:12.5px; color:var(--text-main);">Revisão Final de Código (Checklist Oficial)</strong>
+              <div style="font-size:11px; color:var(--text-muted);">Itens obrigatórios para encaminhamento ao teste de implementação</div>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('dev_standard')" style="font-size:11px; padding:3px 8px; color:#22c55e; border-color:#22c55e;">
+                Marcar Padrão de Envio (1 Clique)
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('all_sim')" style="font-size:11px; padding:3px 8px;">
+                Todos Sim
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('all_na')" style="font-size:11px; padding:3px 8px;">
+                Todos N/A
+              </button>
+            </div>
+          </div>
+
+          <div id="fill-checklist-container" style="display:flex; flex-direction:column; gap:8px; max-height:260px; overflow-y:auto; padding-right:4px;">
+            <!-- Carregado dinamicamente via JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Bloco 2: Campos de Homologacao -->
+      <div id="fill-section-hom" style="display:none;">
+        <div style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:12px; display:grid;">
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Nome do Testador *</label>
+            <input type="text" id="fill-test-nome" class="form-control" style="font-size:12.5px;" placeholder="ex: Jhonatan">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Data do Teste *</label>
+            <input type="text" id="fill-test-data" class="form-control" style="font-size:12.5px;" placeholder="DD/MM/AAAA">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Parecer / Status</label>
+            <select id="fill-test-status" class="form-control" style="font-size:12px;">
+              <option value="aprovado">Aprovado para Release</option>
+              <option value="divergencia">Divergência Encontrada</option>
+              <option value="em_andamento">Em Andamento</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Resultado do Teste / Divergência Encontrada</label>
+          <textarea id="fill-test-detalhes" class="form-control" rows="5" style="font-size:12px; line-height:1.45;" placeholder="Detalhe as validações realizadas, cenários testados ou divergências constatadas..."></textarea>
+        </div>
+      </div>
+
+      <!-- Opcoes de Envio -->
+      <div style="background:rgba(0,0,0,0.1); padding:8px 12px; border-radius:4px; margin-top:8px;">
+        <label style="font-size:11.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-main);">
+          <input type="checkbox" id="fill-opt-post-jira">
+          Publicar também comentário formal de entrega no chamado do Jira Cloud
+        </label>
+      </div>
+    </div>
+
+    <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px; border-top:1px solid var(--border-color); flex-shrink:0;">
+      <button type="button" class="btn btn-outline btn-sm" onclick="closeFillDdsModal()">Cancelar</button>
+      <button type="button" class="btn btn-primary btn-sm" id="btn-submit-dds-fill" onclick="submitDdsFill()" style="background:#8b5cf6; border-color:#7c3aed;">
+        Salvar Preenchimento da DDS
+      </button>
+    </div>
   </div>
 </div>
 
@@ -4533,6 +4663,210 @@ async function detectDdsFromDownloads(explicitFilename = '') {
     }
   } catch (err) {
     showToast('Erro ao verificar Downloads: ' + err.message, 'error');
+  }
+}
+
+let currentFillDdsTemplate = [];
+
+async function openFillDdsModal(preferredRole = 'desenvolvimento') {
+  if (!currentModalTicketKey) {
+    showToast('Nenhum chamado selecionado no momento.', 'warning');
+    return;
+  }
+
+  const modal = document.getElementById('modal-fill-dds');
+  const keyLabel = document.getElementById('fill-dds-ticket-key');
+  if (keyLabel) keyLabel.textContent = currentModalTicketKey;
+
+  const roleRadio = document.querySelector(`input[name="fill_role_radio"][value="${preferredRole}"]`);
+  if (roleRadio) roleRadio.checked = true;
+  onFillRoleChange(preferredRole);
+
+  try {
+    const res = await apiCall('/api/jira/dds/fill-template', 'POST', { key: currentModalTicketKey });
+    currentFillDdsTemplate = res.default_checklist || [];
+    const saved = res.current_fill || {};
+
+    const devNomeInp = document.getElementById('fill-dev-nome');
+    const devDataInp = document.getElementById('fill-dev-data');
+    const devPctInp = document.getElementById('fill-dev-pacote');
+    const devDetInp = document.getElementById('fill-dev-detalhes');
+    const devRecInp = document.getElementById('fill-dev-rec');
+
+    if (devNomeInp) devNomeInp.value = saved.autor_nome || res.default_autor || '';
+    if (devDataInp) devDataInp.value = saved.data_preenchimento || res.default_data || '';
+    if (devPctInp) devPctInp.value = saved.pacote || '';
+    if (devDetInp) devDetInp.value = saved.implementacao_texto || '';
+    if (devRecInp) devRecInp.value = saved.recomendacoes || '';
+
+    const testNomeInp = document.getElementById('fill-test-nome');
+    const testDataInp = document.getElementById('fill-test-data');
+    const testStInp = document.getElementById('fill-test-status');
+    const testDetInp = document.getElementById('fill-test-detalhes');
+
+    if (testNomeInp) testNomeInp.value = saved.testador_nome || '';
+    if (testDataInp) testDataInp.value = saved.testador_data || res.default_data || '';
+    if (testStInp) testStInp.value = saved.resultado_tipo || 'aprovado';
+    if (testDetInp) testDetInp.value = saved.resultado_homologacao || '';
+
+    const noticeEl = document.getElementById('fill-saved-notice');
+    if (noticeEl) {
+      noticeEl.textContent = saved.saved_at ? `Salvo localmente em ${new Date(saved.saved_at).toLocaleString()}` : '';
+    }
+
+    renderFillChecklist(saved.checklist || []);
+
+    if (modal) modal.style.display = 'flex';
+  } catch (err) {
+    showToast('Falha ao abrir formulário de preenchimento: ' + err.message, 'error');
+  }
+}
+
+function closeFillDdsModal() {
+  const modal = document.getElementById('modal-fill-dds');
+  if (modal) modal.style.display = 'none';
+}
+
+function onFillRoleChange(role) {
+  const devSec = document.getElementById('fill-section-dev');
+  const homSec = document.getElementById('fill-section-hom');
+  if (devSec) devSec.style.display = (role === 'desenvolvimento') ? 'block' : 'none';
+  if (homSec) homSec.style.display = (role === 'homologacao') ? 'block' : 'none';
+}
+
+function renderFillChecklist(savedChecklist = []) {
+  const container = document.getElementById('fill-checklist-container');
+  if (!container) return;
+
+  const savedMap = {};
+  if (Array.isArray(savedChecklist)) {
+    savedChecklist.forEach(it => {
+      if (it && it.pergunta) savedMap[it.pergunta.trim().toLowerCase()] = it.resposta;
+    });
+  }
+
+  const items = currentFillDdsTemplate.length > 0 ? currentFillDdsTemplate : [];
+  container.innerHTML = items.map((it, idx) => {
+    const key = (it.pergunta || '').trim().toLowerCase();
+    const curResp = savedMap[key] || it.padrao || 'Sim';
+
+    return `
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:4px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:240px;">
+          <span style="font-size:10px; text-transform:uppercase; color:var(--text-muted); font-weight:700;">${escapeHtml(it.categoria || '')}</span>
+          <div style="font-size:11.5px; color:var(--text-main); line-height:1.35;">${escapeHtml(it.pergunta || '')}</div>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <label style="font-size:11px; display:inline-flex; align-items:center; gap:3px; cursor:pointer;">
+            <input type="radio" name="chk_resp_${idx}" value="Sim" ${curResp === 'Sim' ? 'checked' : ''}> Sim
+          </label>
+          <label style="font-size:11px; display:inline-flex; align-items:center; gap:3px; cursor:pointer;">
+            <input type="radio" name="chk_resp_${idx}" value="Não" ${curResp === 'Não' ? 'checked' : ''}> Não
+          </label>
+          <label style="font-size:11px; display:inline-flex; align-items:center; gap:3px; cursor:pointer;">
+            <input type="radio" name="chk_resp_${idx}" value="Não aplicável" ${curResp === 'Não aplicável' ? 'checked' : ''}> N/A
+          </label>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function applyChecklistPreset(mode) {
+  if (!Array.isArray(currentFillDdsTemplate)) return;
+  currentFillDdsTemplate.forEach((it, idx) => {
+    let targetVal = 'Sim';
+    if (mode === 'dev_standard') {
+      targetVal = it.padrao || 'Sim';
+    } else if (mode === 'all_sim') {
+      targetVal = 'Sim';
+    } else if (mode === 'all_na') {
+      targetVal = 'Não aplicável';
+    }
+
+    const rad = document.querySelector(`input[name="chk_resp_${idx}"][value="${targetVal}"]`);
+    if (rad) rad.checked = true;
+  });
+}
+
+async function submitDdsFill() {
+  if (!currentModalTicketKey) return;
+  const roleRadio = document.querySelector('input[name="fill_role_radio"]:checked');
+  const role = roleRadio ? roleRadio.value : 'desenvolvimento';
+
+  const devNome = (document.getElementById('fill-dev-nome').value || '').trim();
+  const devData = (document.getElementById('fill-dev-data').value || '').trim();
+  const devPacote = (document.getElementById('fill-dev-pacote').value || '').trim();
+  const devDet = (document.getElementById('fill-dev-detalhes').value || '').trim();
+  const devRec = (document.getElementById('fill-dev-rec').value || '').trim();
+
+  const testNome = (document.getElementById('fill-test-nome').value || '').trim();
+  const testData = (document.getElementById('fill-test-data').value || '').trim();
+  const testStatus = document.getElementById('fill-test-status').value;
+  const testDet = (document.getElementById('fill-test-detalhes').value || '').trim();
+  const postJira = document.getElementById('fill-opt-post-jira').checked;
+
+  if (role === 'desenvolvimento' && !devNome) {
+    showToast('Informe o nome do desenvolvedor.', 'warning');
+    return;
+  }
+  if (role === 'desenvolvimento' && !devDet) {
+    showToast('Informe o detalhamento da implementação.', 'warning');
+    return;
+  }
+
+  // Coleta o checklist
+  const checklistPayload = [];
+  if (Array.isArray(currentFillDdsTemplate)) {
+    currentFillDdsTemplate.forEach((it, idx) => {
+      const checked = document.querySelector(`input[name="chk_resp_${idx}"]:checked`);
+      const resp = checked ? checked.value : (it.padrao || 'Sim');
+      checklistPayload.push({
+        categoria: it.categoria || 'Geral',
+        pergunta: it.pergunta || '',
+        resposta: resp,
+      });
+    });
+  }
+
+  const payload = {
+    key: currentModalTicketKey,
+    role: role,
+    autor_nome: devNome,
+    data_preenchimento: devData,
+    pacote: devPacote,
+    implementacao_texto: devDet,
+    recomendacoes: devRec,
+    checklist: checklistPayload,
+    testador_nome: testNome,
+    testador_data: testData,
+    resultado_tipo: testStatus,
+    resultado_homologacao: testDet,
+    post_jira_comment: postJira,
+  };
+
+  const btn = document.getElementById('btn-submit-dds-fill');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Salvando preenchimento...';
+  }
+
+  try {
+    const res = await apiCall('/api/jira/dds/fill', 'POST', payload);
+    if (res.error) throw new Error(res.error);
+
+    showToast(res.message || 'Preenchimento da DDS salvo com sucesso!', 'success');
+    closeFillDdsModal();
+
+    // Recarrega o modal para exibir os dados preenchidos imediatamente
+    await openTicketDdsModal(currentModalTicketKey, true, true);
+  } catch (err) {
+    showToast('Falha ao salvar preenchimento da DDS: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Salvar Preenchimento da DDS';
+    }
   }
 }
 
@@ -7311,6 +7645,52 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 if not res.get("success"):
                     self._send_json({"error": res.get("error", "Texto inválido.")}, status_code=400)
                     return
+                self._send_json(res)
+                return
+
+            if path == "/api/jira/dds/fill-template":
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                cfg = BotConfig.load()
+                from sharepoint_client import DEFAULT_DDS_CHECKLIST_TEMPLATE
+                current_fill = sp_mgr.load_filled_dds(issue_key) if issue_key else None
+                user_email = cfg.jira.email or ""
+                user_name = user_email.split("@")[0].replace(".", " ").title() if user_email else "Desenvolvedor"
+                self._send_json({
+                    "success": True,
+                    "default_checklist": DEFAULT_DDS_CHECKLIST_TEMPLATE,
+                    "current_fill": current_fill,
+                    "default_autor": user_name,
+                    "default_data": datetime.now().strftime("%d/%m/%Y"),
+                })
+                return
+
+            if path == "/api/jira/dds/fill":
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket inválida."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                res = sp_mgr.save_filled_dds(issue_key=issue_key, fill_data=body)
+
+                # Opcional: comentar no Jira caso solicitado
+                if body.get("post_jira_comment"):
+                    try:
+                        cfg = BotConfig.load()
+                        client = JiraClient(cfg.jira, state_mgr)
+                        role_label = "Desenvolvimento" if body.get("role") != "homologacao" else "Homologação"
+                        autor = body.get("autor_nome") or body.get("testador_nome") or "Desenvolvedor"
+                        dt = body.get("data_preenchimento") or body.get("testador_data") or datetime.now().strftime("%d/%m/%Y")
+                        det = body.get("implementacao_texto") or body.get("testador_detalhes") or ""
+                        comment_msg = f"*[DDS - {role_label} Concluído]*\n*Responsável:* {autor}\n*Data:* {dt}\n\n*Detalhes:*\n{det}"
+                        client.add_comment(issue_key, comment_msg)
+                        res["jira_comment_posted"] = True
+                    except Exception as je:
+                        logger.warning("Falha ao registrar comentario no Jira: %s", je)
+                        res["jira_comment_error"] = str(je)
+
                 self._send_json(res)
                 return
 

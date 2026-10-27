@@ -38,6 +38,105 @@ SHAREPOINT_SCOPES = [
 ]
 DEFAULT_AUTHORITY = "https://login.microsoftonline.com/organizations"
 
+# Template oficial do Checklist de Revisao Final de Codigo da Consisa (DDS)
+DEFAULT_DDS_CHECKLIST_TEMPLATE: List[Dict[str, str]] = [
+    {
+        "categoria": "Padrão de codificação",
+        "pergunta": "Todos os códigos incluídos apenas para fins de testes foram devidamente retirados?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Padrão de codificação",
+        "pergunta": "Os valores gerados pelo sistema estão corretos de acordo com as regras estabelecidas?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Padrão de codificação",
+        "pergunta": "Todas as variáveis e métodos não utilizados foram retirados?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Padrão de codificação",
+        "pergunta": "Todas as variáveis foram devidamente inicializadas?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Persistência de dados",
+        "pergunta": "O campo incluído está sendo gravado/atualizado corretamente?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Persistência de dados",
+        "pergunta": "A exclusão dos registros foi tratada adequadamente?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "SQL",
+        "pergunta": "Todos os SQLs de consulta gerados observam a ordem de índices e chaves nas cláusulas join?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "SQL",
+        "pergunta": "Todos os SQLs de consulta gerados observam a ordem de índices e chaves nas cláusulas where?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "SQL",
+        "pergunta": "Todos os SQLs de alteração / exclusão estão considerando a chave primária completa?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "A ordem de tabulação dos campos está correta?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "A máscara do(s) campo(s) está de acordo com o tipo do campo?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "O sistema está bloqueando a digitação em campos são apenas de visualização/consulta? Inclusive em grades.",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "Todas as literais de telas e/ou relatórios estão escritas corretamente (acentuação, erros de português e concordância)?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "Todos os campos e botões estão sendo habilitados e desabilitados nas situações esperadas?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "O sistema está permitindo o não preenchimento de campos opcionais?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "Todos os campos obrigatórios têm seu preenchimento criticado no sistema e devidamente destacados?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "Todos os objetos instanciados/criados estão sendo destruídos ao finalizar a unit?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Envio para teste",
+        "pergunta": "Todas as alterações estão descritas para o testador? inclusive identificando possíveis processos que possam ter sido afetados (em caso de alteração em algo \"público\")?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Envio para teste",
+        "pergunta": "A tarefa está sendo enviada para teste no ambiente correto (projeto mensal ou produção)?",
+        "padrao": "Sim",
+    },
+]
+
 
 def encode_sharepoint_sharing_url(url: str) -> str:
     """
@@ -581,6 +680,46 @@ class SharePointManager:
             return data, meta
         except Exception:
             return None
+
+    def save_filled_dds(self, issue_key: str, fill_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Salva o preenchimento estruturado da DDS (Desenvolvimento, Homologacao e Checklist)
+        para um determinado ticket, persistindo localmente e atualizando o .docx correspondente.
+        """
+        clean_key = self._safe_key(issue_key.upper())
+        fill_path = self.docx_cache_dir / f"fill_{clean_key}.json"
+
+        payload = dict(fill_data)
+        payload["issue_key"] = issue_key.upper()
+        payload["saved_at"] = datetime.now().isoformat()
+        fill_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        # Atualiza a versao manual .docx caso exista para refletir o texto atualizado
+        self._sync_fill_into_manual_docx(clean_key, payload)
+
+        return {"success": True, "message": "Preenchimento da DDS salvo com sucesso!", "meta": payload}
+
+    def load_filled_dds(self, issue_key: str) -> Optional[Dict[str, Any]]:
+        """Carrega os dados previamente preenchidos para determinado ticket, se houver."""
+        clean_key = self._safe_key(issue_key.upper())
+        fill_path = self.docx_cache_dir / f"fill_{clean_key}.json"
+        if not fill_path.exists():
+            return None
+        try:
+            return json.loads(fill_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _sync_fill_into_manual_docx(self, clean_key: str, payload: Dict[str, Any]) -> None:
+        """Sincroniza os dados preenchidos com o arquivo de cache da DDS."""
+        meta_path = self.docx_cache_dir / f"manual_{clean_key}.meta.json"
+        if meta_path.exists():
+            try:
+                cur_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                cur_meta["last_fill"] = payload.get("saved_at")
+                meta_path.write_text(json.dumps(cur_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
 
     # ==================== DOWNLOAD VIA MICROSOFT GRAPH API ====================
 

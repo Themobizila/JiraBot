@@ -2424,6 +2424,49 @@ class JiraClient:
         else:
             structured_dds = regex_structured
 
+        # Mescla preenchimento estruturado local (Opcao 1) caso exista para o ticket
+        local_fill = sp_mgr.load_filled_dds(clean)
+        if local_fill:
+            if not structured_dds:
+                structured_dds = estruturar_conteudo_dds("")
+            structured_dds["has_structured_data"] = True
+            structured_dds["has_local_fill"] = True
+            structured_dds["fill_saved_at"] = local_fill.get("saved_at")
+
+            dev_sec = structured_dds.setdefault("desenvolvimento", {})
+            if local_fill.get("autor_nome"):
+                dev_sec["responsavel"] = local_fill["autor_nome"]
+            if local_fill.get("data_preenchimento"):
+                dev_sec["data"] = local_fill["data_preenchimento"]
+            if local_fill.get("implementacao_texto"):
+                dev_sec["detalhamento"] = local_fill["implementacao_texto"]
+            if local_fill.get("recomendacoes"):
+                dev_sec["recomendacoes"] = local_fill["recomendacoes"]
+
+            if local_fill.get("checklist"):
+                structured_dds["checklist"] = local_fill["checklist"]
+
+            tl_sec = structured_dds.setdefault("team_leader", {})
+            if local_fill.get("pacote"):
+                tl_sec["pacote"] = local_fill["pacote"]
+            if local_fill.get("fonte"):
+                tl_sec["fonte"] = local_fill["fonte"]
+            if local_fill.get("cartao"):
+                tl_sec["cartao"] = local_fill["cartao"]
+
+            if local_fill.get("role") == "homologacao":
+                test_sec = structured_dds.setdefault("teste_implementacao", {})
+                if local_fill.get("testador_nome"):
+                    test_sec["responsavel"] = local_fill["testador_nome"]
+                if local_fill.get("testador_data"):
+                    test_sec["data"] = local_fill["testador_data"]
+                if local_fill.get("testador_detalhes"):
+                    test_sec["detalhamento"] = local_fill["testador_detalhes"]
+                hom_sec = structured_dds.setdefault("resultado_homologacao", {})
+                if local_fill.get("resultado_homologacao"):
+                    hom_sec["detalhamento"] = local_fill["resultado_homologacao"]
+                    hom_sec["tipo"] = _classify_homologacao_tipo(local_fill["resultado_homologacao"])
+
         # 5. Extracao de Metadados do Movidesk
         summary = f.get("summary") or "Sem título"
         movidesk_num = ""
@@ -2531,6 +2574,32 @@ class JiraClient:
             "dds_inherited_from_parent": dds_inherited_from_parent,
             "url": f"{base_url}/browse/{clean}",
         }
+
+    def add_issue_comment(self, issue_key: str, comment_text: str) -> Dict[str, Any]:
+        """
+        Adiciona um comentario ao ticket informado no Jira.
+        """
+        clean = clean_jira_issue_key(issue_key)
+        if not clean or clean == "SEM_TICKET":
+            return {"status": "error", "message": "Chave de ticket invalida."}
+
+        base_url = self.config.get_clean_base_url()
+        endpoint = f"{base_url}/rest/api/2/issue/{clean}/comment"
+        payload = {"body": comment_text}
+        data_bytes = json.dumps(payload).encode("utf-8")
+        headers = self._get_auth_headers()
+
+        req = urllib.request.Request(endpoint, data=data_bytes, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                return {"status": "success", "comment_id": resp_data.get("id"), "data": resp_data}
+        except Exception as e:
+            logger.warning(f"Erro ao adicionar comentario no ticket {clean}: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def add_comment(self, issue_key: str, comment_text: str) -> Dict[str, Any]:
+        return self.add_issue_comment(issue_key, comment_text)
 
     def submit_worklog(
         self,

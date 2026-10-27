@@ -359,6 +359,102 @@ class TestWebPanelAndShiftSchedule(unittest.TestCase):
         self.assertEqual(summary["lunch_end_hm"], "13:30")
         self.assertEqual(summary["end_hm"], "15:30")
 
+    def test_apply_shift_schedule_preserves_multiple_tickets_when_adjusting_lunch(self):
+        from storage import TimeInterval
+        state = DailyState(
+            date_str="2026-10-27",
+            status="RUNNING",
+            target_issue="TASK-4",
+            intervals=[
+                TimeInterval(start="2026-10-27T07:45:00", end="2026-10-27T09:30:00", issue_key="TASK-1", comment="Atividade 1"),
+                TimeInterval(start="2026-10-27T09:30:00", end="2026-10-27T11:00:00", issue_key="TASK-2", comment="Atividade 2"),
+                TimeInterval(start="2026-10-27T11:00:00", end="2026-10-27T12:00:00", issue_key="TASK-3", comment="Atividade 3"),
+                TimeInterval(start="2026-10-27T13:30:00", end=None, issue_key="TASK-4", comment="Atividade 4"),
+            ]
+        )
+        res = state.apply_shift_schedule(
+            start_hm="07:45",
+            lunch_start_hm="12:00",
+            lunch_end_hm="13:00",
+            end_hm="17:30",
+            default_issue="ATIVDIV-32",
+        )
+        self.assertTrue(res.get("success"))
+
+        # 1. Garante que todos os 4 tickets continuam presentes e na mesma ordem
+        self.assertEqual(len(state.intervals), 4)
+        self.assertEqual(state.intervals[0].issue_key, "TASK-1")
+        self.assertEqual(state.intervals[1].issue_key, "TASK-2")
+        self.assertEqual(state.intervals[2].issue_key, "TASK-3")
+        self.assertEqual(state.intervals[3].issue_key, "TASK-4")
+
+        # 2. Garante que os comentarios originais foram preservados
+        self.assertEqual(state.intervals[0].comment, "Atividade 1")
+        self.assertEqual(state.intervals[1].comment, "Atividade 2")
+        self.assertEqual(state.intervals[2].comment, "Atividade 3")
+        self.assertEqual(state.intervals[3].comment, "Atividade 4")
+
+        # 3. Garante que os intervalos intermediarios da manha continuam com os mesmos horarios
+        self.assertEqual(state.intervals[0].start, "2026-10-27T07:45:00")
+        self.assertEqual(state.intervals[0].end, "2026-10-27T09:30:00")
+        self.assertEqual(state.intervals[1].start, "2026-10-27T09:30:00")
+        self.assertEqual(state.intervals[1].end, "2026-10-27T11:00:00")
+        self.assertEqual(state.intervals[2].start, "2026-10-27T11:00:00")
+        self.assertEqual(state.intervals[2].end, "2026-10-27T12:00:00")
+
+        # 4. Garante que a tarde iniciou as 13:00 (ganhou 30 min) e encerrou as 17:30 sob TASK-4
+        self.assertEqual(state.intervals[3].start, "2026-10-27T13:00:00")
+        self.assertEqual(state.intervals[3].end, "2026-10-27T17:30:00")
+
+        # 5. Valida os tempos por ticket via get_seconds_by_issue
+        by_issue = state.get_seconds_by_issue()
+        self.assertIn("TASK-1", by_issue)
+        self.assertIn("TASK-2", by_issue)
+        self.assertIn("TASK-3", by_issue)
+        self.assertIn("TASK-4", by_issue)
+        self.assertEqual(by_issue["TASK-1"], 6300)   # 1h 45m
+        self.assertEqual(by_issue["TASK-2"], 5400)   # 1h 30m
+        self.assertEqual(by_issue["TASK-3"], 3600)   # 1h 00m
+        self.assertEqual(by_issue["TASK-4"], 16200)  # 4h 30m (13:00 as 17:30)
+
+        # 6. Total acumulado bate exatamente 8h 45m (31500 segundos)
+        self.assertEqual(state.get_total_seconds(), 31500)
+
+    def test_apply_shift_schedule_preserves_tickets_when_adjusting_start_and_end(self):
+        from storage import TimeInterval
+        state = DailyState(
+            date_str="2026-10-27",
+            status="RUNNING",
+            target_issue="TASK-4",
+            intervals=[
+                TimeInterval(start="2026-10-27T07:45:00", end="2026-10-27T09:30:00", issue_key="TASK-1", comment="Atividade 1"),
+                TimeInterval(start="2026-10-27T09:30:00", end="2026-10-27T11:00:00", issue_key="TASK-2", comment="Atividade 2"),
+                TimeInterval(start="2026-10-27T11:00:00", end="2026-10-27T12:00:00", issue_key="TASK-3", comment="Atividade 3"),
+                TimeInterval(start="2026-10-27T13:00:00", end="2026-10-27T17:30:00", issue_key="TASK-4", comment="Atividade 4"),
+            ]
+        )
+        res = state.apply_shift_schedule(
+            start_hm="07:30",
+            lunch_start_hm="12:00",
+            lunch_end_hm="13:00",
+            end_hm="18:00",
+        )
+        self.assertTrue(res.get("success"))
+        self.assertEqual(len(state.intervals), 4)
+        self.assertEqual(state.intervals[0].issue_key, "TASK-1")
+        self.assertEqual(state.intervals[0].start, "2026-10-27T07:30:00")
+        self.assertEqual(state.intervals[1].issue_key, "TASK-2")
+        self.assertEqual(state.intervals[2].issue_key, "TASK-3")
+        self.assertEqual(state.intervals[3].issue_key, "TASK-4")
+        self.assertEqual(state.intervals[3].end, "2026-10-27T18:00:00")
+
+        by_issue = state.get_seconds_by_issue()
+        self.assertEqual(by_issue["TASK-1"], 7200)   # 2h 00m (07:30 as 09:30)
+        self.assertEqual(by_issue["TASK-2"], 5400)   # 1h 30m (09:30 as 11:00)
+        self.assertEqual(by_issue["TASK-3"], 3600)   # 1h 00m (11:00 as 12:00)
+        self.assertEqual(by_issue["TASK-4"], 18000)  # 5h 00m (13:00 as 18:00)
+        self.assertEqual(state.get_total_seconds(), 34200)
+
     def test_worklog_schedule_persistence_and_inference(self):
         # 1. Inferencia automatica para worklog de 6h iniciado as 07:45
         wl = {
@@ -2405,6 +2501,106 @@ Não aplicável
             self.assertTrue(res.get("requires_restart"))
             self.assertIn("Git", res.get("message"))
             self.assertIn("sincronizadas com sucesso", res.get("message"))
+
+    def test_sharepoint_manager_save_and_load_filled_dds(self):
+        from sharepoint_client import SharePointManager, DEFAULT_DDS_CHECKLIST_TEMPLATE
+        test_dir = tempfile.mkdtemp()
+        try:
+            sp = SharePointManager(base_dir=Path(test_dir))
+            self.assertIsNone(sp.load_filled_dds("OR-999"))
+            
+            self.assertTrue(len(DEFAULT_DDS_CHECKLIST_TEMPLATE) > 10)
+            
+            fill_data = {
+                "role": "desenvolvimento",
+                "author": "Analista Teste",
+                "date": "26/10/2026",
+                "package": "pkg_financeiro",
+                "source": "fin01.prg",
+                "card": "77889",
+                "implementation": "Ajuste na rotina de conciliacao",
+                "recommendations": "Rodar script de atualizacao antes do teste",
+                "checklist": [
+                    {"id": "c1", "question": "Item 1", "answer": "Sim", "comment": "Validado"},
+                    {"id": "c2", "question": "Item 2", "answer": "Nao aplicavel", "comment": ""},
+                ]
+            }
+            saved = sp.save_filled_dds("OR-999", fill_data)
+            self.assertTrue(saved)
+
+            loaded = sp.load_filled_dds("OR-999")
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.get("author"), "Analista Teste")
+            self.assertEqual(loaded.get("package"), "pkg_financeiro")
+            self.assertEqual(len(loaded.get("checklist", [])), 2)
+            self.assertEqual(loaded["checklist"][0]["answer"], "Sim")
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
+
+    @patch("sharepoint_client.SharePointManager.load_filled_dds")
+    @patch("urllib.request.urlopen")
+    def test_jira_client_structured_dds_merges_local_fill(self, mock_urlopen, mock_load_fill):
+        import json
+        from jira_client import JiraClient
+        from config import BotConfig
+        test_dir = tempfile.mkdtemp()
+        try:
+            mock_data = {
+                "key": "CONSISABI-555",
+                "fields": {
+                    "summary": "Ticket teste DDS",
+                    "status": {"name": "Em Andamento"},
+                    "priority": {"name": "Média"},
+                    "issuetype": {"name": "Tarefa"},
+                    "created": "2026-10-26T10:00:00.000-0300",
+                    "updated": "2026-10-26T12:00:00.000-0300",
+                    "description": "DDS: https://consisa.sharepoint.com/:w:/r/sites/DDS.docx",
+                    "attachment": []
+                }
+            }
+            mock_resp = MagicMock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
+            mock_resp.__enter__.return_value = mock_resp
+            mock_urlopen.return_value = mock_resp
+
+            mock_load_fill.return_value = {
+                "role": "desenvolvimento",
+                "autor_nome": "Dev Atualizado",
+                "data_preenchimento": "26/10/2026",
+                "pacote": "pkg_novo",
+                "implementacao_texto": "Nova implementacao local",
+                "recomendacoes": "Recomendacao local",
+                "checklist": [
+                    {"categoria": "Padrao", "pergunta": "Compilou?", "resposta": "Sim"}
+                ]
+            }
+
+            cfg = BotConfig(notifications_enabled=False)
+            jc = JiraClient(cfg.jira)
+
+            details = jc.get_ticket_dds_details("CONSISABI-555")
+            dds = details.get("structured_dds")
+            self.assertIsNotNone(dds)
+            self.assertTrue(dds.get("has_local_fill"))
+            self.assertEqual(dds.get("desenvolvimento", {}).get("responsavel"), "Dev Atualizado")
+            self.assertEqual(dds.get("desenvolvimento", {}).get("detalhamento"), "Nova implementacao local")
+            self.assertEqual(dds.get("team_leader", {}).get("pacote"), "pkg_novo")
+            self.assertEqual(len(dds.get("checklist", [])), 1)
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
+
+    def test_web_panel_dds_fill_ui_and_routes(self):
+        from web_panel import HTML_PAGE
+
+        self.assertIn("modal-fill-dds", HTML_PAGE)
+        self.assertIn("openFillDdsModal", HTML_PAGE)
+        self.assertIn("closeFillDdsModal", HTML_PAGE)
+        self.assertIn("renderFillChecklist", HTML_PAGE)
+        self.assertIn("applyChecklistPreset", HTML_PAGE)
+        self.assertIn("submitDdsFill", HTML_PAGE)
+        self.assertIn("/api/jira/dds/fill-template", HTML_PAGE)
+        self.assertIn("/api/jira/dds/fill", HTML_PAGE)
 
 
 if __name__ == "__main__":
