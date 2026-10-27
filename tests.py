@@ -440,12 +440,24 @@ class TestWebPanelAndShiftSchedule(unittest.TestCase):
             end_hm="18:00",
         )
         self.assertTrue(res.get("success"))
+        # Inicio da primeira tarefa antecipou para 07:30
         self.assertEqual(len(state.intervals), 4)
         self.assertEqual(state.intervals[0].issue_key, "TASK-1")
         self.assertEqual(state.intervals[0].start, "2026-10-27T07:30:00")
+        self.assertEqual(state.intervals[0].end, "2026-10-27T09:30:00")
+
+        # Tarefas intermediarias inalteradas
         self.assertEqual(state.intervals[1].issue_key, "TASK-2")
+        self.assertEqual(state.intervals[1].start, "2026-10-27T09:30:00")
+        self.assertEqual(state.intervals[1].end, "2026-10-27T11:00:00")
+
         self.assertEqual(state.intervals[2].issue_key, "TASK-3")
+        self.assertEqual(state.intervals[2].start, "2026-10-27T11:00:00")
+        self.assertEqual(state.intervals[2].end, "2026-10-27T12:00:00")
+
+        # Ultima tarefa estendeu para 18:00
         self.assertEqual(state.intervals[3].issue_key, "TASK-4")
+        self.assertEqual(state.intervals[3].start, "2026-10-27T13:00:00")
         self.assertEqual(state.intervals[3].end, "2026-10-27T18:00:00")
 
         by_issue = state.get_seconds_by_issue()
