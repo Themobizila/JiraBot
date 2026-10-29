@@ -306,9 +306,9 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
     if fetch_jira:
         try:
             client = JiraClient(config.jira, state_mgr)
-            is_8h = config.active_profile == "8h"
-            def_ls = "12:00"
-            def_le = "13:00" if is_8h else "13:30"
+            prof_act = config.get_active_profile()
+            def_ls = prof_act.get_lunch_start_hm()
+            def_le = prof_act.get_lunch_end_hm()
             wls = client.get_user_worklogs_by_date_range(monday.isoformat(), sunday.isoformat())
             for w in wls:
                 d_key = w.get("date", "")
@@ -326,12 +326,12 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
     total_week_target = 0
     weekdays_logged_count = 0
 
-    is_8h_prof = config.active_profile == "8h"
+    prof_act = config.get_active_profile()
     default_schedule = {
-        "start_hm": "07:42" if is_8h_prof else "07:45",
-        "lunch_start_hm": "12:00",
-        "lunch_end_hm": "13:00" if is_8h_prof else "13:30",
-        "end_hm": "17:42" if is_8h_prof else "15:15",
+        "start_hm": prof_act.get_entry_hm(),
+        "lunch_start_hm": prof_act.get_lunch_start_hm(),
+        "lunch_end_hm": prof_act.get_lunch_end_hm(),
+        "end_hm": prof_act.get_planned_exit_hm(),
     }
 
     for i in range(7):
@@ -7365,6 +7365,10 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 elif action == "test_popup":
                     show_pre_exit_popup(state_mgr, force=True)
                     self._send_json({"success": True, "message": "Janela gráfica de revisão pré-saída disparada."})
+                elif action == "open_mini_widget":
+                    from mini_window import toggle_mini_window
+                    toggle_mini_window()
+                    self._send_json({"success": True, "message": "Mini janela flutuante acionada."})
                 elif action == "flush_queue":
                     client = JiraClient(cfg.jira, state_mgr)
                     count = client.flush_queue()
@@ -7377,21 +7381,73 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"Ação desconhecida: {action}"}, status_code=400)
                 return
 
+            if path == "/api/mini-widget/open":
+                from mini_window import toggle_mini_window
+                toggle_mini_window()
+                self._send_json({"success": True, "message": "Mini janela flutuante acionada com sucesso."})
+                return
+
+            if path == "/api/snapshots":
+                state_mgr = StateManager()
+                date_filter = (body.get("date_str") or "").strip()
+                snaps = state_mgr.list_snapshots(date_filter if date_filter else None)
+                self._send_json({"success": True, "snapshots": snaps})
+                return
+
+            if path == "/api/snapshots/restore":
+                snap_id = (body.get("id") or "").strip()
+                if not snap_id:
+                    self._send_json({"error": "ID do ponto de restauração não fornecido."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                res = state_mgr.restore_snapshot(snap_id)
+                if res.get("success"):
+                    self._send_json(res)
+                else:
+                    self._send_json({"error": res.get("error", "Falha ao restaurar.")}, status_code=400)
+                return
+
+            if path == "/api/snapshots/create":
+                reason = (body.get("reason") or "manual").strip()
+                state_mgr = StateManager()
+                cur_state = state_mgr.load_state()
+                fp = state_mgr.create_snapshot(cur_state, reason=reason)
+                if fp:
+                    self._send_json({"success": True, "message": "Ponto de restauração manual criado com sucesso!"})
+                else:
+                    self._send_json({"error": "Falha ao gravar snapshot."}, status_code=500)
+                return
+
             if path == "/api/today/schedule":
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
                 state = state_mgr.load_state()
+                state_mgr.create_snapshot(state, reason="pre_schedule_edit")
+                start_hm = body.get("start_hm", "")
+                ls_hm = body.get("lunch_start_hm", "")
+                le_hm = body.get("lunch_end_hm", "")
+                end_hm = body.get("end_hm", "")
                 res = state.apply_shift_schedule(
-                    start_hm=body.get("start_hm", ""),
-                    lunch_start_hm=body.get("lunch_start_hm", ""),
-                    lunch_end_hm=body.get("lunch_end_hm", ""),
-                    end_hm=body.get("end_hm", ""),
+                    start_hm=start_hm,
+                    lunch_start_hm=ls_hm,
+                    lunch_end_hm=le_hm,
+                    end_hm=end_hm,
                     default_issue=cfg.jira.default_issue,
                 )
                 if not res.get("success"):
                     self._send_json({"error": res.get("message", "Horário inválido")}, status_code=400)
                     return
                 state_mgr.save_state(state)
+                sch_meta = {
+                    "start_hm": start_hm,
+                    "lunch_start_hm": ls_hm,
+                    "lunch_end_hm": le_hm,
+                    "end_hm": end_hm,
+                }
+                state_mgr.save_day_shift_schedule(state.date_str, sch_meta)
+                for wid in state.jira_worklog_ids:
+                    state_mgr.save_worklog_schedule(wid, sch_meta)
+
                 dur_str = format_duration(state.get_total_seconds())
                 self._send_json({
                     "success": True,

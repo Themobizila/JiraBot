@@ -108,6 +108,69 @@ class ShiftProfile:
     description: str = ""
     calculator: Dict[str, Any] = field(default_factory=dict)
 
+    def get_planned_lunch_start_time(self) -> time:
+        """Retorna o horario nominal planejado de saida para almoco."""
+        if self.calculator and "ls_hm" in self.calculator:
+            try:
+                parts = str(self.calculator["ls_hm"]).strip().split(":")
+                return time(int(parts[0]), int(parts[1]), 0)
+            except Exception:
+                pass
+        st = self.lunch_start_window.start_time
+        et = self.lunch_start_window.end_time
+        st_sec = st.hour * 3600 + st.minute * 60
+        et_sec = et.hour * 3600 + et.minute * 60
+        if et_sec < st_sec:
+            et_sec += 86400
+        mid_sec = ((st_sec + et_sec) // 2) % 86400
+        return time(mid_sec // 3600, (mid_sec % 3600) // 60, 0)
+
+    def get_planned_lunch_end_time(self) -> time:
+        """Retorna o horario nominal planejado de retorno do almoco."""
+        if self.calculator and "le_hm" in self.calculator:
+            try:
+                parts = str(self.calculator["le_hm"]).strip().split(":")
+                return time(int(parts[0]), int(parts[1]), 0)
+            except Exception:
+                pass
+        if self.name == "8h" or self.target_hours >= 7.5:
+            return time(13, 0, 0)
+        elif self.name in ("6h_0745", "6h_0800"):
+            return time(13, 30, 0)
+        st = self.lunch_end_window.start_time
+        et = self.lunch_end_window.end_time
+        st_sec = st.hour * 3600 + st.minute * 60
+        et_sec = et.hour * 3600 + et.minute * 60
+        if et_sec < st_sec:
+            et_sec += 86400
+        mid_sec = ((st_sec + et_sec) // 2) % 86400
+        return time(mid_sec // 3600, (mid_sec % 3600) // 60, 0)
+
+    def get_planned_entry_time(self) -> time:
+        """Retorna o horario nominal planejado de inicio do expediente."""
+        if self.calculator and "entry_hm" in self.calculator:
+            try:
+                parts = str(self.calculator["entry_hm"]).strip().split(":")
+                return time(int(parts[0]), int(parts[1]), 0)
+            except Exception:
+                pass
+        if self.name == "8h":
+            return time(7, 42, 0)
+        elif self.name == "6h_0745":
+            return time(7, 45, 0)
+        elif self.name == "6h_0800":
+            return time(8, 0, 0)
+        elif self.target_hours >= 7.5:
+            return time(7, 42, 0)
+        st = self.entry_window.start_time
+        et = self.entry_window.end_time
+        st_sec = st.hour * 3600 + st.minute * 60
+        et_sec = et.hour * 3600 + et.minute * 60
+        if et_sec < st_sec:
+            et_sec += 86400
+        mid_sec = ((st_sec + et_sec) // 2) % 86400
+        return time(mid_sec // 3600, (mid_sec % 3600) // 60, 0)
+
     def get_planned_exit_time(self) -> time:
         """Retorna o horario nominal planejado de saida do expediente."""
         if self.calculator and "exit_hm" in self.calculator:
@@ -124,6 +187,8 @@ class ShiftProfile:
             return time(15, 15, 0)
         elif self.name == "6h_0800":
             return time(15, 30, 0)
+        elif self.target_hours >= 7.5:
+            return time(17, 30, 0)
 
         # Fallback: centro da janela de saida
         st = self.exit_window.start_time
@@ -135,6 +200,26 @@ class ShiftProfile:
         mid_sec = ((st_sec + et_sec) // 2) % 86400
         return time(mid_sec // 3600, (mid_sec % 3600) // 60, 0)
 
+    def get_lunch_start_hm(self) -> str:
+        """Retorna o horario de saida para almoco no formato HH:MM."""
+        return self.get_planned_lunch_start_time().strftime("%H:%M")
+
+    def get_lunch_end_hm(self) -> str:
+        """Retorna o horario de retorno do almoco no formato HH:MM."""
+        return self.get_planned_lunch_end_time().strftime("%H:%M")
+
+    def get_entry_hm(self) -> str:
+        """Retorna o horario de inicio no formato HH:MM."""
+        return self.get_planned_entry_time().strftime("%H:%M")
+
+    def get_planned_exit_hm(self) -> str:
+        """Retorna o horario de encerramento no formato HH:MM."""
+        return self.get_planned_exit_time().strftime("%H:%M")
+
+    def is_full_day(self) -> bool:
+        """Indica se o perfil corresponde a turno integral (8 horas ou superior)."""
+        return self.name == "8h" or self.target_hours >= 7.5
+
     def to_dict(self) -> Dict[str, Any]:
         data = {
             "name": self.name,
@@ -144,6 +229,11 @@ class ShiftProfile:
             "lunch_end_window": self.lunch_end_window.to_dict(),
             "exit_window": self.exit_window.to_dict(),
             "description": self.description,
+            "entry_hm": self.get_entry_hm(),
+            "lunch_start_hm": self.get_lunch_start_hm(),
+            "lunch_end_hm": self.get_lunch_end_hm(),
+            "exit_hm": self.get_planned_exit_hm(),
+            "is_full_day": self.is_full_day(),
         }
         if self.calculator:
             data["calculator"] = dict(self.calculator)
@@ -151,15 +241,43 @@ class ShiftProfile:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> ShiftProfile:
+        name = data.get("name", "custom")
+        target_hours = float(data.get("target_hours", 8.0 if name == "custom" else 6.0))
+        calculator = sanitize_calculator(data.get("calculator"))
+        entry_w = TimeWindow.from_dict(data.get("entry_window", {}))
+        ls_w = TimeWindow.from_dict(data.get("lunch_start_window", {}))
+        le_w = TimeWindow.from_dict(data.get("lunch_end_window", {}))
+        ex_w = TimeWindow.from_dict(data.get("exit_window", {}))
+
+        # Se houver calculadora ou carga >= 7.5h:
+        # Garante que a janela de retorno de almoco e saida nao fiquem presas em valores legados de 6h (13:20 / 15:05)
+        if calculator and calculator.get("le_hm"):
+            try:
+                le_str = str(calculator["le_hm"]).strip()
+                le_parts = le_str.split(":")
+                le_m = int(le_parts[0]) * 60 + int(le_parts[1])
+                bef = int(calculator.get("le_before", 10))
+                aft = int(calculator.get("le_after", 15))
+                c_start = f"{max(0, le_m - bef) // 60:02d}:{max(0, le_m - bef) % 60:02d}"
+                c_end = f"{min(1439, le_m + aft) // 60:02d}:{min(1439, le_m + aft) % 60:02d}"
+                if le_w.start_str in ("13:20", "13:15") and le_str in ("13:00", "12:55", "12:50"):
+                    le_w = TimeWindow(c_start, c_end)
+            except Exception:
+                pass
+        elif target_hours >= 7.5 and le_w.start_str in ("13:20", "13:15"):
+            le_w = TimeWindow("12:45", "13:30")
+            if ex_w.start_str == "15:05":
+                ex_w = TimeWindow("17:00", "18:30")
+
         return cls(
-            name=data.get("name", "custom"),
-            target_hours=float(data.get("target_hours", 8.0)),
-            entry_window=TimeWindow.from_dict(data.get("entry_window", {})),
-            lunch_start_window=TimeWindow.from_dict(data.get("lunch_start_window", {})),
-            lunch_end_window=TimeWindow.from_dict(data.get("lunch_end_window", {})),
-            exit_window=TimeWindow.from_dict(data.get("exit_window", {})),
+            name=name,
+            target_hours=target_hours,
+            entry_window=entry_w,
+            lunch_start_window=ls_w,
+            lunch_end_window=le_w,
+            exit_window=ex_w,
             description=data.get("description", ""),
-            calculator=sanitize_calculator(data.get("calculator")),
+            calculator=calculator,
         )
 
 
@@ -231,12 +349,13 @@ def get_default_profiles() -> Dict[str, ShiftProfile]:
         ),
         "custom": ShiftProfile(
             name="custom",
-            target_hours=6.0,
+            target_hours=8.0,
             entry_window=TimeWindow("07:15", "08:30"),
             lunch_start_window=TimeWindow("11:30", "12:30"),
-            lunch_end_window=TimeWindow("13:20", "13:40"),
-            exit_window=TimeWindow("15:05", "16:30"),
-            description="Turno Personalizado pelo Usuario"
+            lunch_end_window=TimeWindow("12:45", "13:30"),
+            exit_window=TimeWindow("17:00", "18:30"),
+            description="Turno Personalizado (8h flexível / ajustável)",
+            calculator={"entry_hm": "07:42", "ls_hm": "12:00", "le_hm": "13:00", "exit_hm": "17:30"},
         ),
     }
 
@@ -301,6 +420,7 @@ class BotConfig:
     exit_warning_enabled: bool = True
     exit_warning_minutes: int = 5
     exit_warning_popup: bool = True
+    mini_window_hotkey: str = "ctrl+alt+j"
 
     def get_current_profile(self) -> ShiftProfile:
         return self.profiles.get(self.active_profile, self.profiles["6h_0745"])
@@ -320,6 +440,7 @@ class BotConfig:
             "exit_warning_enabled": self.exit_warning_enabled,
             "exit_warning_minutes": self.exit_warning_minutes,
             "exit_warning_popup": self.exit_warning_popup,
+            "mini_window_hotkey": self.mini_window_hotkey,
         }
 
     @classmethod
@@ -351,7 +472,15 @@ class BotConfig:
             exit_warning_enabled=bool(data.get("exit_warning_enabled", True)),
             exit_warning_minutes=max(1, min(60, int(data.get("exit_warning_minutes", 5)))),
             exit_warning_popup=bool(data.get("exit_warning_popup", True)),
+            mini_window_hotkey=str(data.get("mini_window_hotkey", "ctrl+alt+j")),
         )
+
+    def get_active_profile(self) -> ShiftProfile:
+        """Retorna o perfil de turno ativo atualmente, com fallback seguro."""
+        if self.active_profile in self.profiles:
+            return self.profiles[self.active_profile]
+        defaults = get_default_profiles()
+        return defaults.get(self.active_profile) or defaults.get("8h") or defaults.get("custom") or list(self.profiles.values())[0]
 
     def save(self, filepath: Optional[Path] = None) -> None:
         path = filepath or (get_default_config_dir() / "config.json")

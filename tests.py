@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 import unittest
-from datetime import datetime, time
+from datetime import datetime, time, date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -2506,6 +2506,220 @@ Não aplicável
             self.assertTrue(res.get("requires_restart"))
             self.assertIn("Git", res.get("message"))
             self.assertIn("sincronizadas com sucesso", res.get("message"))
+
+    def test_state_manager_snapshots_create_list_and_restore(self):
+        from storage import StateManager, DailyState, TimeInterval
+
+        today_str = date.today().isoformat()
+        mgr = StateManager(base_dir=self.test_dir)
+        state = DailyState(date_str=today_str, target_issue="ATIVDIV-32")
+        state.intervals.append(TimeInterval(start=f"{today_str}T08:00:00", end=f"{today_str}T10:00:00", issue_key="ATIVDIV-32"))
+        state.intervals.append(TimeInterval(start=f"{today_str}T10:00:00", end=f"{today_str}T11:30:00", issue_key="CONSISABI-418"))
+        mgr.save_state(state)
+
+        # 1. Cria snapshot
+        snap_p = mgr.create_snapshot(state, reason="pre_schedule_edit")
+        self.assertIsNotNone(snap_p)
+        self.assertTrue(snap_p.exists())
+
+        # 2. Lista snapshots filtrando pela data
+        snaps = mgr.list_snapshots(today_str)
+        self.assertGreaterEqual(len(snaps), 1)
+        self.assertEqual(snaps[0]["tickets_count"], 2)
+        self.assertIn("ATIVDIV-32", snaps[0]["tickets_preview"])
+
+        # 3. Simula perda/alteracao acidental de estado
+        state.intervals.clear()
+        state.target_issue = "SEM_TICKET"
+        mgr.save_state(state)
+        self.assertEqual(len(mgr.load_state().intervals), 0)
+
+        # 4. Restaura snapshot
+        res = mgr.restore_snapshot(snaps[0]["id"])
+        self.assertTrue(res.get("success"))
+
+        restored_state = mgr.load_state()
+        self.assertEqual(len(restored_state.intervals), 2)
+        self.assertEqual(restored_state.target_issue, "ATIVDIV-32")
+        self.assertEqual(restored_state.get_total_seconds(), 12600)
+
+        # 5. Verifica que a restauracao gerou automaticamente um ponto de seguranca 'pre_restore'
+        snaps_after = mgr.list_snapshots(today_str)
+        reasons = [s["reason"] for s in snaps_after]
+        self.assertIn("pre_restore", reasons)
+
+    def test_mini_window_position_persistence_and_widget(self):
+        import tkinter as tk
+        from pathlib import Path
+        import tempfile
+        from unittest.mock import patch, MagicMock
+        from mini_window import save_position, load_saved_position, get_position_file_path, MiniWidgetApp, launch_mini_window
+        from storage import DailyState, TimeInterval
+        from config import BotConfig
+
+        # 1. Teste de persistencia de coordenadas
+        test_pos_file = Path(tempfile.mkdtemp()) / "mini_pos.json"
+        with patch("mini_window.get_position_file_path", return_value=test_pos_file):
+            save_position(350, 420)
+            self.assertTrue(test_pos_file.exists())
+            x, y = load_saved_position(1920, 1080)
+            self.assertEqual(x, 350)
+            self.assertEqual(y, 420)
+
+            # Fora da tela deve aplicar fallback
+            save_position(99999, 99999)
+            fallback_x, fallback_y = load_saved_position(1920, 1080)
+            self.assertNotEqual(fallback_x, 99999)
+
+        # 2. Teste do componente MiniWidgetApp (headless)
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            mock_state = DailyState(date_str="2026-10-28", target_issue="PROJ-777", status="RUNNING")
+            mock_state.intervals.append(TimeInterval(start="2026-10-28T08:00:00", end="2026-10-28T10:00:00", issue_key="PROJ-777")) # 2h
+            mock_cfg = BotConfig(active_profile="6h_0745", notifications_enabled=False)
+
+            with patch("storage.StateManager.load_state", return_value=mock_state), \
+                 patch("config.BotConfig.load", return_value=mock_cfg):
+                app = MiniWidgetApp(root)
+                self.assertEqual(app.ticket_label.cget("text"), "PROJ-777")
+                self.assertEqual(app.timer_label.cget("text"), "02:00:00")
+                self.assertEqual(app.status_label.cget("text"), "Em execucao")
+                self.assertEqual(app.btn_play_pause.cget("text"), "Pausar")
+
+                # Teste toggle_always_on_top
+                orig_top = app.always_on_top
+                app.toggle_always_on_top()
+                self.assertEqual(app.always_on_top, not orig_top)
+
+                # Teste mudanca de estado para PAUSED
+                mock_state.status = "PAUSED_AWAY"
+                app.update_state()
+                self.assertEqual(app.status_label.cget("text"), "Pausado")
+                self.assertEqual(app.btn_play_pause.cget("text"), "Retomar")
+        finally:
+            root.destroy()
+
+        # 3. Teste launch_mini_window desacoplado
+        with patch("subprocess.Popen") as mock_popen, \
+             patch("mini_window.bring_existing_mini_window_to_top", return_value=False):
+            launch_mini_window(detached=True)
+            self.assertTrue(mock_popen.called)
+
+        # 4. Teste toggle_mini_window
+        from mini_window import toggle_mini_window
+        with patch("mini_window.launch_mini_window") as mock_launch, \
+             patch("ctypes.windll.user32.FindWindowW", return_value=0):
+            toggle_mini_window()
+            mock_launch.assert_called_once_with(detached=True)
+
+    def test_shift_profile_custom_8h_schedule_inference(self):
+        """Valida que perfis customizados e de 8 horas inferem corretamente retorno 13:00 e saida 17:30."""
+        from config import ShiftProfile, make_custom_profile, get_default_profiles
+
+        prof = make_custom_profile(
+            name="custom",
+            target_hours=8.0,
+            entry_hm="07:44",
+            lunch_start_hm="12:00",
+            lunch_end_hm="13:00",
+            exit_hm="17:30",
+        )
+        self.assertTrue(prof.is_full_day())
+        self.assertEqual(prof.get_lunch_start_hm(), "12:00")
+        self.assertEqual(prof.get_lunch_end_hm(), "13:00")
+        self.assertEqual(prof.get_planned_exit_hm(), "17:30")
+
+        # Testa defaults
+        defs = get_default_profiles()
+        custom_def = defs["custom"]
+        self.assertTrue(custom_def.is_full_day())
+        self.assertEqual(custom_def.get_lunch_end_hm(), "13:00")
+        self.assertEqual(custom_def.get_planned_exit_hm(), "17:30")
+
+    def test_worklog_schedule_inference_custom_and_8h(self):
+        """Valida que apontamentos de 8 horas nao caem no fallback de 13:30 / 18:56."""
+        from storage import StateManager
+        import tempfile
+        import shutil
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            mgr = StateManager(base_dir=temp_dir)
+            # Simula worklog do Daniel Cassaro: 07:44 com 8h46m (31560s)
+            wl_8h = {
+                "id": "12345",
+                "started": "2026-10-28T07:44:00.000+0000",
+                "time_spent_seconds": 31560,  # 8h 46m
+            }
+            sch = mgr.get_or_infer_worklog_schedule(wl_8h, default_lunch_start="12:00", default_lunch_end="13:30")
+            self.assertEqual(sch["start_hm"], "07:44")
+            self.assertEqual(sch["lunch_start_hm"], "12:00")
+            self.assertEqual(sch["lunch_end_hm"], "13:00")  # Nao pode ser 13:30!
+            self.assertEqual(sch["end_hm"], "17:30")        # 13:00 + 4h30m = 17:30
+
+            # Testa persistencia explicita por data (day:YYYY-MM-DD)
+            mgr.save_day_shift_schedule("2026-10-29", {
+                "start_hm": "07:40",
+                "lunch_start_hm": "12:00",
+                "lunch_end_hm": "13:00",
+                "end_hm": "17:30",
+            })
+            wl_saved_day = {
+                "id": "99999",
+                "started": "2026-10-29T07:40:00.000+0000",
+                "time_spent_seconds": 31200,
+            }
+            sch_saved = mgr.get_or_infer_worklog_schedule(wl_saved_day)
+            self.assertEqual(sch_saved["start_hm"], "07:40")
+            self.assertEqual(sch_saved["lunch_end_hm"], "13:00")
+            self.assertEqual(sch_saved["end_hm"], "17:30")
+            self.assertEqual(sch_saved["is_saved"], "true")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_engine_unlock_during_paused_lunch_resumes_at_13_for_custom(self):
+        """Valida que o desbloqueio as 13:00 retoma o expediente mesmo se a janela comecasse mais tarde."""
+        from engine import BotEngine
+        from config import BotConfig, ShiftProfile, TimeWindow
+        from storage import StateManager, DailyState, TimeInterval
+        import tempfile
+        import shutil
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            cfg = BotConfig()
+            cfg.profiles["custom"] = ShiftProfile(
+                name="custom",
+                target_hours=8.0,
+                entry_window=TimeWindow("07:15", "08:30"),
+                lunch_start_window=TimeWindow("11:30", "12:30"),
+                lunch_end_window=TimeWindow("12:50", "13:20"),
+                exit_window=TimeWindow("17:00", "18:30"),
+                calculator={"entry_hm": "07:44", "ls_hm": "12:00", "le_hm": "13:00", "exit_hm": "17:30"}
+            )
+            cfg.active_profile = "custom"
+            mgr = StateManager(base_dir=temp_dir)
+
+            today_str = date.today().isoformat()
+            state = DailyState(date_str=today_str, status="PAUSED_LUNCH", target_issue="ATIVDIV-32")
+            state.intervals.append(TimeInterval(
+                start=f"{today_str}T07:44:00",
+                end=f"{today_str}T12:00:00",
+                issue_key="ATIVDIV-32"
+            ))
+            mgr.save_state(state)
+
+            engine = BotEngine(config=cfg, state_manager=mgr)
+            now_13 = datetime.combine(date.today(), time(13, 0, 0))
+            new_state = engine.handle_unlock(now=now_13)
+
+            self.assertEqual(new_state.status, "RUNNING")
+            self.assertEqual(new_state.last_event, "RESUMED_LUNCH_UNLOCK")
+            self.assertEqual(len(new_state.intervals), 2)
+            self.assertEqual(new_state.intervals[-1].start, now_13.isoformat())
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

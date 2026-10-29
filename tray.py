@@ -10,6 +10,7 @@ from ctypes import wintypes
 import logging
 from pathlib import Path
 import threading
+import time
 from typing import Callable, Optional
 
 from config import BotConfig
@@ -53,6 +54,17 @@ CMD_TOGGLE_PAUSE = 1002
 CMD_LOG_NOW = 1003
 CMD_EXIT = 1004
 CMD_WEB_PANEL = 1005
+CMD_MINI_WINDOW = 1006
+
+# Hotkey Win32
+WM_HOTKEY = 0x0312
+HOTKEY_MINI_WINDOW_ID = 2001
+HOTKEY_MINI_WINDOW_ID_ALT = 2002
+MOD_ALT = 0x0001
+MOD_CONTROL = 0x0002
+MOD_SHIFT = 0x0004
+MOD_NOREPEAT = 0x4000
+VK_J = 0x4A  # Virtual Key 'J'
 
 LRESULT = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
 
@@ -151,6 +163,7 @@ class SystemTrayIcon:
         self._thread: Optional[threading.Thread] = None
         self._running = False
         self._wnd_proc_ref: Optional[WNDPROC] = None
+        self._last_hotkey_ts: float = 0.0
 
     def _show_menu(self) -> None:
         user32_dll = ctypes.windll.user32
@@ -170,6 +183,7 @@ class SystemTrayIcon:
         user32_dll.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
 
         user32_dll.AppendMenuW(hmenu, MF_STRING, CMD_WEB_PANEL, "Abrir Painel Web no Navegador")
+        user32_dll.AppendMenuW(hmenu, MF_STRING, CMD_MINI_WINDOW, "Mini Janela Flutuante (Ctrl+Alt+J ou Ctrl+Shift+J)")
         user32_dll.AppendMenuW(hmenu, MF_STRING, CMD_STATUS, "Ver Status Detalhado")
         toggle_label = "Pausar Cronometro" if state.status == "RUNNING" else "Retomar Cronometro"
         user32_dll.AppendMenuW(hmenu, MF_STRING, CMD_TOGGLE_PAUSE, toggle_label)
@@ -215,6 +229,10 @@ class SystemTrayIcon:
                     stdin=subprocess.DEVNULL,
                 )
 
+        elif cmd == CMD_MINI_WINDOW:
+            from mini_window import toggle_mini_window
+            toggle_mini_window()
+
         elif cmd == CMD_STATUS:
             self.engine.refresh_state()
             state = self.engine.state
@@ -247,6 +265,19 @@ class SystemTrayIcon:
                 self._handle_command(CMD_STATUS)
                 return 0
 
+        elif msg == WM_HOTKEY:
+            if wparam in (HOTKEY_MINI_WINDOW_ID, HOTKEY_MINI_WINDOW_ID_ALT):
+                now_ts = time.time()
+                if now_ts - self._last_hotkey_ts >= 0.4:
+                    self._last_hotkey_ts = now_ts
+                    logger.info(f"WM_HOTKEY detectada em _wnd_proc (id={wparam})! Alternando mini janela...")
+                    try:
+                        from mini_window import toggle_mini_window
+                        toggle_mini_window()
+                    except Exception as e:
+                        logger.error(f"Erro ao processar hotkey em _wnd_proc: {e}")
+                return 0
+
         elif msg == WM_DESTROY:
             user32.PostQuitMessage(0)
             return 0
@@ -256,6 +287,12 @@ class SystemTrayIcon:
     def _run_loop(self) -> None:
         shell32 = ctypes.windll.shell32
         kernel32 = ctypes.windll.kernel32
+
+        try:
+            from mini_window import _attach_to_interactive_desktop
+            _attach_to_interactive_desktop()
+        except Exception:
+            pass
 
         class_name = "JiraBot_TrayIcon_Class"
         h_instance = kernel32.GetModuleHandleW(None)
@@ -301,13 +338,51 @@ class SystemTrayIcon:
         res = shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
         logger.info(f"Shell_NotifyIconW registrado: {res}")
 
+        # Registra hotkey global Ctrl + Alt + J para abrir/alternar a mini janela
+        try:
+            user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+            user32.RegisterHotKey.restype = wintypes.BOOL
+            user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+            user32.UnregisterHotKey.restype = wintypes.BOOL
+
+            # 1. Hotkey Primaria: Ctrl + Alt + J
+            mod_primary = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT
+            reg_primary = user32.RegisterHotKey(self._hwnd, HOTKEY_MINI_WINDOW_ID, mod_primary, VK_J)
+            if not reg_primary:
+                reg_primary = user32.RegisterHotKey(self._hwnd, HOTKEY_MINI_WINDOW_ID, MOD_CONTROL | MOD_ALT, VK_J)
+            logger.info(f"Hotkey global Ctrl+Alt+J registrada para a Mini Janela: {reg_primary}")
+
+            # 2. Hotkey Secundaria: Ctrl + Shift + J
+            mod_sec = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT
+            reg_sec = user32.RegisterHotKey(self._hwnd, HOTKEY_MINI_WINDOW_ID_ALT, mod_sec, VK_J)
+            if not reg_sec:
+                reg_sec = user32.RegisterHotKey(self._hwnd, HOTKEY_MINI_WINDOW_ID_ALT, MOD_CONTROL | MOD_SHIFT, VK_J)
+            logger.info(f"Hotkey global alternativa Ctrl+Shift+J registrada: {reg_sec}")
+        except Exception as e:
+            logger.warning(f"Nao foi possivel registrar hotkeys globais: {e}")
+
         msg = wintypes.MSG()
         while self._running and user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) > 0:
+            if msg.message == WM_HOTKEY and msg.wParam in (HOTKEY_MINI_WINDOW_ID, HOTKEY_MINI_WINDOW_ID_ALT):
+                now_ts = time.time()
+                if now_ts - self._last_hotkey_ts >= 0.4:
+                    self._last_hotkey_ts = now_ts
+                    logger.info(f"WM_HOTKEY detectada no loop GetMessageW (id={msg.wParam})! Alternando mini janela...")
+                    try:
+                        from mini_window import toggle_mini_window
+                        toggle_mini_window()
+                    except Exception as e:
+                        logger.error(f"Erro ao processar toggle no loop: {e}")
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
 
         shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
         if self._hwnd:
+            try:
+                user32.UnregisterHotKey(self._hwnd, HOTKEY_MINI_WINDOW_ID)
+                user32.UnregisterHotKey(self._hwnd, HOTKEY_MINI_WINDOW_ID_ALT)
+            except Exception:
+                pass
             user32.DestroyWindow(self._hwnd)
             self._hwnd = None
 
