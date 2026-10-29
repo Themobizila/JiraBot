@@ -147,7 +147,16 @@ class JiraBotService:
                 comment="" if is_empty else (comment or self.config.jira.default_comment),
                 no_comment=is_empty,
             )
-            return res.get("status") == "success"
+            ok = res.get("status") == "success"
+            wid = str(res.get("worklog_id") or "")
+            if ok and wid and self.engine and self.engine.state:
+                if wid not in self.engine.state.jira_worklog_ids:
+                    self.engine.state.jira_worklog_ids.append(wid)
+                shift_times = self.engine.state.get_shift_times_summary()
+                if shift_times.get("start_hm"):
+                    self.state_manager.save_worklog_schedule(wid, shift_times)
+                    self.state_manager.save_day_shift_schedule(self.engine.state.date_str, shift_times)
+            return ok
         except Exception as e:
             logger.warning(f"Envio imediato falhou para {issue_key}, item sera mantido na fila offline: {e}")
             return False
@@ -174,6 +183,12 @@ class JiraBotService:
         pid = os.getpid()
         get_pid_file().write_text(str(pid), encoding="utf-8")
         self._running = True
+
+        try:
+            from mini_window import _attach_to_interactive_desktop
+            _attach_to_interactive_desktop()
+        except Exception:
+            pass
 
         logger.info(f"Iniciando JiraBot Service (PID: {pid})...")
         logger.info(f"Perfil ativo: {self.config.active_profile}")
@@ -296,17 +311,12 @@ def start_background() -> int:
     script_path = Path(__file__).resolve()
     cmd = [executable, str(script_path), "run-daemon"]
 
-    flags = 0
-    startupinfo = None
-    if sys.platform == "win32":
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.lpDesktop = r"WinSta0\Default"
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
 
     proc = subprocess.Popen(
         cmd,
+        cwd=str(script_path.parent),
         creationflags=flags,
-        startupinfo=startupinfo,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,

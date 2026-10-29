@@ -5,8 +5,10 @@ Modulo de integracao com a API REST do Jira com auto-negociacao de autenticacao 
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import logging
+import time
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.request
@@ -285,14 +287,17 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
             def _iter_blip_rids(elem: ET.Element) -> List[str]:
                 found: List[str] = []
                 for sub in elem.iter():
-                    if sub.tag == f"{{{A_NS}}}blip":
-                        emb = sub.attrib.get(f"{{{R_NS}}}embed") or sub.attrib.get(f"{{{R_NS}}}link")
-                        if emb:
-                            found.append(emb)
-                    elif sub.tag == f"{{{V_NS}}}imagedata":
-                        emb = sub.attrib.get(f"{{{R_NS}}}id")
-                        if emb:
-                            found.append(emb)
+                    t_low = sub.tag.lower()
+                    if t_low.endswith("}blip") or t_low == "blip":
+                        for k, v in sub.attrib.items():
+                            k_low = k.lower()
+                            if (k_low.endswith("}embed") or k_low.endswith("}link") or k_low in ("embed", "link")) and v:
+                                found.append(v)
+                    elif t_low.endswith("}imagedata") or t_low == "imagedata":
+                        for k, v in sub.attrib.items():
+                            k_low = k.lower()
+                            if (k_low.endswith("}id") or k_low.endswith("}relid") or k_low in ("id", "relid")) and v:
+                                found.append(v)
                 return found
 
             def _plain_text(elem: ET.Element, include_nested_tables: bool = True) -> str:
@@ -338,14 +343,17 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
             for elem in body.iter():
                 if elem is logo_cell_elem:
                     continue
-                if elem.tag == f"{{{A_NS}}}blip":
-                    emb = elem.attrib.get(f"{{{R_NS}}}embed") or elem.attrib.get(f"{{{R_NS}}}link")
-                    if emb:
-                        non_logo_rids.add(emb)
-                elif elem.tag == f"{{{V_NS}}}imagedata":
-                    emb = elem.attrib.get(f"{{{R_NS}}}id")
-                    if emb:
-                        non_logo_rids.add(emb)
+                t_low = elem.tag.lower()
+                if t_low.endswith("}blip") or t_low == "blip":
+                    for k, v in elem.attrib.items():
+                        k_low = k.lower()
+                        if (k_low.endswith("}embed") or k_low.endswith("}link") or k_low in ("embed", "link")) and v:
+                            non_logo_rids.add(v)
+                elif t_low.endswith("}imagedata") or t_low == "imagedata":
+                    for k, v in elem.attrib.items():
+                        k_low = k.lower()
+                        if (k_low.endswith("}id") or k_low.endswith("}relid") or k_low in ("id", "relid")) and v:
+                            non_logo_rids.add(v)
 
             # Se o rId aparece tambem fora da celula de logo, remove de logo_only
             # (Nota: verificamos contagem de ocorrencias totais vs ocorrencias na celula de logo)
@@ -1161,6 +1169,7 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
                     info = _get_media_data_uri(item)
                     if info:
                         data_uri, img_size, orig_fname = info
+                        emitted_media_paths.add(item)
                         embedded_images.append({
                             "id": f"docx-emb-{len(embedded_images) + 1}",
                             "filename": orig_fname,
@@ -1650,6 +1659,57 @@ class JiraClient:
     """Cliente HTTP para envio de Worklogs ao Jira com auto-deteccao de protocolo de autenticacao."""
 
     _account_id_cache: Dict[str, str] = {}
+    _tickets_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+    _worklogs_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+    _my_account_id_cache: Optional[Tuple[float, str]] = None
+    _CACHE_TTL_SECONDS: float = 45.0
+
+    @classmethod
+    def invalidate_worklogs_cache(cls) -> None:
+        cls._worklogs_cache.clear()
+
+    @classmethod
+    def invalidate_tickets_cache(cls) -> None:
+        cls._tickets_cache.clear()
+
+    _ticket_details_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+    _TICKET_DETAILS_CACHE_TTL: float = 30.0
+
+    @classmethod
+    def invalidate_ticket_cache(cls, issue_key: Optional[str] = None) -> None:
+        """
+        Invalida o cache em memoria de detalhes/DDS de chamados.
+        Se issue_key for informado, invalida apenas o ticket especificado.
+        Se omitido ou None, limpa todo o cache de tickets.
+        """
+        if issue_key:
+            clean = clean_jira_issue_key(issue_key)
+            cls._ticket_details_cache.pop(clean, None)
+        else:
+            cls._ticket_details_cache.clear()
+
+    def get_my_account_id(self) -> Optional[str]:
+        """Obtem e armazena em cache de classe o accountId do usuario logado no Jira."""
+        now = time.time()
+        if JiraClient._my_account_id_cache:
+            ts, acc_id = JiraClient._my_account_id_cache
+            if now - ts < 3600.0 and acc_id:
+                return acc_id
+
+        base_url = self.config.get_clean_base_url()
+        headers = self._get_auth_headers()
+        try:
+            myself_url = f"{base_url}/rest/api/2/myself"
+            req = urllib.request.Request(myself_url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                my_data = json.loads(resp.read().decode("utf-8"))
+                acc_id = my_data.get("accountId")
+                if acc_id:
+                    JiraClient._my_account_id_cache = (now, str(acc_id))
+                    return str(acc_id)
+        except Exception as e:
+            logger.warning("Nao foi possivel obter perfil do usuario: %s", e)
+        return None
 
     def __init__(self, jira_config: JiraConfig, state_manager: Optional[StateManager] = None):
         self.config = jira_config
@@ -1884,11 +1944,18 @@ class JiraClient:
         max_results: int = 50,
         status_filter: str = "open",
         query_text: str = "",
+        force_refresh: bool = False,
     ) -> List[Dict[str, Any]]:
         """
-        Retorna a lista de tickets atribuidos ao usuario autenticado no Jira.
+        Retorna a lista de tickets atribuidos ao usuario autenticado no Jira com cache TTL de 45s.
         Suporta filtro por status ('open', 'done', 'all') e busca por texto/chave.
         """
+        cache_key = f"{status_filter}:{query_text}:{max_results}"
+        now = time.time()
+        if not force_refresh and cache_key in JiraClient._tickets_cache:
+            c_time, c_data = JiraClient._tickets_cache[cache_key]
+            if now - c_time < JiraClient._CACHE_TTL_SECONDS:
+                return copy.deepcopy(c_data)
         import re
         import urllib.parse
 
@@ -2021,6 +2088,7 @@ class JiraClient:
             except Exception as ex:
                 logger.debug("Falha na checagem em lote de tickets pai: %s", ex)
 
+        JiraClient._tickets_cache[cache_key] = (now, copy.deepcopy(formatted_list))
         return formatted_list
 
     def get_ticket_dds_details(
@@ -2038,14 +2106,25 @@ class JiraClient:
         """
         import re
 
+        import time as _time
+
         clean = clean_jira_issue_key(issue_key)
         if not clean or clean == "SEM_TICKET":
             return {"error": "Chave de ticket inválida."}
 
+        if force_refresh:
+            self.invalidate_ticket_cache(clean)
+        elif not is_parent_call and clean in self._ticket_details_cache:
+            ts, cached_details = self._ticket_details_cache[clean]
+            if _time.time() - ts < self._TICKET_DETAILS_CACHE_TTL:
+                return cached_details
+
+
         base_url = self.config.get_clean_base_url()
         headers = self._get_auth_headers()
 
-        endpoint = f"{base_url}/rest/api/2/issue/{clean}?fields=*all"
+        fields = "summary,status,issuetype,priority,assignee,reporter,description,comment,attachment,parent,customfield_11200,customfield_12600"
+        endpoint = f"{base_url}/rest/api/2/issue/{clean}?fields={fields}"
         req = urllib.request.Request(endpoint, headers=headers, method="GET")
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -2353,7 +2432,12 @@ class JiraClient:
         parent_details: Optional[Dict[str, Any]] = None
         if not is_parent_call and parent_key and dds_source in ("none", "jira_description"):
             try:
-                parent_details = self.get_ticket_dds_details(parent_key, is_parent_call=True, force_refresh=force_refresh)
+                if parent_key in self._ticket_details_cache:
+                    _pts, p_cached = self._ticket_details_cache[parent_key]
+                    if _time.time() - _pts < self._TICKET_DETAILS_CACHE_TTL:
+                        parent_details = p_cached
+                if not parent_details:
+                    parent_details = self.get_ticket_dds_details(parent_key, is_parent_call=True, force_refresh=force_refresh)
                 if parent_details and not parent_details.get("error"):
                     p_text = parent_details.get("dds_extracted_text") or ""
                     p_source = parent_details.get("dds_source") or ""
@@ -2424,6 +2508,12 @@ class JiraClient:
         else:
             structured_dds = regex_structured
 
+        # 3.7. Carrega imagens locais anexadas a DDS deste ticket
+        local_dds_images = sp_mgr.list_dds_images(clean)
+        for loc_img in local_dds_images:
+            if not any(i.get("id") == loc_img.get("id") for i in images_list):
+                images_list.append(loc_img)
+
         # Mescla preenchimento estruturado local (Opcao 1) caso exista para o ticket
         local_fill = sp_mgr.load_filled_dds(clean)
         if local_fill:
@@ -2432,6 +2522,9 @@ class JiraClient:
             structured_dds["has_structured_data"] = True
             structured_dds["has_local_fill"] = True
             structured_dds["fill_saved_at"] = local_fill.get("saved_at")
+            structured_dds["incluir_checklist"] = local_fill.get("incluir_checklist", True)
+            if local_fill.get("incluir_checklist") is False:
+                structured_dds["checklist"] = []
 
             dev_sec = structured_dds.setdefault("desenvolvimento", {})
             if local_fill.get("autor_nome"):
@@ -2543,7 +2636,7 @@ class JiraClient:
             "last_error": sp_pub_status.get("last_error") or "",
         }
 
-        return {
+        res_details = {
             "key": clean,
             "summary": summary,
             "status": st_name,
@@ -2561,6 +2654,7 @@ class JiraClient:
             "sharepoint_status": sharepoint_status,
             "attachments": files_list,
             "images": images_list,
+            "local_dds_images": local_dds_images,
             "comments_timeline": comments_timeline,
             "movidesk_info": movidesk_info,
             "dds_source": dds_source,
@@ -2574,6 +2668,9 @@ class JiraClient:
             "dds_inherited_from_parent": dds_inherited_from_parent,
             "url": f"{base_url}/browse/{clean}",
         }
+        if not is_parent_call and "error" not in res_details:
+            self._ticket_details_cache[clean] = (_time.time(), res_details)
+        return res_details
 
     def add_issue_comment(self, issue_key: str, comment_text: str) -> Dict[str, Any]:
         """
@@ -2683,7 +2780,10 @@ class JiraClient:
         try:
             with urllib.request.urlopen(req, timeout=12) as response:
                 logger.info(f"Worklog {worklog_id} excluido de {issue_key} com sucesso.")
-                return response.status in [200, 204]
+                if response.status in [200, 204]:
+                    JiraClient.invalidate_worklogs_cache()
+                    return True
+                return False
         except Exception as e:
             logger.error(f"Erro ao excluir worklog {worklog_id} de {issue_key}: {e}")
             return False
@@ -2826,6 +2926,8 @@ class JiraClient:
 
         remaining = [q for q in queue if q.id in [x.id for x in self.state_manager.load_queue()]]
         self.state_manager.save_queue(remaining)
+        if success_count > 0:
+            JiraClient.invalidate_worklogs_cache()
         return success_count
 
     def update_worklog_full(
@@ -2869,6 +2971,8 @@ class JiraClient:
                 except Exception:
                     resp_data = {}
                 logger.info(f"Worklog {worklog_id} em {clean_key} atualizado com sucesso (campos: {list(payload.keys())}).")
+                if response.status in [200, 204]:
+                    JiraClient.invalidate_worklogs_cache()
                 return {
                     "success": response.status in [200, 204],
                     "message": f"Worklog {worklog_id} ({clean_key}) atualizado com sucesso.",
@@ -2897,24 +3001,24 @@ class JiraClient:
         res = self.update_worklog_full(issue_key=issue_key, worklog_id=worklog_id, time_spent_seconds=new_seconds)
         return bool(res.get("success"))
 
-    def get_user_recent_worklogs(self, days: int = 30) -> List[Dict[str, Any]]:
+    def get_user_recent_worklogs(self, days: int = 30, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """
         Busca todos os worklogs lancados pelo usuario logado nos ultimos N dias.
+        Utiliza ThreadPoolExecutor concorrente para consulta paralela de chamados e cache TTL em memoria.
         Retorna lista de dicionarios ordenada por data decrescente.
         """
+        now = time.time()
+        cache_key = f"recent:{days}"
+        if not force_refresh and cache_key in JiraClient._worklogs_cache:
+            c_time, c_data = JiraClient._worklogs_cache[cache_key]
+            if now - c_time < JiraClient._CACHE_TTL_SECONDS:
+                return copy.deepcopy(c_data)
+
         base_url = self.config.get_clean_base_url()
         headers = self._get_auth_headers()
 
-        # 1. Obter accountId do usuario logado
-        my_account_id = None
-        try:
-            myself_url = f"{base_url}/rest/api/2/myself"
-            req = urllib.request.Request(myself_url, headers=headers, method="GET")
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                my_data = json.loads(resp.read().decode("utf-8"))
-                my_account_id = my_data.get("accountId")
-        except Exception as e:
-            logger.warning(f"Nao foi possivel obter perfil do usuario: {e}")
+        # 1. Obter accountId do usuario logado (com cache de classe)
+        my_account_id = self.get_my_account_id()
 
         # 2. Buscar chamados onde o usuario registrou horas nos ultimos N dias
         jql = f"worklogAuthor = currentUser() AND worklogDate >= -{days}d"
@@ -2930,32 +3034,28 @@ class JiraClient:
             logger.error(f"Erro ao buscar chamados via JQL: {e}")
             return []
 
-        # 3. Para cada chamado, extrair os worklogs do usuario no periodo
+        # 3. Para cada chamado, extrair os worklogs do usuario no periodo usando ThreadPool concorrente
         cutoff_date = (datetime.now() - timedelta(days=days)).date()
-        results: List[Dict[str, Any]] = []
 
-        for issue in issues_found:
-            key = issue.get("key", "")
-            summary = issue.get("fields", {}).get("summary", "")
+        def _fetch_issue_worklogs(issue_item: Dict[str, Any]) -> List[Dict[str, Any]]:
+            key = issue_item.get("key", "")
+            summary = issue_item.get("fields", {}).get("summary", "")
             worklog_url = f"{base_url}/rest/api/2/issue/{key}/worklog"
+            issue_res: List[Dict[str, Any]] = []
 
             try:
                 w_req = urllib.request.Request(worklog_url, headers=headers, method="GET")
                 with urllib.request.urlopen(w_req, timeout=10) as w_resp:
                     w_data = json.loads(w_resp.read().decode("utf-8"))
-                    worklogs = w_data.get("worklogs", [])
-
-                    for w in worklogs:
+                    for w in w_data.get("worklogs", []):
                         started_str = w.get("started", "")
                         if not started_str:
                             continue
 
-                        # Validar se o autor eh o usuario logado
                         author_acc = w.get("author", {}).get("accountId")
                         if my_account_id and author_acc != my_account_id:
                             continue
 
-                        # Validar se esta dentro do periodo de dias
                         try:
                             w_date = datetime.fromisoformat(started_str[:10]).date()
                             if w_date < cutoff_date:
@@ -2963,7 +3063,7 @@ class JiraClient:
                         except Exception:
                             pass
 
-                        results.append({
+                        issue_res.append({
                             "id": str(w.get("id")),
                             "issue_key": key,
                             "summary": summary,
@@ -2975,32 +3075,47 @@ class JiraClient:
                         })
             except Exception as e:
                 logger.warning(f"Erro ao obter worklogs de {key}: {e}")
+            return issue_res
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        results: List[Dict[str, Any]] = []
+        if issues_found:
+            workers = min(8, len(issues_found))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(_fetch_issue_worklogs, iss) for iss in issues_found]
+                for f in as_completed(futures):
+                    try:
+                        results.extend(f.result())
+                    except Exception as ex:
+                        logger.debug("Falha na thread de busca de worklogs: %s", ex)
 
         # Ordena do mais recente para o mais antigo
         results.sort(key=lambda x: x.get("started", ""), reverse=True)
+        JiraClient._worklogs_cache[cache_key] = (now, copy.deepcopy(results))
         return results
 
-    def get_user_worklogs_by_date_range(self, start_date_str: str, end_date_str: str) -> List[Dict[str, Any]]:
+    def get_user_worklogs_by_date_range(
+        self, start_date_str: str, end_date_str: str, force_refresh: bool = False
+    ) -> List[Dict[str, Any]]:
         """
         Busca todos os worklogs lancados pelo usuario logado dentro de um intervalo de datas especifico
         (start_date_str ate end_date_str no formato YYYY-MM-DD).
+        Utiliza ThreadPoolExecutor concorrente para consulta paralela de chamados e cache TTL em memoria.
         """
-        import urllib.parse
+        s_clean = (start_date_str or date.today().isoformat())[:10]
+        e_clean = (end_date_str or date.today().isoformat())[:10]
+        now = time.time()
+        cache_key = f"range:{s_clean}:{e_clean}"
+        if not force_refresh and cache_key in JiraClient._worklogs_cache:
+            c_time, c_data = JiraClient._worklogs_cache[cache_key]
+            if now - c_time < JiraClient._CACHE_TTL_SECONDS:
+                return copy.deepcopy(c_data)
 
         base_url = self.config.get_clean_base_url()
         headers = self._get_auth_headers()
-        s_clean = (start_date_str or date.today().isoformat())[:10]
-        e_clean = (end_date_str or date.today().isoformat())[:10]
 
-        my_account_id = None
-        try:
-            myself_url = f"{base_url}/rest/api/2/myself"
-            req = urllib.request.Request(myself_url, headers=headers, method="GET")
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                my_data = json.loads(resp.read().decode("utf-8"))
-                my_account_id = my_data.get("accountId")
-        except Exception as e:
-            logger.warning(f"Nao foi possivel obter perfil do usuario: {e}")
+        my_account_id = self.get_my_account_id()
 
         jql = f'worklogAuthor = currentUser() AND worklogDate >= "{s_clean}" AND worklogDate <= "{e_clean}"'
         search_url = f"{base_url}/rest/api/2/search/jql?jql={urllib.parse.quote(jql)}&maxResults=60&fields=key,summary"
@@ -3015,19 +3130,17 @@ class JiraClient:
             logger.warning(f"Erro ao buscar chamados por intervalo de datas via JQL: {e}")
             return []
 
-        results: List[Dict[str, Any]] = []
-        for issue in issues_found:
-            key = issue.get("key", "")
-            summary = issue.get("fields", {}).get("summary", "")
+        def _fetch_range_worklogs(issue_item: Dict[str, Any]) -> List[Dict[str, Any]]:
+            key = issue_item.get("key", "")
+            summary = issue_item.get("fields", {}).get("summary", "")
             worklog_url = f"{base_url}/rest/api/2/issue/{key}/worklog"
+            issue_res: List[Dict[str, Any]] = []
 
             try:
                 w_req = urllib.request.Request(worklog_url, headers=headers, method="GET")
                 with urllib.request.urlopen(w_req, timeout=10) as w_resp:
                     w_data = json.loads(w_resp.read().decode("utf-8"))
-                    worklogs = w_data.get("worklogs", [])
-
-                    for w in worklogs:
+                    for w in w_data.get("worklogs", []):
                         started_str = w.get("started", "")
                         if not started_str:
                             continue
@@ -3039,7 +3152,7 @@ class JiraClient:
                         if not (s_clean <= w_date_str <= e_clean):
                             continue
 
-                        results.append({
+                        issue_res.append({
                             "id": str(w.get("id")),
                             "issue_key": key,
                             "summary": summary,
@@ -3051,10 +3164,24 @@ class JiraClient:
                         })
             except Exception as e:
                 logger.warning(f"Erro ao obter worklogs de {key}: {e}")
+            return issue_res
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        results: List[Dict[str, Any]] = []
+        if issues_found:
+            workers = min(8, len(issues_found))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(_fetch_range_worklogs, iss) for iss in issues_found]
+                for f in as_completed(futures):
+                    try:
+                        results.extend(f.result())
+                    except Exception as ex:
+                        logger.debug("Falha na thread de range worklogs: %s", ex)
 
         results.sort(key=lambda x: x.get("started", ""), reverse=True)
+        JiraClient._worklogs_cache[cache_key] = (now, copy.deepcopy(results))
         return results
-
 
     def get_user_analytics_data(
         self,

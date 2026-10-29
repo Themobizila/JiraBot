@@ -726,6 +726,7 @@ class StateManager:
         self.queue_file = self.base_dir / "queue.json"
         self.history_file = self.base_dir / "history.json"
         self.schedules_file = self.base_dir / "worklog_schedules.json"
+        self.snapshots_dir = self.base_dir / "state_history"
 
     def load_state(self) -> DailyState:
         """Carrega o estado atual do dia. Se for de um dia anterior, salva no historico e reseta."""
@@ -933,6 +934,25 @@ class StateManager:
             if temp_file.exists():
                 temp_file.replace(self.schedules_file)
 
+    def save_day_shift_schedule(self, date_str: str, schedule_data: Dict[str, Any]) -> None:
+        """Salva os horarios de expediente de um dia especifico usando chave day:YYYY-MM-DD."""
+        if not date_str:
+            return
+        d_key = f"day:{date_str[:10]}"
+        schedules = self.load_worklog_schedules()
+        schedules[d_key] = {
+            "start_hm": schedule_data.get("start_hm", ""),
+            "lunch_start_hm": schedule_data.get("lunch_start_hm", ""),
+            "lunch_end_hm": schedule_data.get("lunch_end_hm", ""),
+            "end_hm": schedule_data.get("end_hm", ""),
+            "updated_at": datetime.now().isoformat(),
+        }
+        temp_file = self.schedules_file.with_suffix(".tmp")
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(schedules, f, indent=2, ensure_ascii=False)
+        if temp_file.exists():
+            temp_file.replace(self.schedules_file)
+
     def get_or_infer_worklog_schedule(
         self,
         worklog: Dict[str, Any],
@@ -941,10 +961,15 @@ class StateManager:
     ) -> Dict[str, str]:
         """
         Retorna os horarios de inicio, pausa de almoco, retorno e encerramento de um worklog.
-        Caso nao exista registro explicito salvo em worklog_schedules.json, calcula/infere
-        automaticamente com base no horario de inicio (started) e duracao (time_spent_seconds).
+        Caso nao exista registro explicito salvo em worklog_schedules.json para o worklog_id,
+        verifica se ha metadados salvos para o dia (day:YYYY-MM-DD) ou no estado diario.
+        Caso contrario, calcula/infere com base na duracao e perfil de turno.
         """
         wid = str(worklog.get("id", ""))
+        started_str = worklog.get("started", "")
+        date_part = started_str[:10] if len(started_str) >= 10 else date.today().isoformat()
+        total_sec = int(worklog.get("time_spent_seconds", 0) or 0)
+
         schedules = self.load_worklog_schedules()
         if wid and wid in schedules:
             saved = schedules[wid]
@@ -957,14 +982,49 @@ class StateManager:
                     "is_saved": "true",
                 }
 
-        started_str = worklog.get("started", "")
-        total_sec = int(worklog.get("time_spent_seconds", 0) or 0)
-        date_part = started_str[:10] if len(started_str) >= 10 else date.today().isoformat()
+        # 2. Verifica se ha horario explicitamente salvo para o dia em worklog_schedules.json
+        day_key = f"day:{date_part}"
+        if day_key in schedules:
+            saved_day = schedules[day_key]
+            if saved_day.get("start_hm"):
+                return {
+                    "start_hm": saved_day.get("start_hm", ""),
+                    "lunch_start_hm": saved_day.get("lunch_start_hm", ""),
+                    "lunch_end_hm": saved_day.get("lunch_end_hm", ""),
+                    "end_hm": saved_day.get("end_hm", ""),
+                    "is_saved": "true",
+                }
+
+        # 3. Se a data for hoje e o estado local tiver intervalos registrados
+        if date_part == date.today().isoformat() and self.state_file.exists():
+            try:
+                cur_state = self.load_state()
+                if cur_state.intervals and cur_state.date_str == date_part:
+                    st_summary = cur_state.get_shift_times_summary()
+                    if st_summary.get("start_hm") and (st_summary.get("end_hm") or cur_state.status == "COMPLETED"):
+                        return {
+                            "start_hm": st_summary.get("start_hm", ""),
+                            "lunch_start_hm": st_summary.get("lunch_start_hm", ""),
+                            "lunch_end_hm": st_summary.get("lunch_end_hm", ""),
+                            "end_hm": st_summary.get("end_hm", ""),
+                            "is_saved": "true",
+                        }
+            except Exception:
+                pass
+
         start_hm = started_str[11:16] if len(started_str) >= 16 else "08:00"
+
+        # Inferencia inteligente:
+        # Se a carga horaria do worklog for de 7.5 horas ou mais (>= 27000s),
+        # trata-se de turno integral (8h CLT), cujo retorno de almoco nominal e as 13:00 (1h de pausa),
+        # e nunca 13:30 (que e a pausa estendida de 1h30m exclusiva para estagio/6h).
+        effective_le_hm = default_lunch_end or "13:30"
+        if total_sec >= 27000 and effective_le_hm in ("13:30", "13:20"):
+            effective_le_hm = "13:00"
 
         start_dt = _parse_hm(date_part, start_hm) or datetime(2026, 1, 1, 8, 0)
         ls_dt = _parse_hm(date_part, default_lunch_start) or datetime(start_dt.year, start_dt.month, start_dt.day, 12, 0)
-        le_dt = _parse_hm(date_part, default_lunch_end) or datetime(start_dt.year, start_dt.month, start_dt.day, 13, 30)
+        le_dt = _parse_hm(date_part, effective_le_hm) or datetime(start_dt.year, start_dt.month, start_dt.day, 13, 0 if total_sec >= 27000 else 13, 30)
 
         # Se o inicio foi antes do almoco e o tempo total ultrapassa o periodo da manha + 30min
         morning_capacity = max(0, int((ls_dt - start_dt).total_seconds()))
@@ -987,4 +1047,166 @@ class StateManager:
                 "end_hm": end_dt.strftime("%H:%M"),
                 "is_saved": "false",
             }
+
+    # ==================== SNAPSHOTS E HISTORICO DE RECUPERACAO DO DIA ====================
+
+    def _get_snapshots_dir(self) -> Path:
+        self.snapshots_dir.mkdir(parents=True, exist_ok=True)
+        return self.snapshots_dir
+
+    def create_snapshot(self, state: DailyState, reason: str = "auto") -> Optional[Path]:
+        """
+        Salva uma copia de seguranca isolada do estado ativo do dia.
+        Permite recuperar os tickets, tempos e intervalos em caso de qualquer incidente.
+        """
+        try:
+            s_dir = self._get_snapshots_dir()
+            now_dt = datetime.now()
+            time_tag = now_dt.strftime("%H%M%S")
+            date_tag = state.date_str or now_dt.strftime("%Y-%m-%d")
+            clean_reason = "".join(c for c in reason if c.isalnum() or c in ("_", "-")).lower() or "auto"
+            filename = f"snapshot_{date_tag}_{time_tag}_{clean_reason}.json"
+            filepath = s_dir / filename
+
+            # Evita criar snapshots "auto" repetitivos se nada mudou em menos de 10 min
+            if clean_reason == "auto":
+                existing = sorted(s_dir.glob(f"snapshot_{date_tag}_*.json"), reverse=True)
+                if existing:
+                    try:
+                        latest_data = json.loads(existing[0].read_text(encoding="utf-8"))
+                        last_ts = latest_data.get("created_at_iso", "")
+                        if last_ts:
+                            last_dt = datetime.fromisoformat(last_ts)
+                            if (now_dt - last_dt).total_seconds() < 600:
+                                return existing[0]
+                    except Exception:
+                        pass
+
+            tot_sec = state.get_total_seconds()
+            all_issues = state.get_all_issues_worked()
+            h = tot_sec // 3600
+            m = (tot_sec % 3600) // 60
+            tot_hm = f"{h}h {m:02d}m" if h > 0 else f"{m}m"
+
+            payload = {
+                "id": filepath.stem,
+                "version": 1,
+                "date_str": date_tag,
+                "created_at_iso": now_dt.isoformat(),
+                "time_hm": now_dt.strftime("%H:%M:%S"),
+                "reason": reason,
+                "reason_label": self._format_snapshot_reason(reason),
+                "total_seconds": tot_sec,
+                "total_formatted": tot_hm,
+                "tickets_count": len(all_issues),
+                "tickets_preview": ", ".join(all_issues) if all_issues else "Nenhum ticket",
+                "state": state.to_dict(),
+            }
+
+            temp_p = filepath.with_suffix(".tmp")
+            with open(temp_p, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+            temp_p.replace(filepath)
+
+            # Politica de retencao: mantem os ultimos 50 snapshots
+            self._cleanup_old_snapshots(max_keep=50)
+            return filepath
+        except Exception as e:
+            logger.warning(f"Erro ao criar snapshot de seguranca: {e}")
+            return None
+
+    def _format_snapshot_reason(self, reason: str) -> str:
+        mapping = {
+            "pre_schedule_edit": "Antes de alterar horários do expediente",
+            "pre_transfer": "Antes de transferir horas entre chamados",
+            "pre_interval_edit": "Antes de editar intervalos manuais",
+            "pre_restore": "Ponto de segurança gerado antes de restaurar",
+            "manual": "Ponto de restauração manual",
+            "auto": "Snapshot automático periódico",
+            "pre_switch": "Antes de trocar de chamado",
+        }
+        return mapping.get(reason, reason.replace("_", " ").title())
+
+    def _cleanup_old_snapshots(self, max_keep: int = 50) -> None:
+        try:
+            s_dir = self.snapshots_dir
+            if not s_dir.exists():
+                return
+            all_snaps = sorted(s_dir.glob("snapshot_*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+            if len(all_snaps) > max_keep:
+                for old in all_snaps[max_keep:]:
+                    try:
+                        old.unlink()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def list_snapshots(self, date_str: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Retorna a lista de pontos de restauracao disponiveis, ordenados do mais recente para o mais antigo.
+        """
+        s_dir = self.snapshots_dir
+        if not s_dir.exists():
+            return []
+
+        pattern = f"snapshot_{date_str}_*.json" if date_str else "snapshot_*.json"
+        files = sorted(s_dir.glob(pattern), key=lambda f: f.stat().st_mtime, reverse=True)
+
+        results = []
+        for fp in files:
+            try:
+                data = json.loads(fp.read_text(encoding="utf-8"))
+                results.append({
+                    "id": fp.stem,
+                    "date_str": data.get("date_str", ""),
+                    "created_at_iso": data.get("created_at_iso", ""),
+                    "time_hm": data.get("time_hm", "") or (data.get("created_at_iso", "")[11:16]),
+                    "reason": data.get("reason", "auto"),
+                    "reason_label": data.get("reason_label") or self._format_snapshot_reason(data.get("reason", "auto")),
+                    "total_seconds": data.get("total_seconds", 0),
+                    "total_formatted": data.get("total_formatted", "0m"),
+                    "tickets_count": data.get("tickets_count", 0),
+                    "tickets_preview": data.get("tickets_preview", ""),
+                })
+            except Exception:
+                continue
+        return results
+
+    def restore_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+        """
+        Restaura com seguranca um snapshot para o state.json atual.
+        Antes de aplicar a restauracao, salva preventivamente o estado atual
+        com motivo 'pre_restore' para permitir reverter o proprio restauro.
+        """
+        s_dir = self.snapshots_dir
+        clean_id = "".join(c for c in snapshot_id if c.isalnum() or c in ("_", "-"))
+        filepath = s_dir / f"{clean_id}.json"
+        if not filepath.exists():
+            return {"success": False, "error": "Ponto de restauração não encontrado."}
+
+        try:
+            snap_data = json.loads(filepath.read_text(encoding="utf-8"))
+            raw_state = snap_data.get("state")
+            if not raw_state:
+                return {"success": False, "error": "Conteúdo do snapshot corrompido ou inválido."}
+
+            restored_state = DailyState.from_dict(raw_state)
+
+            # Salva ponto de seguranca do estado atual antes de sobrescrever
+            cur_state = self.load_state()
+            self.create_snapshot(cur_state, reason="pre_restore")
+
+            # Salva o estado restaurado atomicamente
+            self.save_state(restored_state)
+
+            return {
+                "success": True,
+                "message": f"Estado restaurado com sucesso para o ponto de {snap_data.get('time_hm', '')} ({snap_data.get('reason_label', '')})!",
+                "restored_id": clean_id,
+                "restored_date": restored_state.date_str,
+                "total_seconds": restored_state.get_total_seconds(),
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Falha ao restaurar snapshot: {e}"}
 

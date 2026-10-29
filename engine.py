@@ -163,8 +163,21 @@ class BotEngine:
 
         elif self.state.status == "PAUSED_LUNCH":
             current_time = now.time()
-            if current_time < profile.lunch_end_window.start_time:
-                logger.info(f"Desbloqueio as {now.strftime('%H:%M')} antes da janela de retorno do almoco ({profile.lunch_end_window.start_str}). Cronometro mantido em pausa.")
+            lunch_pause_sec = 0
+            if self.state.intervals and self.state.intervals[-1].end:
+                try:
+                    ls_end_dt = datetime.fromisoformat(self.state.intervals[-1].end)
+                    lunch_pause_sec = max(0, int((now - ls_end_dt).total_seconds()))
+                except Exception:
+                    pass
+
+            # Permite retomar se o horario atingiu a janela de retorno OU se ja decorreram ao menos 35 minutos de almoco
+            can_resume = (current_time >= profile.lunch_end_window.start_time) or (lunch_pause_sec >= 2100)
+            if not can_resume:
+                logger.info(
+                    f"Desbloqueio as {now.strftime('%H:%M')} antes da janela de retorno do almoco "
+                    f"({profile.lunch_end_window.start_str}) e com apenas {lunch_pause_sec // 60}m de pausa. Cronometro mantido em pausa."
+                )
                 return self.state
 
             # Retorno valido do intervalo de almoco
@@ -411,6 +424,11 @@ class BotEngine:
             self.state.is_logged = True
             self.state_manager.save_state(self.state)
             self.state_manager.save_day_to_history(self.state)
+            shift_summary = self.state.get_shift_times_summary()
+            if shift_summary.get("start_hm"):
+                self.state_manager.save_day_shift_schedule(self.state.date_str, shift_summary)
+                for wid in self.state.jira_worklog_ids:
+                    self.state_manager.save_worklog_schedule(wid, shift_summary)
             logger.info("Todos os apontamentos de hoje foram transmitidos ao Jira com sucesso.")
 
     def manual_start(self, now: Optional[datetime] = None) -> DailyState:

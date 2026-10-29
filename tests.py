@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 import unittest
-from datetime import datetime, time
+from datetime import date, datetime, time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1142,10 +1142,14 @@ class TestThemeSelectorAndSeasonalThemes(unittest.TestCase):
 
 class TestJiraTicketsManagementAndDds(unittest.TestCase):
     def setUp(self):
+        from jira_client import JiraClient
+        JiraClient.invalidate_ticket_cache()
         self.test_dir = Path(tempfile.mkdtemp())
         self.state_mgr = StateManager(base_dir=self.test_dir)
 
     def tearDown(self):
+        from jira_client import JiraClient
+        JiraClient.invalidate_ticket_cache()
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     @patch("urllib.request.urlopen")
@@ -2613,6 +2617,594 @@ Não aplicável
         self.assertIn("submitDdsFill", HTML_PAGE)
         self.assertIn("/api/jira/dds/fill-template", HTML_PAGE)
         self.assertIn("/api/jira/dds/fill", HTML_PAGE)
+
+    def test_web_panel_dds_toolbar_partitions(self):
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        self.assertIn('id="dds-partition-official"', HTML_PAGE)
+        self.assertIn('id="dds-partition-import"', HTML_PAGE)
+        self.assertIn("DDS Oficial & Edição", HTML_PAGE)
+        self.assertIn("Importação & Arquivos Locais", HTML_PAGE)
+        self.assertIn("openFillDdsModal()", HTML_PAGE)
+        self.assertIn("detectDdsFromDownloads()", HTML_PAGE)
+        self.assertIn("triggerManualDocxUpload()", HTML_PAGE)
+        self.assertIn("openPasteDdsModal()", HTML_PAGE)
+        self.assertIn('id="dds-top-sharepoint-btn"', HTML_PAGE)
+
+        # Valida estilos CSS correspondentes em web_assets
+        self.assertIn(".dds-partition-card", THEME_CSS)
+        self.assertIn(".dds-partition-title", THEME_CSS)
+        self.assertIn(".dds-partition-actions", THEME_CSS)
+
+    @patch("urllib.request.urlopen")
+    def test_jira_client_worklogs_cache_and_concurrency(self, mock_urlopen):
+        import json
+        import time as tm
+        from jira_client import JiraClient
+        from config import BotConfig
+
+        cfg = BotConfig(notifications_enabled=False)
+        jc = JiraClient(cfg.jira)
+        JiraClient.invalidate_worklogs_cache()
+        JiraClient._my_account_id_cache = (tm.time(), "acc-123")
+
+        # Mock de busca JQL retornando 2 chamados
+        jql_data = {
+            "issues": [
+                {"key": "TASK-1", "fields": {"summary": "Tarefa 1"}},
+                {"key": "TASK-2", "fields": {"summary": "Tarefa 2"}},
+            ]
+        }
+        # Mock de worklogs para cada chamado
+        wl_data = {
+            "worklogs": [
+                {
+                    "id": "1001",
+                    "author": {"accountId": "acc-123"},
+                    "started": "2026-10-27T10:00:00.000-0300",
+                    "timeSpent": "1h",
+                    "timeSpentSeconds": 3600,
+                    "comment": "Atividade concorrente",
+                }
+            ]
+        }
+
+        call_count = [0]
+        def fake_urlopen(req, timeout=10):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            call_count[0] += 1
+            resp = MagicMock()
+            resp.status = 200
+            if "search/jql" in url:
+                resp.read.return_value = json.dumps(jql_data).encode("utf-8")
+            else:
+                resp.read.return_value = json.dumps(wl_data).encode("utf-8")
+            resp.__enter__.return_value = resp
+            return resp
+
+        mock_urlopen.side_effect = fake_urlopen
+
+        # 1. Primeira consulta preenche cache
+        wls_1 = jc.get_user_recent_worklogs(days=7, force_refresh=False)
+        self.assertEqual(len(wls_1), 2)
+        initial_calls = call_count[0]
+        self.assertTrue(initial_calls >= 3) # 1 JQL + 2 worklogs
+
+        # 2. Segunda consulta sem force_refresh deve retornar do cache imediatamente (0 chamadas HTTP a mais)
+        wls_2 = jc.get_user_recent_worklogs(days=7, force_refresh=False)
+        self.assertEqual(len(wls_2), 2)
+        self.assertEqual(call_count[0], initial_calls)
+
+        # 3. Consulta com force_refresh=True deve reconsultar o Jira
+        wls_3 = jc.get_user_recent_worklogs(days=7, force_refresh=True)
+        self.assertEqual(len(wls_3), 2)
+        self.assertTrue(call_count[0] > initial_calls)
+
+
+    @patch("urllib.request.urlopen")
+    def test_ticket_details_cache_ttl_and_invalidation(self, mock_urlopen):
+        import json
+        from jira_client import JiraClient
+        from config import JiraConfig
+
+        mock_payload = {
+            "key": "CONSISABI-999",
+            "fields": {
+                "summary": "Ticket Teste de Cache",
+                "status": {"name": "Aberto", "statusCategory": {"key": "new"}},
+                "priority": {"name": "Média"},
+                "issuetype": {"name": "Tarefa"},
+                "assignee": {"displayName": "Dev Teste"},
+                "reporter": {"displayName": "Autor Teste"},
+                "description": "Descricao do ticket teste",
+                "comment": {"comments": []},
+                "attachment": [],
+            }
+        }
+
+        call_counter = [0]
+        def fake_urlopen(req, timeout=15):
+            call_counter[0] += 1
+            from io import BytesIO
+            return BytesIO(json.dumps(mock_payload).encode("utf-8"))
+
+        mock_urlopen.side_effect = fake_urlopen
+
+        cfg = JiraConfig(email="test@consisa.com.br", api_token="secret", base_url="https://consisa.atlassian.net")
+        client = JiraClient(cfg, self.state_mgr)
+
+        # 1. Primeira consulta: bate na API do Jira
+        res1 = client.get_ticket_dds_details("CONSISABI-999")
+        self.assertEqual(res1.get("key"), "CONSISABI-999")
+        self.assertEqual(call_counter[0], 1)
+
+        # 2. Segunda consulta sem force_refresh: retorna do cache (0 chamadas adicionais)
+        res2 = client.get_ticket_dds_details("CONSISABI-999")
+        self.assertEqual(res2.get("key"), "CONSISABI-999")
+        self.assertEqual(call_counter[0], 1)
+
+        # 3. Consulta com force_refresh=True: invalida cache e chama Jira novamente
+        res3 = client.get_ticket_dds_details("CONSISABI-999", force_refresh=True)
+        self.assertEqual(res3.get("key"), "CONSISABI-999")
+        self.assertEqual(call_counter[0], 2)
+
+        # 4. Invalidação seletiva de cache por chave
+        JiraClient.invalidate_ticket_cache("CONSISABI-999")
+        res4 = client.get_ticket_dds_details("CONSISABI-999")
+        self.assertEqual(res4.get("key"), "CONSISABI-999")
+        self.assertEqual(call_counter[0], 3)
+
+        # 5. Invalidação global do cache
+        JiraClient.invalidate_ticket_cache()
+        res5 = client.get_ticket_dds_details("CONSISABI-999")
+        self.assertEqual(res5.get("key"), "CONSISABI-999")
+        self.assertEqual(call_counter[0], 4)
+
+        # 6. Verificacao de expiracao do TTL de cache
+        # Altera artificialmente o timestamp para simular passagem de tempo (> 30s)
+        self.assertIn("CONSISABI-999", JiraClient._ticket_details_cache)
+        ts, data = JiraClient._ticket_details_cache["CONSISABI-999"]
+        JiraClient._ticket_details_cache["CONSISABI-999"] = (ts - 35.0, data)
+        res6 = client.get_ticket_dds_details("CONSISABI-999")
+        self.assertEqual(res6.get("key"), "CONSISABI-999")
+        self.assertEqual(call_counter[0], 5)
+
+
+    def test_daily_summary_fallback_description_hierarchy(self):
+        from web_panel import resolve_fallback_description
+
+        # 1. Comentário personalizado válido deve ter prioridade máxima
+        desc1 = resolve_fallback_description("TEST-100", "Correção no motor de relatórios", "Demanda Principal")
+        self.assertEqual(desc1, "Correção no motor de relatórios")
+
+        # 2. Comentário vazio/padrão deve fazer fallback para o resumo oficial do Jira
+        desc2 = resolve_fallback_description("TEST-100", "", "Implementação de Regras de Negócio")
+        self.assertEqual(desc2, "Implementação de Regras de Negócio")
+
+        desc3 = resolve_fallback_description("TEST-100", "(Padrão: [Outros registros])", "Ajuste na tela de login")
+        self.assertEqual(desc3, "Ajuste na tela de login")
+
+        # 3. Se não houver comentário nem resumo, gera fallback limpo profissional
+        desc4 = resolve_fallback_description("TEST-100", "", "")
+        self.assertEqual(desc4, "Atividades e desenvolvimento na demanda TEST-100")
+
+        desc5 = resolve_fallback_description("SEM_TICKET", "-", "-")
+        self.assertEqual(desc5, "Atividades gerais de desenvolvimento e rotina")
+
+    def test_build_daily_summary_payload_periods(self):
+        from web_panel import build_daily_summary_payload
+
+        # 1. Periodo Today
+        res_today = build_daily_summary_payload("today")
+        self.assertTrue(res_today.get("success"))
+        self.assertEqual(res_today.get("period"), "today")
+        self.assertIn("Resumo da Jornada", res_today.get("raw_text", ""))
+        self.assertIn("items", res_today)
+
+        # 2. Periodo Yesterday
+        res_yest = build_daily_summary_payload("yesterday")
+        self.assertTrue(res_yest.get("success"))
+        self.assertEqual(res_yest.get("period"), "yesterday")
+        self.assertIn("Resumo da Jornada", res_yest.get("raw_text", ""))
+
+        # 3. Periodo Week
+        res_week = build_daily_summary_payload("week")
+        self.assertTrue(res_week.get("success"))
+        self.assertEqual(res_week.get("period"), "week")
+        self.assertIn("Semana", res_week.get("period_label", ""))
+
+
+    def test_state_manager_snapshots_create_list_and_restore(self):
+        from storage import StateManager, DailyState, TimeInterval
+
+        today_str = date.today().isoformat()
+        mgr = StateManager(base_dir=self.test_dir)
+        state = DailyState(date_str=today_str, target_issue="ATIVDIV-32")
+        state.intervals.append(TimeInterval(start=f"{today_str}T08:00:00", end=f"{today_str}T10:00:00", issue_key="ATIVDIV-32"))
+        state.intervals.append(TimeInterval(start=f"{today_str}T10:00:00", end=f"{today_str}T11:30:00", issue_key="CONSISABI-418"))
+        mgr.save_state(state)
+
+        # 1. Cria snapshot
+        snap_p = mgr.create_snapshot(state, reason="pre_schedule_edit")
+        self.assertIsNotNone(snap_p)
+        self.assertTrue(snap_p.exists())
+
+        # 2. Lista snapshots filtrando pela data
+        snaps = mgr.list_snapshots(today_str)
+        self.assertGreaterEqual(len(snaps), 1)
+        self.assertEqual(snaps[0]["tickets_count"], 2)
+        self.assertIn("ATIVDIV-32", snaps[0]["tickets_preview"])
+        self.assertIn("Antes de alterar horários", snaps[0]["reason_label"])
+
+        # 3. Simula perda/alteracao acidental de estado
+        state.intervals.clear()
+        state.target_issue = "SEM_TICKET"
+        mgr.save_state(state)
+        self.assertEqual(len(mgr.load_state().intervals), 0)
+
+        # 4. Restaura snapshot
+        res = mgr.restore_snapshot(snaps[0]["id"])
+        self.assertTrue(res.get("success"))
+
+        restored_state = mgr.load_state()
+        self.assertEqual(len(restored_state.intervals), 2)
+        self.assertEqual(restored_state.target_issue, "ATIVDIV-32")
+        self.assertEqual(restored_state.get_total_seconds(), 12600)
+
+        # 5. Verifica que a restauracao gerou automaticamente um ponto de seguranca 'pre_restore'
+        snaps_after = mgr.list_snapshots(today_str)
+        reasons = [s["reason"] for s in snaps_after]
+        self.assertIn("pre_restore", reasons)
+
+
+    def test_audit_today_worklogs_payload_scenarios(self):
+        import time
+        from web_panel import audit_today_worklogs_payload
+        from storage import DailyState, TimeInterval
+        from jira_client import JiraClient
+        from config import BotConfig
+
+        # 1. Cenario: Expediente Vazio
+        empty_state = DailyState(date_str="2026-10-28", target_issue="ATIVDIV-32")
+        mock_cfg = BotConfig(active_profile="6h_0745", notifications_enabled=False)
+
+        with patch("storage.StateManager.load_state", return_value=empty_state), \
+             patch("config.BotConfig.load", return_value=mock_cfg):
+            res = audit_today_worklogs_payload()
+            self.assertTrue(res["success"])
+            self.assertFalse(res["can_log"])
+            self.assertEqual(res["balance"]["status"], "empty")
+            self.assertTrue(res["has_warnings"])
+            self.assertTrue(any("Nenhum tempo" in w["title"] for w in res["warnings"]))
+
+        # 2. Cenario: Deficit de Horas
+        deficit_state = DailyState(date_str="2026-10-28", target_issue="TEST-100")
+        deficit_state.intervals.append(TimeInterval(start="2026-10-28T08:00:00", end="2026-10-28T10:00:00", issue_key="TEST-100")) # 2h
+
+        with patch("storage.StateManager.load_state", return_value=deficit_state), \
+             patch("config.BotConfig.load", return_value=mock_cfg):
+            res = audit_today_worklogs_payload()
+            self.assertTrue(res["can_log"])
+            self.assertEqual(res["balance"]["status"], "deficit")
+            self.assertEqual(res["balance"]["diff_formatted"], "04:00")
+            self.assertTrue(any("abaixo da meta" in w["title"] for w in res["warnings"]))
+
+        # 3. Cenario: Excesso de Horas
+        excess_state = DailyState(date_str="2026-10-28", target_issue="TEST-100")
+        excess_state.intervals.append(TimeInterval(start="2026-10-28T08:00:00", end="2026-10-28T16:00:00", issue_key="TEST-100")) # 8h
+
+        with patch("storage.StateManager.load_state", return_value=excess_state), \
+             patch("config.BotConfig.load", return_value=mock_cfg):
+            res = audit_today_worklogs_payload()
+            self.assertEqual(res["balance"]["status"], "excess")
+            self.assertEqual(res["balance"]["diff_formatted"], "02:00")
+            self.assertTrue(any("acima da meta" in w["title"] for w in res["warnings"]))
+
+        # 4. Cenario: Chamado Concluido / Fechado no Jira
+        closed_state = DailyState(date_str="2026-10-28", target_issue="CLOSED-1")
+        closed_state.intervals.append(TimeInterval(start="2026-10-28T08:00:00", end="2026-10-28T14:00:00", issue_key="CLOSED-1")) # 6h
+        JiraClient._ticket_details_cache["CLOSED-1"] = (
+            time.time(),
+            {"status": "Concluído", "status_category": "done", "summary": "Demanda já entregue"}
+        )
+
+        with patch("storage.StateManager.load_state", return_value=closed_state), \
+             patch("config.BotConfig.load", return_value=mock_cfg):
+            res = audit_today_worklogs_payload()
+            self.assertTrue(res["has_critical"])
+            self.assertEqual(len(res["tickets"]), 1)
+            self.assertTrue(res["tickets"][0]["is_closed"])
+            self.assertEqual(res["tickets"][0]["jira_status"], "Concluído")
+            self.assertTrue(any("Chamado encerrado" in w["title"] for w in res["warnings"]))
+
+        # 5. Cenario: Horas em SEM_TICKET
+        sem_ticket_state = DailyState(date_str="2026-10-28", target_issue="SEM_TICKET")
+        sem_ticket_state.intervals.append(TimeInterval(start="2026-10-28T08:00:00", end="2026-10-28T10:00:00", issue_key="SEM_TICKET"))
+
+        with patch("storage.StateManager.load_state", return_value=sem_ticket_state), \
+             patch("config.BotConfig.load", return_value=mock_cfg):
+            res = audit_today_worklogs_payload()
+            self.assertTrue(res["has_critical"])
+            self.assertTrue(any("SEM_TICKET" in w["title"] for w in res["warnings"]))
+
+
+    def test_mini_window_position_persistence_and_widget(self):
+        import tkinter as tk
+        from pathlib import Path
+        import tempfile
+        from unittest.mock import patch, MagicMock
+        from mini_window import save_position, load_saved_position, get_position_file_path, MiniWidgetApp, launch_mini_window
+        from storage import DailyState, TimeInterval
+        from config import BotConfig
+
+        # 1. Teste de persistencia de coordenadas
+        test_pos_file = Path(tempfile.mkdtemp()) / "mini_pos.json"
+        with patch("mini_window.get_position_file_path", return_value=test_pos_file):
+            save_position(350, 420)
+            self.assertTrue(test_pos_file.exists())
+            x, y = load_saved_position(1920, 1080)
+            self.assertEqual(x, 350)
+            self.assertEqual(y, 420)
+
+            # Fora da tela deve aplicar fallback
+            save_position(99999, 99999)
+            fallback_x, fallback_y = load_saved_position(1920, 1080)
+            self.assertNotEqual(fallback_x, 99999)
+
+        # 2. Teste do componente MiniWidgetApp (headless)
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            mock_state = DailyState(date_str="2026-10-28", target_issue="PROJ-777", status="RUNNING")
+            mock_state.intervals.append(TimeInterval(start="2026-10-28T08:00:00", end="2026-10-28T10:00:00", issue_key="PROJ-777")) # 2h
+            mock_cfg = BotConfig(active_profile="6h_0745", notifications_enabled=False)
+
+            with patch("storage.StateManager.load_state", return_value=mock_state), \
+                 patch("config.BotConfig.load", return_value=mock_cfg):
+                app = MiniWidgetApp(root)
+                self.assertEqual(app.ticket_label.cget("text"), "PROJ-777")
+                self.assertEqual(app.timer_label.cget("text"), "02:00:00")
+                self.assertEqual(app.status_label.cget("text"), "Em execucao")
+                self.assertEqual(app.btn_play_pause.cget("text"), "Pausar")
+
+                # Teste toggle_always_on_top
+                orig_top = app.always_on_top
+                app.toggle_always_on_top()
+                self.assertEqual(app.always_on_top, not orig_top)
+
+                # Teste mudanca de estado para PAUSED
+                mock_state.status = "PAUSED_AWAY"
+                app.update_state()
+                self.assertEqual(app.status_label.cget("text"), "Pausado")
+                self.assertEqual(app.btn_play_pause.cget("text"), "Retomar")
+        finally:
+            root.destroy()
+
+        # 3. Teste launch_mini_window desacoplado
+        with patch("subprocess.Popen") as mock_popen, \
+             patch("mini_window.bring_existing_mini_window_to_top", return_value=False):
+            launch_mini_window(detached=True)
+            self.assertTrue(mock_popen.called)
+
+        # 4. Teste toggle_mini_window
+        from mini_window import toggle_mini_window
+        with patch("mini_window.launch_mini_window") as mock_launch, \
+             patch("ctypes.windll.user32.FindWindowW", return_value=0):
+            toggle_mini_window()
+            mock_launch.assert_called_once_with(detached=True)
+
+        with patch("ctypes.windll.user32.FindWindowW", return_value=12345), \
+             patch("ctypes.windll.user32.GetForegroundWindow", return_value=12345), \
+             patch("ctypes.windll.user32.PostMessageW") as mock_post:
+            toggle_mini_window()
+            mock_post.assert_called_once_with(12345, 0x0010, 0, 0)
+
+        with patch("ctypes.windll.user32.FindWindowW", return_value=12345), \
+             patch("ctypes.windll.user32.GetForegroundWindow", return_value=99999), \
+             patch("ctypes.windll.user32.ShowWindow") as mock_show, \
+             patch("ctypes.windll.user32.SetForegroundWindow") as mock_fg:
+            toggle_mini_window()
+            mock_show.assert_called_once_with(12345, 9)
+            mock_fg.assert_called_once_with(12345)
+
+
+    def test_dds_modal_redesign_checklist_toggle_and_image_endpoints(self):
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        # Valida que o modal de preenchimento tem fundo opaco e master toggle de checklist
+        self.assertIn('id="modal-fill-dds"', HTML_PAGE)
+        self.assertIn('id="fill-include-checklist"', HTML_PAGE)
+        self.assertIn('toggleFillChecklist', HTML_PAGE)
+        self.assertIn('id="fill-checklist-actions"', HTML_PAGE)
+        self.assertIn('id="fill-checklist-inner"', HTML_PAGE)
+
+        # Valida que o bloco de upload de imagens esta presente no HTML
+        self.assertIn('id="fill-image-file-input"', HTML_PAGE)
+        self.assertIn('id="fill-image-drop-zone"', HTML_PAGE)
+        self.assertIn('id="fill-images-preview-grid"', HTML_PAGE)
+        self.assertIn('handleFillImagesSelected', HTML_PAGE)
+        self.assertIn('loadDdsImages', HTML_PAGE)
+        self.assertIn('deleteDdsImage', HTML_PAGE)
+        self.assertIn('/api/jira/dds/images/upload', HTML_PAGE)
+        self.assertIn('/api/jira/dds/images/list', HTML_PAGE)
+
+        # Valida que o CSS contem as regras de opacidade e estilo de upload
+        self.assertIn('.modal-container {', THEME_CSS)
+        self.assertIn('.dds-image-upload-zone', THEME_CSS)
+        self.assertIn('.dds-image-preview-grid', THEME_CSS)
+        self.assertIn('.dds-image-thumb-card', THEME_CSS)
+
+    def test_sharepoint_manager_image_storage_and_parent_folder_retrieval(self):
+        from sharepoint_client import SharePointManager
+        test_dir = tempfile.mkdtemp()
+        try:
+            sp = SharePointManager(base_dir=Path(test_dir))
+
+            # 1. Teste de salvamento, listagem e delecao de imagem local da DDS
+            fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+            res = sp.save_dds_image("TEST-100", "evidencia_tela.png", fake_png)
+            self.assertTrue(res.get("success"))
+            self.assertIn("evidencia_tela.png", res.get("filename"))
+
+            imgs = sp.list_dds_images("TEST-100")
+            self.assertEqual(len(imgs), 1)
+            self.assertEqual(imgs[0]["name"], "evidencia_tela.png")
+            self.assertTrue(imgs[0]["url"].startswith("data:image/png;base64,"))
+            self.assertTrue(imgs[0]["is_local"])
+
+            # 2. Exclusao da imagem
+            del_ok = sp.delete_dds_image("TEST-100", imgs[0]["id"])
+            self.assertTrue(del_ok)
+            imgs_after = sp.list_dds_images("TEST-100")
+            self.assertEqual(len(imgs_after), 0)
+
+            # 3. Teste de inclusao opcional de checklist
+            fill_payload = {
+                "role": "desenvolvimento",
+                "autor_nome": "Dev Teste",
+                "incluir_checklist": False,
+                "checklist": [],
+            }
+            sp.save_filled_dds("TEST-100", fill_payload)
+            loaded = sp.load_filled_dds("TEST-100")
+            self.assertIsNotNone(loaded)
+            self.assertFalse(loaded.get("incluir_checklist"))
+            self.assertEqual(loaded.get("checklist"), [])
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
+
+    def test_shift_profile_custom_8h_schedule_inference(self):
+        """Valida que perfis customizados e de 8 horas inferem corretamente retorno 13:00 e saida 17:30."""
+        from config import ShiftProfile, make_custom_profile, get_default_profiles
+
+        prof = make_custom_profile(
+            name="custom",
+            target_hours=8.0,
+            entry_hm="07:44",
+            lunch_start_hm="12:00",
+            lunch_end_hm="13:00",
+            exit_hm="17:30",
+        )
+        self.assertTrue(prof.is_full_day())
+        self.assertEqual(prof.get_lunch_start_hm(), "12:00")
+        self.assertEqual(prof.get_lunch_end_hm(), "13:00")
+        self.assertEqual(prof.get_planned_exit_hm(), "17:30")
+
+        # Testa from_dict com calculadora preenchida para 13:00 e 17:30
+        data = {
+            "name": "custom",
+            "target_hours": 8.0,
+            "entry_window": {"start": "07:15", "end": "08:30"},
+            "lunch_start_window": {"start": "11:30", "end": "12:30"},
+            "lunch_end_window": {"start": "13:20", "end": "13:40"},  # Janela antiga herdada
+            "exit_window": {"start": "15:05", "end": "16:30"},        # Janela antiga herdada
+            "calculator": {
+                "entry_hm": "07:44",
+                "ls_hm": "12:00",
+                "le_hm": "13:00",
+                "exit_hm": "17:30",
+            }
+        }
+        prof2 = ShiftProfile.from_dict(data)
+        self.assertEqual(prof2.get_lunch_end_hm(), "13:00")
+        self.assertEqual(prof2.get_planned_exit_hm(), "17:30")
+        # Janela de retorno de almoco deve ter sido ajustada para permitir retorno as 13:00
+        self.assertLessEqual(prof2.lunch_end_window.start_time, time(13, 0))
+
+        # Testa defaults
+        defs = get_default_profiles()
+        custom_def = defs["custom"]
+        self.assertTrue(custom_def.is_full_day())
+        self.assertEqual(custom_def.get_lunch_end_hm(), "13:00")
+        self.assertEqual(custom_def.get_planned_exit_hm(), "17:30")
+
+    def test_worklog_schedule_inference_custom_and_8h(self):
+        """Valida que apontamentos de 8 horas nao caem no fallback de 13:30 / 18:56."""
+        from storage import StateManager
+        import tempfile
+        import shutil
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            mgr = StateManager(base_dir=temp_dir)
+            # Simula worklog do Daniel Cassaro: 07:44 com 8h46m (31560s)
+            wl_8h = {
+                "id": "12345",
+                "started": "2026-10-28T07:44:00.000+0000",
+                "time_spent_seconds": 31560,  # 8h 46m
+            }
+            sch = mgr.get_or_infer_worklog_schedule(wl_8h, default_lunch_start="12:00", default_lunch_end="13:30")
+            self.assertEqual(sch["start_hm"], "07:44")
+            self.assertEqual(sch["lunch_start_hm"], "12:00")
+            self.assertEqual(sch["lunch_end_hm"], "13:00")  # Nao pode ser 13:30!
+            self.assertEqual(sch["end_hm"], "17:30")        # 13:00 + 4h30m = 17:30
+
+            # Testa persistencia explicita por data (day:YYYY-MM-DD)
+            mgr.save_day_shift_schedule("2026-10-29", {
+                "start_hm": "07:40",
+                "lunch_start_hm": "12:00",
+                "lunch_end_hm": "13:00",
+                "end_hm": "17:30",
+            })
+            wl_saved_day = {
+                "id": "99999",
+                "started": "2026-10-29T07:40:00.000+0000",
+                "time_spent_seconds": 31200,
+            }
+            sch_saved = mgr.get_or_infer_worklog_schedule(wl_saved_day)
+            self.assertEqual(sch_saved["start_hm"], "07:40")
+            self.assertEqual(sch_saved["lunch_end_hm"], "13:00")
+            self.assertEqual(sch_saved["end_hm"], "17:30")
+            self.assertEqual(sch_saved["is_saved"], "true")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_engine_unlock_during_paused_lunch_resumes_at_13_for_custom(self):
+        """Valida que o desbloqueio as 13:00 retoma o expediente mesmo se a janela comecasse mais tarde."""
+        from engine import BotEngine
+        from config import BotConfig, ShiftProfile, TimeWindow
+        from storage import StateManager, DailyState, TimeInterval
+        import tempfile
+        import shutil
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            cfg = BotConfig()
+            # Perfil customizado do usuario
+            cfg.profiles["custom"] = ShiftProfile(
+                name="custom",
+                target_hours=8.0,
+                entry_window=TimeWindow("07:15", "08:30"),
+                lunch_start_window=TimeWindow("11:30", "12:30"),
+                lunch_end_window=TimeWindow("12:50", "13:20"),
+                exit_window=TimeWindow("17:00", "18:30"),
+                calculator={"entry_hm": "07:44", "ls_hm": "12:00", "le_hm": "13:00", "exit_hm": "17:30"}
+            )
+            cfg.active_profile = "custom"
+            mgr = StateManager(base_dir=temp_dir)
+
+            today_str = date.today().isoformat()
+            state = DailyState(date_str=today_str, status="PAUSED_LUNCH", target_issue="ATIVDIV-32")
+            state.intervals.append(TimeInterval(
+                start=f"{today_str}T07:44:00",
+                end=f"{today_str}T12:00:00",
+                issue_key="ATIVDIV-32"
+            ))
+            mgr.save_state(state)
+
+            engine = BotEngine(config=cfg, state_manager=mgr)
+            # Desbloqueio as 13:00 (60 minutos de almoco)
+            now_13 = datetime.combine(date.today(), time(13, 0, 0))
+            new_state = engine.handle_unlock(now=now_13)
+
+            self.assertEqual(new_state.status, "RUNNING")
+            self.assertEqual(new_state.last_event, "RESUMED_LUNCH_UNLOCK")
+            self.assertEqual(len(new_state.intervals), 2)
+            self.assertEqual(new_state.intervals[-1].start, now_13.isoformat())
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

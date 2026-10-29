@@ -742,16 +742,29 @@ def cmd_log_now(args: Optional[argparse.Namespace] = None, no_comment: bool = Fa
     state_mgr = StateManager()
     client = JiraClient(config.jira, state_mgr)
 
-    engine = BotEngine(
-        config=config,
-        state_manager=state_mgr,
-        on_worklog_trigger=lambda issue, sec, start_iso, comment=None: client.submit_worklog(
+    def _cli_worklog_trigger(issue: str, sec: int, start_iso: str, comment: Optional[str] = None) -> bool:
+        res = client.submit_worklog(
             issue,
             sec,
             start_iso,
             comment="" if comment == "__EMPTY__" else comment,
             no_comment=(comment == "__EMPTY__"),
-        ).get("status") == "success"
+        )
+        ok = res.get("status") == "success"
+        wid = str(res.get("worklog_id") or "")
+        if ok and wid:
+            if wid not in engine.state.jira_worklog_ids:
+                engine.state.jira_worklog_ids.append(wid)
+            shift_times = engine.state.get_shift_times_summary()
+            if shift_times.get("start_hm"):
+                state_mgr.save_worklog_schedule(wid, shift_times)
+                state_mgr.save_day_shift_schedule(engine.state.date_str, shift_times)
+        return ok
+
+    engine = BotEngine(
+        config=config,
+        state_manager=state_mgr,
+        on_worklog_trigger=_cli_worklog_trigger,
     )
 
     issue = getattr(args, "issue", None) or config.jira.default_issue
@@ -822,6 +835,17 @@ def cmd_test_popup(args: Optional[argparse.Namespace] = None) -> None:
     print("Janela de revisao finalizada.")
 
 
+def cmd_mini(args: Optional[argparse.Namespace] = None) -> None:
+    """Abre a mini janela flutuante Always-on-Top do JiraBot."""
+    from mini_window import launch_mini_window
+    detached = getattr(args, "detached", False) if args else False
+    if not detached:
+        print("\nIniciando mini janela flutuante Always-on-Top...")
+    launch_mini_window(detached=detached)
+    if not detached:
+        print("Mini janela finalizada.")
+
+
 def cmd_web(args: Optional[argparse.Namespace] = None) -> None:
     """Inicia o servidor do Painel Web Interativo do JiraBot e abre no navegador."""
     from web_panel import run_web_server
@@ -886,6 +910,7 @@ def interactive_menu() -> None:
         print(f"  Ticket Ativo  : {target_issue}")
         print("-" * 60)
         print(" [W] Abrir Painel Web Interativo no Navegador (Interface Visual)")
+        print(" [J] Abrir Mini Janela Flutuante (Always-on-Top) [Atalho: Ctrl+Alt+J ou Ctrl+Shift+J]")
         print(" [1] Iniciar Bot em Background (com Icone na Bandeja)")
         print(" [2] Parar Bot em Background")
         print(" [X] Reiniciar Bot em Background (restart)")
@@ -912,6 +937,8 @@ def interactive_menu() -> None:
 
         if choice == "W":
             cmd_web()
+        elif choice == "J":
+            cmd_mini()
         elif choice == "1":
             cmd_start()
         elif choice == "2":
@@ -1092,6 +1119,12 @@ def main() -> None:
     subparsers.add_parser("test-popup", help="Dispara a janela grafica de revisao pre-saida para teste")
     subparsers.add_parser("popup", help="Dispara a janela grafica de revisao pre-saida")
 
+    # mini / widget
+    mini_p = subparsers.add_parser("mini", help="Abre a mini janela flutuante Always-on-Top do JiraBot")
+    mini_p.add_argument("--detached", "-d", action="store_true", help="Executa em processo desacoplado em segundo plano")
+    widget_p = subparsers.add_parser("widget", help="Abre a mini janela flutuante Always-on-Top do JiraBot")
+    widget_p.add_argument("--detached", "-d", action="store_true", help="Executa em processo desacoplado em segundo plano")
+
     args = parser.parse_args()
 
     if args.command == "setup":
@@ -1112,6 +1145,8 @@ def main() -> None:
         cmd_edit_worklogs(args)
     elif args.command in ["test-popup", "popup"]:
         cmd_test_popup(args)
+    elif args.command in ["mini", "widget"]:
+        cmd_mini(args)
     elif args.command == "adjust-start":
         cmd_adjust_start(args.time)
     elif args.command == "switch":

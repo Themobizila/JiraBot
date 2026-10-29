@@ -306,9 +306,9 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
     if fetch_jira:
         try:
             client = JiraClient(config.jira, state_mgr)
-            is_8h = config.active_profile == "8h"
-            def_ls = "12:00"
-            def_le = "13:00" if is_8h else "13:30"
+            prof_act = config.get_active_profile()
+            def_ls = prof_act.get_lunch_start_hm()
+            def_le = prof_act.get_lunch_end_hm()
             wls = client.get_user_worklogs_by_date_range(monday.isoformat(), sunday.isoformat())
             for w in wls:
                 d_key = w.get("date", "")
@@ -326,12 +326,12 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
     total_week_target = 0
     weekdays_logged_count = 0
 
-    is_8h_prof = config.active_profile == "8h"
+    prof_act = config.get_active_profile()
     default_schedule = {
-        "start_hm": "07:42" if is_8h_prof else "07:45",
-        "lunch_start_hm": "12:00",
-        "lunch_end_hm": "13:00" if is_8h_prof else "13:30",
-        "end_hm": "17:42" if is_8h_prof else "15:15",
+        "start_hm": prof_act.get_entry_hm(),
+        "lunch_start_hm": prof_act.get_lunch_start_hm(),
+        "lunch_end_hm": prof_act.get_lunch_end_hm(),
+        "end_hm": prof_act.get_planned_exit_hm(),
     }
 
     for i in range(7):
@@ -462,6 +462,333 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
         "balance_formatted": f"{diff_sign}{format_duration(abs(diff_sec))}",
         "weekdays_logged_count": weekdays_logged_count,
         "days": days_rows,
+    }
+
+
+def resolve_fallback_description(issue_key: str, custom_comment: str = "", ticket_summary: str = "") -> str:
+    """
+    Resolve a descricao da atividade aplicando hierarquia de fallback em cascata
+    para garantir que nenhum apontamento fique sem texto ou quebre a formatacao da Daily.
+    """
+    clean_c = (custom_comment or "").strip()
+    if clean_c and clean_c.lower() not in (
+        "sem descrição", "sem descricao", "sem descrição definida",
+        "(padrao: [outros registros])", "(padrão: [outros registros])",
+        "outros registros", "-", "padrao", "padrão", "atividade padrão", "atividade padrao"
+    ):
+        return clean_c
+
+    clean_s = (ticket_summary or "").strip()
+    if clean_s and clean_s != "Demanda Principal" and clean_s != "-":
+        return clean_s
+
+    clean_k = clean_jira_issue_key(issue_key)
+    if clean_k and clean_k != "SEM_TICKET":
+        return f"Atividades e desenvolvimento na demanda {clean_k}"
+    return "Atividades gerais de desenvolvimento e rotina"
+
+
+def build_daily_summary_payload(period: str = "today") -> Dict[str, Any]:
+    """
+    Gera o resumo estruturado e textual das atividades para Daily Scrum / Microsoft Teams.
+    period: 'today' (padrao), 'yesterday' (dia util anterior ou dia anterior) ou 'week' (semana corrente).
+    Aplica fallback em cascata para evitar textos vazios quando o usuario nao digitar descricao.
+    """
+    state_mgr = StateManager()
+    config = BotConfig.load()
+    profile = config.get_current_profile()
+    today_iso = date.today().isoformat()
+    period_lower = (period or "today").strip().lower()
+
+    items: List[Dict[str, Any]] = []
+    total_seconds = 0
+    period_label = ""
+    date_display = ""
+
+    if period_lower == "yesterday":
+        history = state_mgr.load_history()
+        prev_summaries = [h for h in history if h.date_str < today_iso]
+        if prev_summaries:
+            target_day = prev_summaries[-1]
+            date_display = target_day.date_str
+            total_seconds = target_day.total_seconds
+            period_label = f"Dia Anterior ({date_display[8:10]}/{date_display[5:7]}/{date_display[:4]})"
+
+            for k, sec in target_day.by_issue.items():
+                if sec <= 0:
+                    continue
+                clean_k = clean_jira_issue_key(k)
+                cached = JiraClient._ticket_details_cache.get(clean_k)
+                summary_jira = cached[1].get("summary", "") if cached else ""
+                desc = resolve_fallback_description(clean_k, "", summary_jira)
+                items.append({
+                    "issue_key": clean_k,
+                    "seconds": sec,
+                    "formatted": format_hm_from_seconds(sec),
+                    "comment": "",
+                    "summary": summary_jira,
+                    "display_description": desc,
+                })
+        else:
+            period_label = "Dia Anterior"
+            date_display = (date.today() - timedelta(days=1)).isoformat()
+
+    elif period_lower == "week":
+        ref_date = date.today()
+        monday = ref_date - timedelta(days=ref_date.weekday())
+        period_label = f"Semana ({monday.strftime('%d/%m')} a {ref_date.strftime('%d/%m/%Y')})"
+        date_display = f"{monday.isoformat()} a {today_iso}"
+
+        history = state_mgr.load_history()
+        week_days = {(monday + timedelta(days=i)).isoformat() for i in range(ref_date.weekday() + 1)}
+
+        by_issue_week: Dict[str, int] = {}
+        for h in history:
+            if h.date_str in week_days and h.date_str != today_iso:
+                total_seconds += h.total_seconds
+                for ik, isec in h.by_issue.items():
+                    clean_k = clean_jira_issue_key(ik)
+                    by_issue_week[clean_k] = by_issue_week.get(clean_k, 0) + isec
+
+        cur_state = state_mgr.load_state()
+        if cur_state.date_str in week_days:
+            total_seconds += cur_state.get_total_seconds()
+            for ik, isec in cur_state.get_seconds_by_issue(default_issue=config.jira.default_issue).items():
+                clean_k = clean_jira_issue_key(ik)
+                by_issue_week[clean_k] = by_issue_week.get(clean_k, 0) + isec
+
+        for k, sec in sorted(by_issue_week.items(), key=lambda x: x[1], reverse=True):
+            if sec <= 0:
+                continue
+            cached = JiraClient._ticket_details_cache.get(k)
+            summary_jira = cached[1].get("summary", "") if cached else ""
+            desc = resolve_fallback_description(k, "", summary_jira)
+            items.append({
+                "issue_key": k,
+                "seconds": sec,
+                "formatted": format_hm_from_seconds(sec),
+                "comment": "",
+                "summary": summary_jira,
+                "display_description": desc,
+            })
+
+    else:
+        # Padrao: today
+        cur_state = state_mgr.load_state()
+        date_display = cur_state.date_str
+        total_seconds = cur_state.get_total_seconds()
+        period_label = f"Hoje ({date_display[8:10]}/{date_display[5:7]}/{date_display[:4]})"
+
+        by_issue = cur_state.get_seconds_by_issue(default_issue=config.jira.default_issue)
+        all_issues = cur_state.get_all_issues_worked(default_issue=config.jira.default_issue)
+        for k in by_issue.keys():
+            if k not in all_issues and k != "SEM_TICKET":
+                all_issues.append(k)
+
+        for iss in all_issues:
+            sec = by_issue.get(iss, 0)
+            if sec <= 0 and iss != cur_state.target_issue:
+                continue
+            clean_k = clean_jira_issue_key(iss)
+            custom_c = cur_state.get_issue_comment(clean_k)
+            cached = JiraClient._ticket_details_cache.get(clean_k)
+            summary_jira = cached[1].get("summary", "") if cached else ""
+            desc = resolve_fallback_description(clean_k, custom_c, summary_jira)
+            items.append({
+                "issue_key": clean_k,
+                "seconds": sec,
+                "formatted": format_hm_from_seconds(sec),
+                "comment": custom_c,
+                "summary": summary_jira,
+                "display_description": desc,
+            })
+
+    total_formatted = format_hm_from_seconds(total_seconds)
+    target_sec = int(profile.target_hours * 3600) if period_lower == "today" else 0
+    target_pct = min(100, round((total_seconds / target_sec) * 100, 1)) if target_sec > 0 else 0.0
+    target_status = f"{target_pct}% cumprida"
+
+    lines = [f"*Resumo da Jornada ({period_label}):*"]
+    if items:
+        for it in items:
+            lines.append(f"- {it['issue_key']}: {it['display_description']} ({it['formatted']})")
+    else:
+        lines.append("- Nenhuma atividade registrada no período.")
+
+    if period_lower == "today":
+        lines.append(f"\n*Total:* {total_formatted} (Meta: {profile.target_hours}h - {target_status})")
+    else:
+        lines.append(f"\n*Total acumulado:* {total_formatted}")
+
+    raw_text = "\n".join(lines)
+
+    return {
+        "success": True,
+        "period": period_lower,
+        "period_label": period_label,
+        "date_display": date_display,
+        "total_seconds": total_seconds,
+        "total_formatted": total_formatted,
+        "target_hours": profile.target_hours,
+        "target_status": target_status,
+        "items": items,
+        "raw_text": raw_text,
+    }
+
+
+def audit_today_worklogs_payload() -> Dict[str, Any]:
+    """
+    Audita o estado atual do expediente de hoje antes do lancamento no Jira.
+    Verifica saldo de horas (deficit/excesso vs meta do perfil), chamados sob SEM_TICKET,
+    status dos chamados no Jira (alertando se fechados/concluidos) e qualidade das descricoes.
+    """
+    state_mgr = StateManager()
+    cur_state = state_mgr.load_state()
+    config = BotConfig.load()
+    profile = config.get_current_profile()
+
+    total_seconds = cur_state.get_total_seconds()
+    target_hours = profile.target_hours
+    target_seconds = int(target_hours * 3600)
+    diff_seconds = total_seconds - target_seconds  # > 0 excesso, < 0 deficit
+
+    warnings: List[Dict[str, str]] = []
+    has_critical = False
+
+    # 1. Saldo de horas vs meta do perfil
+    if total_seconds <= 0:
+        balance_status = "empty"
+        warnings.append({
+            "level": "warning",
+            "title": "Nenhum tempo registrado",
+            "message": "Nenhum tempo trabalhado foi registrado para o expediente de hoje até o momento."
+        })
+    elif diff_seconds < -900:  # Deficit superior a 15 minutos
+        balance_status = "deficit"
+        warnings.append({
+            "level": "warning",
+            "title": "Carga horária abaixo da meta",
+            "message": f"Você registrou {format_hm_from_seconds(total_seconds)} de uma meta de {target_hours}h. Déficit de {format_hm_from_seconds(abs(diff_seconds))}."
+        })
+    elif diff_seconds > 2700:  # Excesso superior a 45 minutos
+        balance_status = "excess"
+        warnings.append({
+            "level": "warning",
+            "title": "Carga horária acima da meta",
+            "message": f"Você registrou {format_hm_from_seconds(total_seconds)} de uma meta de {target_hours}h. Excesso de {format_hm_from_seconds(diff_seconds)}. Verifique se o expediente não foi encerrado com atraso."
+        })
+    else:
+        balance_status = "ok"
+
+    # 2. Chamados trabalhados
+    by_issue = cur_state.get_seconds_by_issue(default_issue=config.jira.default_issue)
+    all_issues = cur_state.get_all_issues_worked(default_issue=config.jira.default_issue)
+    for k in by_issue.keys():
+        if k not in all_issues and k != "SEM_TICKET":
+            all_issues.append(k)
+
+    # Verifica tempo acumulado sob SEM_TICKET
+    sem_ticket_sec = by_issue.get("SEM_TICKET", 0)
+    if sem_ticket_sec > 0:
+        warnings.append({
+            "level": "danger",
+            "title": "Horas em 'SEM_TICKET'",
+            "message": f"Existem {format_hm_from_seconds(sem_ticket_sec)} acumulados sob 'SEM_TICKET'. Apontamentos sob SEM_TICKET não podem ser enviados ao Jira até serem transferidos para um chamado válido."
+        })
+        has_critical = True
+
+    tickets_data: List[Dict[str, Any]] = []
+    jira_client_instance = None
+
+    for iss in all_issues:
+        sec = by_issue.get(iss, 0)
+        if sec <= 0 and iss != cur_state.target_issue:
+            continue
+        clean_k = clean_jira_issue_key(iss)
+        if not clean_k or clean_k == "SEM_TICKET":
+            continue
+
+        custom_c = cur_state.get_issue_comment(clean_k)
+
+        # Consulta dados do Jira (cache ou cliente seguro)
+        status_name = ""
+        status_category = ""
+        summary_jira = ""
+
+        cached = JiraClient._ticket_details_cache.get(clean_k)
+        if cached:
+            details = cached[1]
+            status_name = details.get("status", "")
+            status_category = (details.get("status_category") or "").lower()
+            summary_jira = details.get("summary", "")
+        else:
+            if bool(config.jira.get_clean_email() and config.jira.get_clean_token()):
+                try:
+                    if jira_client_instance is None:
+                        jira_client_instance = JiraClient(config.jira, state_mgr)
+                    details = jira_client_instance.get_ticket_details(clean_k)
+                    if isinstance(details, dict) and "error" not in details:
+                        status_name = details.get("status", "")
+                        status_category = (details.get("status_category") or "").lower()
+                        summary_jira = details.get("summary", "")
+                except Exception:
+                    pass
+
+        ticket_warnings: List[str] = []
+        is_closed = False
+
+        # Avaliacao de status encerrado / concluido
+        st_lower = status_name.lower()
+        closed_keywords = ["conclu", "fechad", "resolv", "cancel", "finaliz", "done", "closed", "resolved"]
+        if status_category == "done" or any(kw in st_lower for kw in closed_keywords):
+            is_closed = True
+            msg = f"O chamado {clean_k} está com status '{status_name}' no Jira (concluído/fechado). Confirme se os apontamentos devem ser lançados nesta demanda encerrada."
+            ticket_warnings.append(msg)
+            warnings.append({
+                "level": "danger",
+                "title": f"Chamado encerrado: {clean_k}",
+                "message": msg
+            })
+            has_critical = True
+
+        # Avaliacao de descricao
+        desc = resolve_fallback_description(clean_k, custom_c, summary_jira)
+        if not custom_c.strip():
+            if summary_jira:
+                ticket_warnings.append("Sem descrição personalizada. Será utilizado o resumo do chamado no Jira.")
+            else:
+                ticket_warnings.append("Sem descrição personalizada nem resumo no Jira. Será aplicada descrição genérica de rotina.")
+
+        tickets_data.append({
+            "issue_key": clean_k,
+            "seconds": sec,
+            "formatted": format_hm_from_seconds(sec),
+            "comment": custom_c,
+            "summary": summary_jira,
+            "jira_status": status_name or "Desconhecido",
+            "is_closed": is_closed,
+            "display_description": desc,
+            "warnings": ticket_warnings,
+        })
+
+    return {
+        "success": True,
+        "date_str": cur_state.date_str,
+        "can_log": total_seconds > 0,
+        "has_warnings": len(warnings) > 0,
+        "has_critical": has_critical,
+        "balance": {
+            "total_seconds": total_seconds,
+            "total_formatted": format_hm_from_seconds(total_seconds),
+            "target_hours": target_hours,
+            "target_seconds": target_seconds,
+            "diff_seconds": diff_seconds,
+            "diff_formatted": format_hm_from_seconds(abs(diff_seconds)),
+            "status": balance_status,
+            "percentage": min(200, round((total_seconds / target_seconds) * 100, 1)) if target_seconds > 0 else 0,
+        },
+        "tickets": tickets_data,
+        "warnings": warnings,
     }
 
 
@@ -748,6 +1075,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <span id="top-status-badge" class="badge badge-idle">CARREGANDO</span>
     </div>
     <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="serviceAction('open_mini_widget')" title="Abrir Mini Janela Flutuante Always-on-Top no Windows (Atalho: Ctrl + Alt + J ou Ctrl + Shift + J)">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        <span>Mini Janela</span>
+      </button>
       <button class="btn btn-outline btn-sm fx-btn" id="fx-toggle-btn" onclick="toggleFx()" aria-pressed="false" title="Pausar animações e efeitos visuais">
         <svg class="fx-ico-pause" viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="8" y1="5" x2="8" y2="19"/><line x1="16" y1="5" x2="16" y2="19"/></svg>
         <svg class="fx-ico-play" viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="7 4 20 12 7 20 7 4"/></svg>
@@ -871,6 +1202,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <button class="btn btn-outline" onclick="serviceAction('simulate_unlock')">Simular Desbloqueio (Unlock)</button>
           <button class="btn btn-outline" onclick="serviceAction('simulate_lock')">Simular Bloqueio (Lock)</button>
           <button class="btn btn-outline" onclick="serviceAction('test_popup')">Abrir Janela de Revisão Pré-Saída</button>
+          <button class="btn btn-outline" onclick="serviceAction('open_mini_widget')" title="Abrir Mini Janela Flutuante Always-on-Top no Windows (Atalho: Ctrl + Alt + J ou Ctrl + Shift + J)">Mini Janela Flutuante</button>
+          <button class="btn btn-outline" onclick="openDailySummaryModal()" title="Gerar e copiar resumo formatado para a Daily Scrum ou Teams">Resumo Daily / Teams</button>
+          <button class="btn btn-outline" onclick="openAuditModal()" title="Auditar saldo de horas, descrições e status dos chamados antes do lançamento">Auditor Pré-Lançamento</button>
           <button class="btn btn-success" onclick="openLogNowModal()">Lançar Horas de Hoje no Jira Agora</button>
         </div>
       </div>
@@ -907,6 +1241,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
               Preencha os horários para visualizar o cálculo líquido de manhã, almoço e tarde.
             </div>
             <div class="btn-group">
+              <button type="button" class="btn btn-outline btn-sm" onclick="openSnapshotsModal()" title="Ver e restaurar pontos de segurança de hoje">Histórico de Recuperação (Snapshots)</button>
               <button class="btn btn-outline btn-sm" onclick="fillTodayDefaultSchedule()">Preencher Padrão do Perfil</button>
               <button class="btn btn-primary btn-sm" onclick="saveTodaySchedule()">Aplicar Horários ao Dia de Hoje</button>
             </div>
@@ -963,7 +1298,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <button class="btn btn-primary" onclick="submitTransferToday()">Transferir Horas de Hoje</button>
 
           <div style="margin-top: 18px; border-top: 1px solid var(--border-color); padding-top: 12px;">
-            <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--text-muted);">RESUMO POR TICKET TRABALHADO HOJE</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <div style="font-size: 12px; font-weight: 700; color: var(--text-muted);">RESUMO POR TICKET TRABALHADO HOJE</div>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:2px 8px;" onclick="openDailySummaryModal('today')" title="Copiar resumo formatado para a Daily Scrum ou Teams">Copiar para Daily</button>
+            </div>
             <div id="today-tickets-list"></div>
           </div>
         </div>
@@ -1289,7 +1627,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <input type="text" id="wl-search-text" class="form-control" placeholder="Filtrar resultados exibidos..." oninput="renderWorklogsTable()">
           </div>
           <div class="btn-group">
-            <button class="btn btn-primary" onclick="loadJiraWorklogs()">Consultar no Jira</button>
+            <button class="btn btn-primary" onclick="loadJiraWorklogs(true)">Consultar no Jira</button>
             <button class="btn btn-outline" onclick="document.getElementById('wl-filter-issue').value=''; loadJiraWorklogs();">Limpar Filtro</button>
           </div>
         </div>
@@ -2172,6 +2510,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
         Isso encerrará os intervalos em aberto de hoje e enviará imediatamente os apontamentos acumulados de cada ticket para o Jira.
       </p>
+      <!-- Auditoria Previa no Modal de Lancamento -->
+      <div id="lognow-audit-preview" style="background:var(--bg-subtle); border-radius:8px; padding:12px; margin-bottom:14px; border:1px solid var(--border-color, rgba(148,163,184,0.2)); font-size:12.5px;">
+        <div style="font-size:12px; color:var(--text-muted); text-align:center;">Carregando auditoria prévia do expediente...</div>
+      </div>
       <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
         <input type="checkbox" id="lognow-no-comment">
         <label for="lognow-no-comment" style="margin:0; cursor:pointer;">Enviar apontamentos SEM nenhuma descrição</label>
@@ -2179,7 +2521,33 @@ HTML_PAGE = r"""<!DOCTYPE html>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeLogNowModal()">Cancelar</button>
-      <button class="btn btn-success" onclick="confirmLogNow()">Confirmar e Lançar no Jira</button>
+      <button class="btn btn-success" id="btn-confirm-lognow" onclick="confirmLogNow()">Confirmar e Lançar no Jira</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: AUDITOR PRE-LANCAMENTO DE HORAS ==================== -->
+<div class="modal-backdrop" id="modal-audit" style="display:none; z-index:10003;" onclick="closeAuditModal()">
+  <div class="modal-container" style="max-width:780px; width:94vw;" onclick="event.stopPropagation();">
+    <div class="modal-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        <div>
+          <span class="modal-title" style="font-size:16px; font-weight:700;">Auditor Pré-Lançamento de Horas</span>
+          <div style="font-size:11.5px; color:var(--text-muted);">Validação de conformidade de carga horária, integridade dos chamados no Jira e descrições</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="closeAuditModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px; max-height:75vh; overflow-y:auto;" id="modal-audit-body">
+      <div style="text-align:center; padding:30px; color:var(--text-muted);"><div class="spinner" style="margin:0 auto 8px auto;"></div>Executando auditoria do dia...</div>
+    </div>
+    <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+      <button type="button" class="btn btn-outline btn-sm" onclick="refreshAuditData()">Recarregar Auditoria</button>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn btn-outline" onclick="closeAuditModal()">Fechar</button>
+        <button type="button" class="btn btn-success" id="btn-audit-lognow" onclick="closeAuditModal(); openLogNowModal();">Prosseguir para Lançamento</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2240,32 +2608,50 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <div class="modal-body" style="max-height: calc(85vh - 170px); overflow-y: auto; padding: 18px 20px;">
       <input type="file" id="dds-manual-docx-input" accept=".docx" style="display:none;" onchange="handleManualDocxUpload(event)">
 
-      <!-- Barra de Acoes Rapidas da DDS (100% independente de TI, drag & drop e deteccao automatica) -->
+      <!-- Barra de Acoes Rapidas da DDS Dividida em 2 Particoes (Oficial vs Importacao/Arquivos) -->
       <div class="dds-offline-toolbar" id="dds-offline-toolbar">
-        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; flex:1;">
-          <span style="font-size:12px; font-weight:700; color:var(--text-main);">DDS Completa:</span>
-          <button type="button" class="btn btn-outline btn-sm" onclick="detectDdsFromDownloads()" title="Verificar se o arquivo .docx da DDS foi baixado na pasta Downloads">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Detectar em Downloads
-          </button>
-          <button type="button" class="btn btn-outline btn-sm" onclick="triggerManualDocxUpload()" title="Carregar arquivo .docx salvo no seu computador">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="12" y2="12"/><line x1="15" y1="15" x2="12" y2="12"/></svg>
-            Importar .docx Local
-          </button>
-          <button type="button" class="btn btn-outline btn-sm" onclick="openPasteDdsModal()" title="Colar texto copiado do Word Online da DDS">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            Colar Texto da DDS
-          </button>
-          <button type="button" class="btn btn-primary btn-sm" onclick="openFillDdsModal()" style="display:inline-flex; align-items:center; gap:6px; background:#8b5cf6; border-color:#7c3aed;" title="Preencher secao de Desenvolvimento e Checklist de Revisao de Codigo">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            Preencher DDS
-          </button>
+        <!-- Particao 1: DDS Oficial & Edicao -->
+        <div class="dds-partition-card" id="dds-partition-official">
+          <div class="dds-partition-header">
+            <span class="dds-partition-title">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              DDS Oficial & Edição
+            </span>
+          </div>
+          <div class="dds-partition-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="openFillDdsModal()" style="display:inline-flex; align-items:center; gap:6px; background:#8b5cf6; border-color:#7c3aed;" title="Preencher secao de Desenvolvimento e Checklist de Revisao de Codigo">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Preencher DDS
+            </button>
+            <a id="dds-top-sharepoint-btn" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-warning btn-sm" style="display:none; align-items:center; gap:6px; background:#f59e0b; border-color:#d97706; color:#ffffff;" title="Abrir DDS no Word Online usando o navegador corporativo">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              Abrir no SharePoint (Navegador)
+            </a>
+          </div>
         </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <a id="dds-top-sharepoint-btn" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="display:none; align-items:center; gap:6px;" title="Abrir DDS no Word Online usando o navegador corporativo">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            Abrir no SharePoint (Navegador)
-          </a>
+
+        <!-- Particao 2: Importacao & Arquivos Locais -->
+        <div class="dds-partition-card" id="dds-partition-import">
+          <div class="dds-partition-header">
+            <span class="dds-partition-title">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Importação & Arquivos Locais
+            </span>
+          </div>
+          <div class="dds-partition-actions">
+            <button type="button" class="btn btn-outline btn-sm" onclick="detectDdsFromDownloads()" title="Verificar se o arquivo .docx da DDS foi baixado na pasta Downloads">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Detectar em Downloads
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="triggerManualDocxUpload()" title="Carregar arquivo .docx salvo no seu computador">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="12" y2="12"/><line x1="15" y1="15" x2="12" y2="12"/></svg>
+              Importar .docx Local
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="openPasteDdsModal()" title="Colar texto copiado do Word Online da DDS">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Colar Texto da DDS
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2405,8 +2791,15 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </div>
 
           <div style="padding: 16px;">
+            <!-- Loading State da DDS e Detalhes do Chamado -->
+            <div id="dds-loading-view" style="display:none; text-align:center; padding:48px 20px; color:var(--text-muted);">
+              <div class="spinner" style="margin:0 auto 12px auto;"></div>
+              <div style="font-size:13.5px; font-weight:600; color:var(--text-main); margin-bottom:4px;">Consultando informações no Jira Cloud...</div>
+              <div style="font-size:11.5px;">Extraindo especificação, histórico de comunicações e documento DDS</div>
+            </div>
+
             <!-- Visao 1: Estruturada (Executiva, limpa de boilerplates) -->
-            <div id="dds-structured-view" class="dds-structured-container" style="display:none;">
+            <div id="dds-structured-view"  class="dds-structured-container" style="display:none;">
               <!-- Meta Grid do Sistema / Modulo -->
               <div class="dds-meta-grid" id="dds-struct-meta-grid">
                 <div class="dds-meta-item">
@@ -2770,100 +3163,136 @@ HTML_PAGE = r"""<!DOCTYPE html>
 </div>
 
 <!-- ==================== MODAL: PREENCHIMENTO ESTRUTURADO DA DDS (OPCAO 1) ==================== -->
-<div class="modal-backdrop" id="modal-fill-dds" style="display:none; z-index:10002;" onclick="closeFillDdsModal()">
-  <div class="modal-container" style="max-width:860px; width:95vw; max-height:90vh; display:flex; flex-direction:column;" onclick="event.stopPropagation();">
-    <div class="modal-header" style="flex-shrink:0;">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#8b5cf6" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        <span class="modal-title">Preenchimento Rápido da DDS: <strong id="fill-dds-ticket-key" style="color:#8b5cf6;">-</strong></span>
+<div class="modal-backdrop" id="modal-fill-dds" style="display:none; z-index:10002; background:rgba(6, 4, 2, 0.88);" onclick="closeFillDdsModal()">
+  <div class="modal-container" style="max-width:920px; width:95vw; max-height:92vh; display:flex; flex-direction:column; background:var(--bg-solid, #0f172a); border:1px solid var(--border-strong, #334155); border-radius:10px; box-shadow:0 25px 60px rgba(0,0,0,0.85);" onclick="event.stopPropagation();">
+    <div class="modal-header" style="flex-shrink:0; background:var(--bg-solid, #0f172a); border-bottom:1px solid var(--border-color); padding:16px 22px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:32px; height:32px; border-radius:8px; background:rgba(139,92,246,0.15); display:flex; align-items:center; justify-content:center;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#8b5cf6" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </div>
+        <div>
+          <span class="modal-title" style="font-size:15px; font-weight:700;">Preenchimento Rápido da DDS: <strong id="fill-dds-ticket-key" style="color:#8b5cf6;">-</strong></span>
+          <div style="font-size:11.5px; color:var(--text-muted);">Edição estruturada oficial de desenvolvimento, testes e evidências</div>
+        </div>
       </div>
       <button type="button" class="modal-close-btn" onclick="closeFillDdsModal()">&times;</button>
     </div>
 
-    <div class="modal-body" style="padding:16px 20px; overflow-y:auto; flex:1;">
+    <div class="modal-body" style="padding:18px 22px; overflow-y:auto; flex:1; background:var(--bg-solid, #0f172a);">
       <!-- Seletor de Papel -->
-      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border-color);">
-        <div style="display:flex; align-items:center; gap:12px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border-color);">
+        <div style="display:flex; align-items:center; gap:14px;">
           <span style="font-size:12px; font-weight:700; color:var(--text-main);">Etapa do Preenchimento:</span>
-          <label style="font-size:12px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; color:var(--text-main);">
-            <input type="radio" name="fill_role_radio" value="desenvolvimento" checked onchange="onFillRoleChange(this.value)">
-            Desenvolvimento & Revisão Técnica
+          <label style="font-size:12.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-main); font-weight:500;">
+            <input type="radio" name="fill_role_radio" value="desenvolvimento" checked onchange="onFillRoleChange(this.value)" style="accent-color:#8b5cf6;">
+            Desenvolvimento &amp; Revisão Técnica
           </label>
-          <label style="font-size:12px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; color:var(--text-main);">
-            <input type="radio" name="fill_role_radio" value="homologacao" onchange="onFillRoleChange(this.value)">
-            Teste de Implementação & Homologação
+          <label style="font-size:12.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-main); font-weight:500;">
+            <input type="radio" name="fill_role_radio" value="homologacao" onchange="onFillRoleChange(this.value)" style="accent-color:#8b5cf6;">
+            Teste de Implementação &amp; Homologação
           </label>
         </div>
-        <div id="fill-saved-notice" style="font-size:11px; color:var(--text-muted);"></div>
+        <div id="fill-saved-notice" style="font-size:11.5px; color:var(--text-muted);"></div>
       </div>
 
       <!-- Bloco 1: Campos do Desenvolvimento -->
       <div id="fill-section-dev" style="display:block;">
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-bottom:14px;">
           <div>
-            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Nome do Desenvolvedor *</label>
-            <input type="text" id="fill-dev-nome" class="form-control" style="font-size:12.5px;" placeholder="ex: João Moura">
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Nome do Desenvolvedor *</label>
+            <input type="text" id="fill-dev-nome" class="form-control" style="font-size:13px; height:38px;" placeholder="ex: João Moura">
           </div>
           <div>
-            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Data de Conclusão *</label>
-            <input type="text" id="fill-dev-data" class="form-control" style="font-size:12.5px;" placeholder="DD/MM/AAAA">
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Data de Conclusão *</label>
+            <input type="text" id="fill-dev-data" class="form-control" style="font-size:13px; height:38px;" placeholder="DD/MM/AAAA">
           </div>
           <div>
-            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Pacote / Cartão / Branch</label>
-            <input type="text" id="fill-dev-pacote" class="form-control" style="font-size:12.5px;" placeholder="ex: CNET-2026.01 / Pacote 45">
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Pacote / Cartão / Branch</label>
+            <input type="text" id="fill-dev-pacote" class="form-control" style="font-size:13px; height:38px;" placeholder="ex: CNET-2026.01 / Pacote 45">
           </div>
-        </div>
-
-        <div style="margin-bottom:12px;">
-          <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Detalhamento da Implementação *</label>
-          <textarea id="fill-dev-detalhes" class="form-control" rows="4" style="font-size:12px; line-height:1.45;" placeholder="Descreva claramente o que foi alterado no código ou banco de dados..."></textarea>
         </div>
 
         <div style="margin-bottom:14px;">
-          <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Recomendações ao Teste de Implementação</label>
-          <textarea id="fill-dev-rec" class="form-control" rows="2" style="font-size:12px; line-height:1.45;" placeholder="Orientações e parâmetros de teste para a equipe de homologação..."></textarea>
+          <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Detalhamento da Implementação *</label>
+          <textarea id="fill-dev-detalhes" class="form-control" rows="5" style="font-size:13px; line-height:1.5; min-height:120px;" placeholder="Descreva claramente o que foi alterado no código ou banco de dados..."></textarea>
         </div>
 
-        <!-- Bloco de Checklist Oficial de Revisao de Codigo -->
-        <div style="background:var(--bg-subtle); border:1px solid var(--border-color); border-radius:6px; padding:12px 14px; margin-bottom:14px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+        <div style="margin-bottom:16px;">
+          <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Recomendações ao Teste de Implementação</label>
+          <textarea id="fill-dev-rec" class="form-control" rows="3" style="font-size:13px; line-height:1.5; min-height:80px;" placeholder="Orientações e parâmetros de teste para a equipe de homologação..."></textarea>
+        </div>
+
+        <!-- Bloco de Imagens e Evidencias da DDS -->
+        <div style="background:var(--bg-subtle, #1e293b); border:1px solid var(--border-color); border-radius:8px; padding:14px 16px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
             <div>
-              <strong style="font-size:12.5px; color:var(--text-main);">Revisão Final de Código (Checklist Oficial)</strong>
-              <div style="font-size:11px; color:var(--text-muted);">Itens obrigatórios para encaminhamento ao teste de implementação</div>
+              <strong style="font-size:13px; color:var(--text-main); display:inline-flex; align-items:center; gap:6px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#8b5cf6" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                Imagens &amp; Evidências da DDS
+              </strong>
+              <div style="font-size:11.5px; color:var(--text-muted);">Anexe capturas de tela ou tecle <strong>Ctrl + V</strong> a qualquer momento no modal para colar prints direto da área de transferência</div>
             </div>
-            <div style="display:flex; gap:6px; flex-wrap:wrap;">
-              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('dev_standard')" style="font-size:11px; padding:3px 8px; color:#22c55e; border-color:#22c55e;">
+            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('fill-image-file-input').click()" style="font-size:11.5px; padding:4px 10px;">
+              Selecionar Arquivo(s)...
+            </button>
+          </div>
+
+          <input type="file" id="fill-image-file-input" multiple accept="image/*" style="display:none;" onchange="handleFillImagesSelected(this.files)">
+
+          <div class="dds-image-upload-zone" id="fill-image-drop-zone" onclick="document.getElementById('fill-image-file-input').click()">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="var(--text-muted)" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <div style="font-size:12px; font-weight:600; color:var(--text-main);">Arraste imagens aqui, selecione arquivos ou use <strong>Ctrl + V</strong></div>
+            <div style="font-size:11px; color:var(--text-muted);">Suporta PNG, JPG, JPEG, GIF e WebP</div>
+          </div>
+
+          <div id="fill-images-preview-grid" class="dds-image-preview-grid" style="display:none;"></div>
+        </div>
+
+        <!-- Bloco de Checklist Oficial de Revisao de Codigo com Toggle Mestre -->
+        <div style="background:var(--bg-subtle, #1e293b); border:1px solid var(--border-color); border-radius:8px; padding:14px 16px; margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+            <div>
+              <label style="display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:700; color:var(--text-main); user-select:none;">
+                <input type="checkbox" id="fill-include-checklist" checked onchange="toggleFillChecklist(this.checked)" style="width:17px; height:17px; accent-color:#8b5cf6; cursor:pointer;">
+                Preencher Revisão Final de Código (Checklist Oficial)
+              </label>
+              <div style="font-size:11.5px; color:var(--text-muted); margin-left:25px;">Marque para incluir a verificação de código ou desmarque para dispensar nesta entrega</div>
+            </div>
+            <div id="fill-checklist-actions" style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('dev_standard')" style="font-size:11px; padding:4px 9px; color:#22c55e; border-color:#22c55e;">
                 Marcar Padrão de Envio (1 Clique)
               </button>
-              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('all_sim')" style="font-size:11px; padding:3px 8px;">
+              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('all_sim')" style="font-size:11px; padding:4px 9px;">
                 Todos Sim
               </button>
-              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('all_na')" style="font-size:11px; padding:3px 8px;">
+              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('all_na')" style="font-size:11px; padding:4px 9px;">
                 Todos N/A
               </button>
             </div>
           </div>
 
-          <div id="fill-checklist-container" style="display:flex; flex-direction:column; gap:8px; max-height:260px; overflow-y:auto; padding-right:4px;">
-            <!-- Carregado dinamicamente via JS -->
+          <div id="fill-checklist-inner">
+            <div id="fill-checklist-container" style="display:flex; flex-direction:column; gap:8px; max-height:260px; overflow-y:auto; padding-right:4px;">
+              <!-- Carregado dinamicamente via JS -->
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Bloco 2: Campos de Homologacao -->
       <div id="fill-section-hom" style="display:none;">
-        <div style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:12px; display:grid;">
+        <div style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-bottom:14px; display:grid;">
           <div>
-            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Nome do Testador *</label>
-            <input type="text" id="fill-test-nome" class="form-control" style="font-size:12.5px;" placeholder="ex: Jhonatan">
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Nome do Testador *</label>
+            <input type="text" id="fill-test-nome" class="form-control" style="font-size:13px; height:38px;" placeholder="ex: Jhonatan">
           </div>
           <div>
-            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Data do Teste *</label>
-            <input type="text" id="fill-test-data" class="form-control" style="font-size:12.5px;" placeholder="DD/MM/AAAA">
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Data do Teste *</label>
+            <input type="text" id="fill-test-data" class="form-control" style="font-size:13px; height:38px;" placeholder="DD/MM/AAAA">
           </div>
           <div>
-            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Parecer / Status</label>
-            <select id="fill-test-status" class="form-control" style="font-size:12px;">
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Parecer / Status</label>
+            <select id="fill-test-status" class="form-control" style="font-size:13px; height:38px;">
               <option value="aprovado">Aprovado para Release</option>
               <option value="divergencia">Divergência Encontrada</option>
               <option value="em_andamento">Em Andamento</option>
@@ -2871,24 +3300,24 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </div>
         </div>
 
-        <div style="margin-bottom:12px;">
-          <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Resultado do Teste / Divergência Encontrada</label>
-          <textarea id="fill-test-detalhes" class="form-control" rows="5" style="font-size:12px; line-height:1.45;" placeholder="Detalhe as validações realizadas, cenários testados ou divergências constatadas..."></textarea>
+        <div style="margin-bottom:14px;">
+          <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Resultado do Teste / Divergência Encontrada</label>
+          <textarea id="fill-test-detalhes" class="form-control" rows="5" style="font-size:13px; line-height:1.5; min-height:120px;" placeholder="Detalhe as validações realizadas, cenários testados ou divergências constatadas..."></textarea>
         </div>
       </div>
 
       <!-- Opcoes de Envio -->
-      <div style="background:rgba(0,0,0,0.1); padding:8px 12px; border-radius:4px; margin-top:8px;">
-        <label style="font-size:11.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-main);">
-          <input type="checkbox" id="fill-opt-post-jira">
+      <div style="background:rgba(0,0,0,0.15); padding:10px 14px; border-radius:6px; margin-top:10px; border:1px solid var(--border-color);">
+        <label style="font-size:12px; display:inline-flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-main);">
+          <input type="checkbox" id="fill-opt-post-jira" style="accent-color:#8b5cf6;">
           Publicar também comentário formal de entrega no chamado do Jira Cloud
         </label>
       </div>
     </div>
 
-    <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px; border-top:1px solid var(--border-color); flex-shrink:0;">
+    <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:14px 22px; border-top:1px solid var(--border-color); flex-shrink:0; background:var(--bg-solid, #0f172a);">
       <button type="button" class="btn btn-outline btn-sm" onclick="closeFillDdsModal()">Cancelar</button>
-      <button type="button" class="btn btn-primary btn-sm" id="btn-submit-dds-fill" onclick="submitDdsFill()" style="background:#8b5cf6; border-color:#7c3aed;">
+      <button type="button" class="btn btn-primary btn-sm" id="btn-submit-dds-fill" onclick="submitDdsFill()" style="background:#8b5cf6; border-color:#7c3aed; font-size:12.5px; padding:6px 14px;">
         Salvar Preenchimento da DDS
       </button>
     </div>
@@ -2914,6 +3343,88 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid var(--border-color);">
       <button type="button" class="btn btn-outline btn-sm" onclick="closePasteDdsModal()">Cancelar</button>
       <button type="button" class="btn btn-primary btn-sm" onclick="submitPastedDds()">Salvar e Estruturar DDS</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: RESUMO PARA DAILY SCRUM / TEAMS ==================== -->
+<div class="modal-backdrop" id="modal-daily-summary" style="display:none; z-index:10003;" onclick="closeDailySummaryModal()">
+  <div class="modal-container" style="max-width:680px; width:92vw;" onclick="event.stopPropagation();">
+    <div class="modal-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span class="modal-title">Resumo para Daily Scrum / Microsoft Teams</span>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="closeDailySummaryModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px;">
+      <!-- Seletor de Periodo -->
+      <div style="display:flex; gap:6px; margin-bottom:14px; background:var(--bg-subtle); padding:4px; border-radius:6px; width:fit-content;">
+        <button type="button" class="btn btn-sm btn-primary daily-period-btn active" id="btn-period-today" onclick="selectDailyPeriod('today')">Hoje</button>
+        <button type="button" class="btn btn-sm btn-outline daily-period-btn" id="btn-period-yesterday" onclick="selectDailyPeriod('yesterday')">Dia Anterior (Ontem)</button>
+        <button type="button" class="btn btn-sm btn-outline daily-period-btn" id="btn-period-week" onclick="selectDailyPeriod('week')">Semana Atual</button>
+      </div>
+
+      <!-- Opcoes de Formatacao -->
+      <div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:12px; font-size:12px; color:var(--text-main);">
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+          <input type="checkbox" id="daily-opt-times" checked onchange="updateDailySummaryText()">
+          <span>Incluir tempos gastos (ex: 3h 30m)</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+          <input type="checkbox" id="daily-opt-meta" checked onchange="updateDailySummaryText()">
+          <span>Incluir total vs meta</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+          <input type="checkbox" id="daily-opt-greeting" onchange="updateDailySummaryText()">
+          <span>Incluir saudação ("Bom dia equipe...")</span>
+        </label>
+      </div>
+
+      <!-- Preview do Texto -->
+      <div class="form-group" style="margin-bottom:0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Pré-Visualização do Texto</span>
+          <span id="daily-summary-char-count" style="font-size:11px; color:var(--text-muted);">0 caracteres</span>
+        </div>
+        <textarea id="daily-summary-textarea" class="form-control" rows="8" style="font-family:var(--font-mono); font-size:12px; line-height:1.5; resize:vertical;"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px; border-top:1px solid var(--border-color);">
+      <span style="font-size:11.5px; color:var(--text-muted);">Pronto para colar no chat do Teams ou na Daily</span>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn btn-outline btn-sm" onclick="closeDailySummaryModal()">Fechar</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="copyDailySummaryText()" id="btn-copy-daily-summary">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px; vertical-align:middle;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Copiar para Área de Transferência
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: HISTORICO DE RECUPERACAO (SNAPSHOTS) ==================== -->
+<div class="modal-backdrop" id="modal-snapshots" style="display:none; z-index:10004;" onclick="closeSnapshotsModal()">
+  <div class="modal-container" style="max-width:760px; width:92vw; max-height:85vh; display:flex; flex-direction:column;" onclick="event.stopPropagation();">
+    <div class="modal-header" style="flex-shrink:0;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>
+        <span class="modal-title">Histórico de Recuperação e Snapshots de Hoje</span>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="closeSnapshotsModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px; overflow-y:auto; flex:1;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; background:var(--bg-subtle); padding:10px 14px; border-radius:6px; font-size:12px; color:var(--text-muted);">
+        <span>Pontos automáticos salvos antes de alterar horários, transferir horas e periodicamente.</span>
+        <button type="button" class="btn btn-primary btn-sm" onclick="createManualSnapshot()">+ Criar Ponto Agora</button>
+      </div>
+      <div id="snapshots-list-container" style="display:flex; flex-direction:column; gap:10px;">
+        <div style="text-align:center; padding:24px; color:var(--text-muted);"><div class="spinner" style="margin:0 auto 8px auto;"></div>Carregando histórico de segurança...</div>
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px; border-top:1px solid var(--border-color); flex-shrink:0;">
+      <span style="font-size:11.5px; color:var(--text-muted);">Restaurar um ponto não perde dados: o JiraBot salva um snapshot do estado atual antes de restaurar.</span>
+      <button type="button" class="btn btn-outline btn-sm" onclick="closeSnapshotsModal()">Fechar</button>
     </div>
   </div>
 </div>
@@ -3401,11 +3912,16 @@ function previewTodaySchedule(markTouched = true) {
 }
 
 function fillTodayDefaultSchedule() {
-  const is8h = appState && appState.profile && appState.profile.name === '8h';
-  document.getElementById('today-start-hm').value = is8h ? '07:42' : '07:45';
-  document.getElementById('today-lunch-start-hm').value = '12:00';
-  document.getElementById('today-lunch-end-hm').value = is8h ? '13:00' : '13:30';
-  document.getElementById('today-end-hm').value = is8h ? '17:42' : '15:15';
+  const prof = appState && appState.profile;
+  const is8h = prof && (prof.name === '8h' || (prof.target_hours && prof.target_hours >= 7.5));
+  const startHm = (prof && prof.entry_hm) || (is8h ? '07:42' : '07:45');
+  const lsHm = (prof && prof.lunch_start_hm) || '12:00';
+  const leHm = (prof && prof.lunch_end_hm) || (is8h ? '13:00' : '13:30');
+  const endHm = (prof && prof.exit_hm) || (is8h ? '17:30' : '15:15');
+  document.getElementById('today-start-hm').value = startHm;
+  document.getElementById('today-lunch-start-hm').value = lsHm;
+  document.getElementById('today-lunch-end-hm').value = leHm;
+  document.getElementById('today-end-hm').value = endHm;
   previewTodaySchedule(true);
 }
 
@@ -3674,18 +4190,100 @@ async function deleteInterval(idx) {
   }
 }
 
-/* ==================== LOG NOW MODAL ==================== */
-function openLogNowModal() {
+/* ==================== LOG NOW MODAL & AUDITOR ==================== */
+let cachedAuditData = null;
+
+async function openLogNowModal() {
   document.getElementById('lognow-no-comment').checked = Boolean(appState && appState.today.no_comment);
   document.getElementById('lognow-modal').classList.add('open');
+  await renderLogNowAuditPreview();
 }
 
 function closeLogNowModal() {
   document.getElementById('lognow-modal').classList.remove('open');
 }
 
+async function renderLogNowAuditPreview() {
+  const container = document.getElementById('lognow-audit-preview');
+  const confirmBtn = document.getElementById('btn-confirm-lognow');
+  if (!container) return;
+
+  container.innerHTML = '<div style="text-align:center; padding:10px; color:var(--text-muted);"><div class="spinner" style="margin:0 auto 6px auto;"></div>Auditoria do expediente em andamento...</div>';
+
+  try {
+    const res = await apiCall('/api/today/audit');
+    cachedAuditData = res;
+
+    if (!res.can_log || res.balance.total_seconds <= 0) {
+      if (confirmBtn) confirmBtn.disabled = true;
+      container.innerHTML = `
+        <div style="background:rgba(239,74,95,0.12); border:1px solid rgba(239,74,95,0.3); border-radius:6px; padding:10px; color:var(--danger); font-size:12px;">
+          <strong>Atenção:</strong> Nenhum tempo trabalhado foi registrado para o expediente de hoje. Inicie ou registre atividades antes de efetuar o envio.
+        </div>`;
+      return;
+    }
+
+    if (confirmBtn) confirmBtn.disabled = false;
+
+    // Badges de saldo
+    let balanceBadge = '';
+    if (res.balance.status === 'deficit') {
+      balanceBadge = `<span class="badge" style="background:rgba(234,179,8,0.15); color:#eab308; border:1px solid rgba(234,179,8,0.35);">Déficit de ${res.balance.diff_formatted}</span>`;
+    } else if (res.balance.status === 'excess') {
+      balanceBadge = `<span class="badge" style="background:rgba(234,179,8,0.15); color:#eab308; border:1px solid rgba(234,179,8,0.35);">Excesso de ${res.balance.diff_formatted}</span>`;
+    } else {
+      balanceBadge = `<span class="badge" style="background:var(--success-bg); color:var(--success); border:1px solid rgba(52,181,140,0.35);">Meta cumprida (${res.balance.percentage}%)</span>`;
+    }
+
+    let alertsHtml = '';
+    if (res.warnings && res.warnings.length > 0) {
+      alertsHtml = `<div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;">` +
+        res.warnings.map(w => {
+          const isDanger = w.level === 'danger';
+          const bg = isDanger ? 'rgba(239,74,95,0.1)' : 'rgba(234,179,8,0.1)';
+          const border = isDanger ? 'rgba(239,74,95,0.35)' : 'rgba(234,179,8,0.35)';
+          const color = isDanger ? 'var(--danger)' : '#eab308';
+          return `<div style="background:${bg}; border-left:3px solid ${color}; padding:6px 10px; border-radius:4px; font-size:11.5px; color:var(--text-main);">
+            <strong style="color:${color};">${w.title}:</strong> ${w.message}
+          </div>`;
+        }).join('') + `</div>`;
+    }
+
+    let ticketsListHtml = '';
+    if (res.tickets && res.tickets.length > 0) {
+      ticketsListHtml = `<div style="margin-top:8px; border-top:1px solid var(--border-color, rgba(148,163,184,0.2)); padding-top:6px; font-size:11.5px;">
+        <span style="color:var(--text-muted); font-size:11px; display:block; margin-bottom:4px;">Chamados a serem lançados:</span>
+        <ul style="margin:0; padding-left:16px; color:var(--text-main);">` +
+        res.tickets.map(t => {
+          const statusExtra = t.is_closed ? ' <strong style="color:var(--danger);">(Demanda encerrada no Jira!)</strong>' : '';
+          return `<li><strong>${t.issue_key}</strong>: ${t.formatted} - <em>${t.display_description.slice(0, 48)}${t.display_description.length > 48 ? '...' : ''}</em>${statusExtra}</li>`;
+        }).join('') +
+        `</ul></div>`;
+    }
+
+    container.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+        <div>
+          <span style="font-weight:600; color:var(--text-main);">Total a Enviar: ${res.balance.total_formatted}</span>
+          <span style="color:var(--text-muted); font-size:11.5px; margin-left:6px;">(Meta: ${res.balance.target_hours}h)</span>
+        </div>
+        ${balanceBadge}
+      </div>
+      ${alertsHtml}
+      ${ticketsListHtml}
+    `;
+  } catch (err) {
+    container.innerHTML = `<div style="color:var(--danger); font-size:11.5px;">Não foi possível consultar auditoria prévia: ${err.message}</div>`;
+  }
+}
+
 async function confirmLogNow() {
   const no_comment = document.getElementById('lognow-no-comment').checked;
+  const confirmBtn = document.getElementById('btn-confirm-lognow');
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.innerText = 'Lançando...';
+  }
   try {
     const res = await apiCall('/api/today/ticket', 'POST', {
       action: 'log_now',
@@ -3696,6 +4294,142 @@ async function confirmLogNow() {
     await loadDashboard(true);
   } catch (err) {
     showToast(err.message, 'error');
+  } finally {
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.innerText = 'Confirmar e Lançar no Jira';
+    }
+  }
+}
+
+/* ==================== AUDITOR DEDICADO ==================== */
+async function openAuditModal() {
+  const modal = document.getElementById('modal-audit');
+  if (modal) modal.style.display = 'flex';
+  await refreshAuditData();
+}
+
+function closeAuditModal() {
+  const modal = document.getElementById('modal-audit');
+  if (modal) modal.style.display = 'none';
+}
+
+async function refreshAuditData() {
+  const body = document.getElementById('modal-audit-body');
+  if (!body) return;
+
+  body.innerHTML = '<div style="text-align:center; padding:32px; color:var(--text-muted);"><div class="spinner" style="margin:0 auto 8px auto;"></div>Auditoria minuciosa em andamento...</div>';
+
+  try {
+    const res = await apiCall('/api/today/audit');
+    cachedAuditData = res;
+
+    // 1. Cards de Saldo
+    let saldoColor = 'var(--success)';
+    let saldoLabel = 'Em dia';
+    if (res.balance.status === 'deficit') {
+      saldoColor = '#eab308';
+      saldoLabel = `Déficit de ${res.balance.diff_formatted}`;
+    } else if (res.balance.status === 'excess') {
+      saldoColor = '#eab308';
+      saldoLabel = `Excesso de ${res.balance.diff_formatted}`;
+    }
+
+    const cardsHtml = `
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">
+        <div style="background:var(--bg-subtle); padding:12px; border-radius:8px; border:1px solid var(--border-color, rgba(148,163,184,0.2)); text-align:center;">
+          <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:600; margin-bottom:4px;">Total Trabalhado</div>
+          <div style="font-size:20px; font-weight:700; color:var(--text-main);">${res.balance.total_formatted}</div>
+        </div>
+        <div style="background:var(--bg-subtle); padding:12px; border-radius:8px; border:1px solid var(--border-color, rgba(148,163,184,0.2)); text-align:center;">
+          <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:600; margin-bottom:4px;">Meta do Perfil</div>
+          <div style="font-size:20px; font-weight:700; color:var(--text-main);">${res.balance.target_hours}h</div>
+        </div>
+        <div style="background:var(--bg-subtle); padding:12px; border-radius:8px; border:1px solid var(--border-color, rgba(148,163,184,0.2)); text-align:center;">
+          <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:600; margin-bottom:4px;">Saldo da Jornada</div>
+          <div style="font-size:18px; font-weight:700; color:${saldoColor};">${saldoLabel}</div>
+        </div>
+        <div style="background:var(--bg-subtle); padding:12px; border-radius:8px; border:1px solid var(--border-color, rgba(148,163,184,0.2)); text-align:center;">
+          <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:600; margin-bottom:4px;">Conclusão</div>
+          <div style="font-size:20px; font-weight:700; color:var(--primary);">${res.balance.percentage}%</div>
+        </div>
+      </div>
+    `;
+
+    // 2. Alertas
+    let alertsBlock = '';
+    if (res.warnings && res.warnings.length > 0) {
+      alertsBlock = `
+        <div style="margin-bottom:16px;">
+          <div style="font-size:12px; font-weight:700; color:var(--text-main); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#eab308" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            Apontamentos de Inconformidade (${res.warnings.length})
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">` +
+          res.warnings.map(w => {
+            const isDanger = w.level === 'danger';
+            const bg = isDanger ? 'rgba(239,74,95,0.1)' : 'rgba(234,179,8,0.1)';
+            const border = isDanger ? 'rgba(239,74,95,0.35)' : 'rgba(234,179,8,0.35)';
+            const color = isDanger ? 'var(--danger)' : '#eab308';
+            return `<div style="background:${bg}; border:1px solid ${border}; border-left:4px solid ${color}; padding:8px 12px; border-radius:6px; font-size:12.5px; color:var(--text-main);">
+              <div style="font-weight:700; color:${color}; margin-bottom:2px;">${w.title}</div>
+              <div>${w.message}</div>
+            </div>`;
+          }).join('') +
+          `</div>
+        </div>`;
+    } else {
+      alertsBlock = `
+        <div style="background:rgba(52,181,140,0.1); border:1px solid rgba(52,181,140,0.3); border-left:4px solid var(--success); padding:10px 14px; border-radius:6px; margin-bottom:16px; font-size:12.5px; color:var(--text-main);">
+          <strong style="color:var(--success);">Tudo em conformidade!</strong> Carga horária e chamados validados com sucesso para o envio ao Jira.
+        </div>`;
+    }
+
+    // 3. Tabela de Chamados
+    let tableHtml = '';
+    if (res.tickets && res.tickets.length > 0) {
+      tableHtml = `
+        <div>
+          <div style="font-size:12px; font-weight:700; color:var(--text-main); margin-bottom:8px;">Detalhamento dos Chamados de Hoje</div>
+          <div style="overflow-x:auto; border:1px solid var(--border-color, rgba(148,163,184,0.2)); border-radius:6px;">
+            <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:left;">
+              <thead>
+                <tr style="background:var(--bg-subtle); border-bottom:1px solid var(--border-color, rgba(148,163,184,0.2)); color:var(--text-muted);">
+                  <th style="padding:8px 10px;">Ticket</th>
+                  <th style="padding:8px 10px;">Tempo</th>
+                  <th style="padding:8px 10px;">Status no Jira</th>
+                  <th style="padding:8px 10px;">Descrição que será Enviada</th>
+                  <th style="padding:8px 10px;">Validação</th>
+                </tr>
+              </thead>
+              <tbody>` +
+              res.tickets.map(t => {
+                const badgeClass = t.is_closed ? 'badge-danger' : 'badge-running';
+                const warningsText = t.warnings && t.warnings.length > 0
+                  ? t.warnings.map(w => `<div style="color:${t.is_closed ? 'var(--danger)' : '#eab308'}; font-size:11px;">&bull; ${w}</div>`).join('')
+                  : '<span style="color:var(--success); font-size:11px;">Ok</span>';
+                return `
+                  <tr style="border-bottom:1px solid var(--border-color, rgba(148,163,184,0.1));">
+                    <td style="padding:8px 10px; font-weight:700; color:var(--primary);">${t.issue_key}</td>
+                    <td style="padding:8px 10px; font-weight:600;">${t.formatted}</td>
+                    <td style="padding:8px 10px;"><span class="badge ${badgeClass}">${t.jira_status}</span></td>
+                    <td style="padding:8px 10px; color:var(--text-muted); max-width:240px; word-break:break-word;">${t.display_description}</td>
+                    <td style="padding:8px 10px;">${warningsText}</td>
+                  </tr>
+                `;
+              }).join('') +
+              `</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    } else {
+      tableHtml = `<div style="text-align:center; padding:16px; color:var(--text-muted); font-size:12px;">Nenhum chamado com apontamento registrado hoje.</div>`;
+    }
+
+    body.innerHTML = cardsHtml + alertsBlock + tableHtml;
+  } catch (err) {
+    body.innerHTML = `<div style="color:var(--danger); padding:20px; text-align:center;">Erro ao carregar auditoria: ${err.message}</div>`;
   }
 }
 
@@ -4188,11 +4922,16 @@ function formatDdsRichText(rawText) {
     return '\n' + token + '\n';
   });
 
-  // Garante que marcadores de imagem [[DOCX_IMG:...]] fiquem em sua propria linha
+  // Garante que marcadores de imagem [[DOCX_IMG:...]] e [[IMG:...]] fiquem em sua propria linha
   normalized = normalized.replace(/\[\[DOCX_IMG:([^\]]+)\]\]/g, '\n[[DOCX_IMG:$1]]\n');
+  normalized = normalized.replace(/\[\[IMG:([^\]]+)\]\]/gi, '\n[[JIRA_IMG:$1]]\n');
+
+  // Suporta sintaxe Markdown ![alt](arquivo.png) ou ![arquivo.png]
+  normalized = normalized.replace(/!\[[^\]]*\]\(([^)]+?\.(?:png|jpg|jpeg|gif|webp|bmp))\)/gi, '\n[[JIRA_IMG:$1]]\n');
+  normalized = normalized.replace(/!\[([^\]]+?\.(?:png|jpg|jpeg|gif|webp|bmp))\]/gi, '\n[[JIRA_IMG:$1]]\n');
 
   // Suporta sintaxe de imagem Jira !arquivo.png|thumbnail! em linha propria
-  normalized = normalized.replace(/!([^!\n|]+?\.(?:png|jpg|jpeg|gif|webp))(?:\|[^!\n]*)?!/gi, '\n[[JIRA_IMG:$1]]\n');
+  normalized = normalized.replace(/!([^!\n|]+?\.(?:png|jpg|jpeg|gif|webp|bmp))(?:\|[^!\n]*)?!/gi, '\n[[JIRA_IMG:$1]]\n');
 
   const lines = normalized.split('\n');
   const htmlParts = [];
@@ -4637,6 +5376,7 @@ async function detectDdsFromDownloads(explicitFilename = '') {
     };
     const res = await apiCall('/api/jira/dds/detect-download', 'POST', payload);
     if (res && res.success) {
+      clientTicketDetailsCache.delete(currentModalTicketKey);
       showToast(res.message || 'Arquivo detectado e vinculado com sucesso!', 'success');
       await openTicketDdsModal(currentModalTicketKey, true, true);
       return;
@@ -4714,7 +5454,16 @@ async function openFillDdsModal(preferredRole = 'desenvolvimento') {
       noticeEl.textContent = saved.saved_at ? `Salvo localmente em ${new Date(saved.saved_at).toLocaleString()}` : '';
     }
 
+    const chkMaster = document.getElementById('fill-include-checklist');
+    const shouldInclude = saved.incluir_checklist !== undefined ? !!saved.incluir_checklist : true;
+    if (chkMaster) chkMaster.checked = shouldInclude;
+    toggleFillChecklist(shouldInclude);
+
     renderFillChecklist(saved.checklist || []);
+
+    // Carrega imagens locais da DDS e configura dropzone
+    setupFillImageDropZone();
+    loadDdsImages(currentModalTicketKey);
 
     if (modal) modal.style.display = 'flex';
   } catch (err) {
@@ -4727,12 +5476,193 @@ function closeFillDdsModal() {
   if (modal) modal.style.display = 'none';
 }
 
+function toggleFillChecklist(checked) {
+  const inner = document.getElementById('fill-checklist-inner');
+  const actions = document.getElementById('fill-checklist-actions');
+  if (inner) inner.style.display = checked ? 'block' : 'none';
+  if (actions) actions.style.display = checked ? 'flex' : 'none';
+}
+
 function onFillRoleChange(role) {
   const devSec = document.getElementById('fill-section-dev');
   const homSec = document.getElementById('fill-section-hom');
   if (devSec) devSec.style.display = (role === 'desenvolvimento') ? 'block' : 'none';
   if (homSec) homSec.style.display = (role === 'homologacao') ? 'block' : 'none';
 }
+
+let currentDdsLocalImages = [];
+
+async function loadDdsImages(ticketKey) {
+  const grid = document.getElementById('fill-images-preview-grid');
+  if (!grid || !ticketKey) return;
+  try {
+    const res = await apiCall('/api/jira/dds/images/list?key=' + encodeURIComponent(ticketKey));
+    currentDdsLocalImages = (res && res.images) || [];
+    renderDdsImagesPreview();
+  } catch (err) {
+    console.error('Erro ao carregar imagens da DDS:', err);
+  }
+}
+
+function insertImageTagIntoText(imageName, targetId = 'fill-dev-detalhes') {
+  const ta = document.getElementById(targetId) || document.getElementById('fill-dev-detalhes');
+  if (!ta) return;
+  const tag = `\n!${imageName}!\n`;
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  if (start !== undefined && end !== undefined) {
+    const val = ta.value;
+    ta.value = val.substring(0, start) + tag + val.substring(end);
+    ta.selectionStart = ta.selectionEnd = start + tag.length;
+  } else {
+    ta.value += tag;
+  }
+  ta.focus();
+  showToast(`Marcador !${imageName}! inserido na posição do texto.`, 'success');
+}
+
+function renderDdsImagesPreview() {
+  const grid = document.getElementById('fill-images-preview-grid');
+  if (!grid) return;
+  if (!currentDdsLocalImages || currentDdsLocalImages.length === 0) {
+    grid.style.display = 'none';
+    grid.innerHTML = '';
+    return;
+  }
+  grid.style.display = 'grid';
+  grid.innerHTML = currentDdsLocalImages.map(img => {
+    const safeArg = escapeHtml(img.name).replace(/'/g, "\\'");
+    return `
+      <div class="dds-image-thumb-card" title="${escapeHtml(img.name)}">
+        <button type="button" class="thumb-del-btn" onclick="deleteDdsImage('${escapeHtml(img.id)}')" title="Excluir imagem">&times;</button>
+        <img src="${escapeHtml(img.thumbnail_url || img.url)}" alt="${escapeHtml(img.name)}" onclick="openImageLightbox('${escapeHtml(img.thumbnail_url || img.url)}', '${escapeHtml(img.name)}')">
+        <div class="thumb-info" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</div>
+        <button type="button" class="btn btn-outline btn-sm" onclick="insertImageTagIntoText('${safeArg}')" style="font-size:10px; padding:3px 6px; margin:2px 4px 6px; border-color:#8b5cf6; color:#c084fc; text-align:center; width:calc(100% - 8px);" title="Inserir !${escapeHtml(img.name)}! no meio do texto onde estiver o cursor">
+          + Inserir no Texto
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function uploadDdsImageFile(file, ticketKey) {
+  if (!file || !ticketKey) return;
+  const reader = new FileReader();
+  return new Promise((resolve, reject) => {
+    reader.onload = async () => {
+      try {
+        const res = await apiCall('/api/jira/dds/images/upload', 'POST', {
+          key: ticketKey,
+          filename: file.name,
+          content_base64: reader.result,
+        });
+        if (res.error) throw new Error(res.error);
+        resolve(res);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleFillImagesSelected(fileList) {
+  if (!fileList || fileList.length === 0 || !currentModalTicketKey) return;
+  const files = Array.from(fileList);
+  showToast(`Enviando ${files.length} imagem(ns)...`, 'info');
+  for (const f of files) {
+    try {
+      await uploadDdsImageFile(f, currentModalTicketKey);
+    } catch (err) {
+      showToast(`Erro ao enviar ${f.name}: ${err.message}`, 'error');
+    }
+  }
+  showToast('Imagens anexadas à DDS com sucesso!', 'success');
+  await loadDdsImages(currentModalTicketKey);
+}
+
+async function deleteDdsImage(imageId) {
+  if (!currentModalTicketKey || !imageId) return;
+  if (!confirm('Deseja remover esta imagem da DDS?')) return;
+  try {
+    const res = await apiCall('/api/jira/dds/images/delete', 'POST', {
+      key: currentModalTicketKey,
+      id: imageId,
+    });
+    if (res.error) throw new Error(res.error);
+    showToast('Imagem removida com sucesso.', 'success');
+    await loadDdsImages(currentModalTicketKey);
+  } catch (err) {
+    showToast('Erro ao remover imagem: ' + err.message, 'error');
+  }
+}
+
+function setupFillImageDropZone() {
+  const zone = document.getElementById('fill-image-drop-zone');
+  if (!zone || zone._dragInit) return;
+  zone._dragInit = true;
+
+  ['dragenter', 'dragover'].forEach(name => {
+    zone.addEventListener(name, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.add('dragover');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach(name => {
+    zone.addEventListener(name, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.remove('dragover');
+    });
+  });
+
+  zone.addEventListener('drop', (e) => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const imgFiles = Array.from(files).filter(f => f.type.startsWith('image/') || f.name.toLowerCase().match(/\.(png|jpe?g|gif|webp|bmp)$/));
+      if (imgFiles.length > 0) {
+        handleFillImagesSelected(imgFiles);
+      } else {
+        showToast('Apenas arquivos de imagem são suportados.', 'warning');
+      }
+    }
+  });
+}
+
+// Suporte a Ctrl + V para colar capturas de tela quando o modal estiver aberto
+window.addEventListener('paste', async (e) => {
+  const modal = document.getElementById('modal-fill-dds');
+  if (!modal || modal.style.display === 'none' || !currentModalTicketKey) return;
+  const dt = e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData);
+  if (!dt || !dt.items) return;
+  for (let i = 0; i < dt.items.length; i++) {
+    if (dt.items[i].type && dt.items[i].type.indexOf('image') !== -1) {
+      const blob = dt.items[i].getAsFile();
+      if (blob) {
+        e.preventDefault();
+        const ext = dt.items[i].type.split('/')[1] || 'png';
+        const file = new File([blob], `print_${Date.now()}.${ext}`, { type: dt.items[i].type });
+        showToast('Colando captura de tela da área de transferência...', 'info');
+        try {
+          const res = await uploadDdsImageFile(file, currentModalTicketKey);
+          showToast('Captura colada e anexada com sucesso!', 'success');
+          await loadDdsImages(currentModalTicketKey);
+          const activeEl = document.activeElement;
+          const targetTa = (activeEl && (activeEl.id === 'fill-dev-detalhes' || activeEl.id === 'fill-dev-rec' || activeEl.id === 'fill-test-detalhes')) ? activeEl : document.getElementById('fill-dev-detalhes');
+          if (targetTa && res && (res.filename || file.name)) {
+            const imgName = res.filename || file.name;
+            insertImageTagIntoText(imgName, targetTa.id);
+          }
+        } catch (err) {
+          showToast('Erro ao colar captura: ' + err.message, 'error');
+        }
+      }
+    }
+  }
+});
 
 function renderFillChecklist(savedChecklist = []) {
   const container = document.getElementById('fill-checklist-container');
@@ -4815,9 +5745,11 @@ async function submitDdsFill() {
     return;
   }
 
-  // Coleta o checklist
+  const includeChecklist = document.getElementById('fill-include-checklist') ? document.getElementById('fill-include-checklist').checked : true;
+
+  // Coleta o checklist apenas se o usuario manteve a opcao marcada
   const checklistPayload = [];
-  if (Array.isArray(currentFillDdsTemplate)) {
+  if (includeChecklist && Array.isArray(currentFillDdsTemplate)) {
     currentFillDdsTemplate.forEach((it, idx) => {
       const checked = document.querySelector(`input[name="chk_resp_${idx}"]:checked`);
       const resp = checked ? checked.value : (it.padrao || 'Sim');
@@ -4837,7 +5769,8 @@ async function submitDdsFill() {
     pacote: devPacote,
     implementacao_texto: devDet,
     recomendacoes: devRec,
-    checklist: checklistPayload,
+    incluir_checklist: includeChecklist,
+    checklist: includeChecklist ? checklistPayload : [],
     testador_nome: testNome,
     testador_data: testData,
     resultado_tipo: testStatus,
@@ -5042,37 +5975,221 @@ function getActiveModalSubtab() {
   return 'dds';
 }
 
-async function openTicketDdsModal(key, forceRefresh = false, preserveSubtab = false) {
-  const previousSubtab = preserveSubtab ? getActiveModalSubtab() : 'dds';
-  currentModalTicketKey = key;
-  if (!preserveSubtab) {
-    currentModalTicketSummary = '';
-    currentModalDdsLinks = [];
-    currentModalDdsText = '';
-    currentModalDocHtml = '';
-    currentModalImages = [];
+const CLIENT_TICKET_CACHE_TTL_MS = 60 * 1000;
+const clientTicketDetailsCache = new Map();
+
+function resetTicketDdsModalFields(key) {
+  // Limpa variaveis de estado ativas
+  currentModalTicketSummary = '';
+  currentModalDdsLinks = [];
+  currentModalDdsText = '';
+  currentModalDocHtml = '';
+  currentModalImages = [];
+  currentSharepointStatus = {};
+  currentSharepointEmbedUrl = '';
+
+  // Badges e titulos de cabecalho
+  const keyBadge = document.getElementById('modal-ticket-key-badge');
+  if (keyBadge) keyBadge.textContent = key || '-';
+  const statusBadge = document.getElementById('modal-ticket-status-badge');
+  if (statusBadge) statusBadge.textContent = 'Carregando...';
+  const prioBadge = document.getElementById('modal-ticket-priority-badge');
+  if (prioBadge) prioBadge.textContent = '';
+  const titleEl = document.getElementById('modal-ticket-title');
+  if (titleEl) titleEl.textContent = key ? 'Consultando ' + key + ' no Jira Cloud...' : 'Consultando informações no Jira Cloud...';
+  const descEl = document.getElementById('modal-ticket-description');
+  if (descEl) descEl.textContent = 'Aguarde um instante...';
+  const assEl = document.getElementById('modal-ticket-assignee');
+  if (assEl) assEl.textContent = '-';
+  const repEl = document.getElementById('modal-ticket-reporter');
+  if (repEl) repEl.textContent = '-';
+  const updEl = document.getElementById('modal-ticket-updated');
+  if (updEl) updEl.textContent = '-';
+  const jiraLink = document.getElementById('modal-ticket-jira-link');
+  if (jiraLink) jiraLink.href = '#';
+
+  // Subtarefa / Pai
+  const parentBadge = document.getElementById('modal-ticket-parent-badge');
+  if (parentBadge) parentBadge.style.display = 'none';
+
+  // Movidesk
+  const movWrap = document.getElementById('modal-ticket-movidesk-wrap');
+  if (movWrap) movWrap.style.display = 'none';
+  const movTicket = document.getElementById('modal-ticket-movidesk');
+  if (movTicket) movTicket.textContent = '-';
+  const ddsMovSol = document.getElementById('dds-mov-solicitante');
+  if (ddsMovSol) ddsMovSol.textContent = '-';
+  const ddsMovEmp = document.getElementById('dds-mov-empresa');
+  if (ddsMovEmp) ddsMovEmp.textContent = '-';
+  const ddsMovTkt = document.getElementById('dds-mov-ticket');
+  if (ddsMovTkt) ddsMovTkt.textContent = '-';
+  const ddsMovAberto = document.getElementById('dds-mov-aberto-por');
+  if (ddsMovAberto) ddsMovAberto.textContent = '-';
+  const tlMovSol = document.getElementById('timeline-mov-solicitante');
+  if (tlMovSol) tlMovSol.textContent = '-';
+  const tlMovEmp = document.getElementById('timeline-mov-empresa');
+  if (tlMovEmp) tlMovEmp.textContent = '-';
+
+  // DDS Geral e SharePoint
+  const docTitle = document.getElementById('dds-doc-title');
+  if (docTitle) docTitle.textContent = 'Especificação da Demanda';
+  const parentAlert = document.getElementById('dds-parent-inherited-alert');
+  if (parentAlert) parentAlert.style.display = 'none';
+  const sourceBadge = document.getElementById('dds-source-badge');
+  if (sourceBadge) {
+    sourceBadge.textContent = 'Consultando Jira...';
+    sourceBadge.style.background = 'rgba(148, 163, 184, 0.15)';
+    sourceBadge.style.color = 'var(--text-muted)';
   }
-  const modal = document.getElementById('ticket-dds-modal');
-  if (!modal) return;
+  const spBtn = document.getElementById('dds-sharepoint-btn');
+  if (spBtn) spBtn.style.display = 'none';
+  const topSpBtn = document.getElementById('dds-top-sharepoint-btn');
+  if (topSpBtn) topSpBtn.style.display = 'none';
+  const spTabBtn = document.getElementById('subtab-btn-sharepoint');
+  if (spTabBtn) spTabBtn.style.display = 'none';
+  const spCalloutBanner = document.getElementById('dds-sharepoint-callout-banner');
+  if (spCalloutBanner) spCalloutBanner.style.display = 'none';
+  const spFolderBtn = document.getElementById('modal-sp-folder-link');
+  if (spFolderBtn) spFolderBtn.style.display = 'none';
+  const spExternalLink = document.getElementById('modal-sp-external-link');
+  if (spExternalLink) spExternalLink.style.display = 'none';
+  const spDocTitle = document.getElementById('modal-sp-doc-title');
+  if (spDocTitle) spDocTitle.textContent = 'DDS Oficial no SharePoint';
+  const ddsLinksContainer = document.getElementById('modal-dds-links-container');
+  if (ddsLinksContainer) ddsLinksContainer.innerHTML = '';
 
-  if (!preserveSubtab) {
-    document.getElementById('modal-ticket-key-badge').textContent = key;
-    document.getElementById('modal-ticket-status-badge').textContent = 'Carregando...';
-    document.getElementById('modal-ticket-priority-badge').textContent = '';
-    document.getElementById('modal-ticket-title').textContent = 'Consultando informações no Jira Cloud...';
-    document.getElementById('modal-ticket-description').textContent = 'Aguarde um instante...';
-    document.getElementById('dds-native-content').textContent = 'Consultando e extraindo especificação da DDS...';
-    document.getElementById('modal-timeline-container').innerHTML = '<div style="color:var(--text-muted); font-size:12px; padding:12px;">Consultando histórico de comunicações...</div>';
-    document.getElementById('modal-images-grid').innerHTML = '';
-    document.getElementById('modal-attachments-container').innerHTML = '';
-  }
+  // Exibe Loading View e oculta views de conteudo anterior
+  const loadingView = document.getElementById('dds-loading-view');
+  if (loadingView) loadingView.style.display = 'block';
+  const structView = document.getElementById('dds-structured-view');
+  if (structView) structView.style.display = 'none';
+  const rawView = document.getElementById('dds-raw-view');
+  if (rawView) rawView.style.display = 'none';
+  const toggleBtn = document.getElementById('btn-toggle-dds-mode');
+  if (toggleBtn) toggleBtn.style.display = 'none';
 
-  modal.classList.add('open');
+  // Reseta campos da visao estruturada para evitar fantasmas visuais
+  const tipoBadge = document.getElementById('dds-tipo-badge');
+  if (tipoBadge) tipoBadge.style.display = 'none';
+  const elSis = document.getElementById('dds-struct-sistema');
+  if (elSis) elSis.textContent = '-';
+  const elOpc = document.getElementById('dds-struct-opcao');
+  if (elOpc) elOpc.textContent = '-';
+  const elVer = document.getElementById('dds-struct-versao');
+  if (elVer) elVer.textContent = '-';
+  const elFil = document.getElementById('dds-struct-filial');
+  if (elFil) elFil.textContent = '-';
 
-  try {
-    const urlApi = '/api/jira/ticket-details?key=' + encodeURIComponent(key) + (forceRefresh ? '&refresh=1' : '');
-    const data = await apiCall(urlApi);
-    if (data.error) throw new Error(data.error);
+  // Oculta/reseta todos os cards estruturados
+  const cardNec = document.getElementById('dds-card-necessidade');
+  if (cardNec) cardNec.style.display = 'none';
+  const structNec = document.getElementById('dds-struct-necessidade');
+  if (structNec) structNec.innerHTML = '';
+
+  const cardRes = document.getElementById('dds-card-resultado');
+  if (cardRes) cardRes.style.display = 'none';
+  const structRes = document.getElementById('dds-struct-resultado');
+  if (structRes) structRes.innerHTML = '';
+
+  const cardEsp = document.getElementById('dds-card-especificacao');
+  if (cardEsp) cardEsp.style.display = 'none';
+  const structEsp = document.getElementById('dds-struct-especificacao');
+  if (structEsp) structEsp.innerHTML = '';
+
+  const cardSup = document.getElementById('dds-card-suporte');
+  if (cardSup) cardSup.style.display = 'none';
+  const structSup = document.getElementById('dds-struct-suporte');
+  if (structSup) structSup.innerHTML = '';
+  const structSupMeta = document.getElementById('dds-struct-suporte-meta');
+  if (structSupMeta) structSupMeta.textContent = '';
+
+  const cardTl = document.getElementById('dds-card-team-leader');
+  if (cardTl) cardTl.style.display = 'none';
+  const structTl = document.getElementById('dds-struct-team-leader');
+  if (structTl) structTl.innerHTML = '';
+  const structTlMeta = document.getElementById('dds-struct-team-leader-meta');
+  if (structTlMeta) structTlMeta.textContent = '';
+
+  const cardAn = document.getElementById('dds-card-analise');
+  if (cardAn) cardAn.style.display = 'none';
+  const structAn = document.getElementById('dds-struct-analise');
+  if (structAn) structAn.innerHTML = '';
+  const structAnMeta = document.getElementById('dds-struct-analise-meta');
+  if (structAnMeta) structAnMeta.textContent = '';
+
+  const cardAs = document.getElementById('dds-card-analise-sistemas');
+  if (cardAs) cardAs.style.display = 'none';
+  const structAs = document.getElementById('dds-struct-analise-sistemas');
+  if (structAs) structAs.innerHTML = '';
+  const structAsMeta = document.getElementById('dds-struct-analise-sistemas-meta');
+  if (structAsMeta) structAsMeta.textContent = '';
+
+  const cardDev = document.getElementById('dds-card-desenvolvimento');
+  if (cardDev) cardDev.style.display = 'none';
+  const structDev = document.getElementById('dds-struct-dev');
+  if (structDev) structDev.innerHTML = '';
+  const structDevMeta = document.getElementById('dds-struct-dev-meta');
+  if (structDevMeta) structDevMeta.textContent = '';
+  const structDevRec = document.getElementById('dds-struct-dev-rec');
+  if (structDevRec) structDevRec.innerHTML = '';
+  const structDevRecWrap = document.getElementById('dds-struct-dev-rec-wrap');
+  if (structDevRecWrap) structDevRecWrap.style.display = 'none';
+
+  const cardChk = document.getElementById('dds-card-checklist');
+  if (cardChk) cardChk.style.display = 'none';
+  const chkCount = document.getElementById('dds-checklist-count');
+  if (chkCount) chkCount.textContent = '0';
+  const chkTbody = document.getElementById('dds-checklist-tbody');
+  if (chkTbody) chkTbody.innerHTML = '';
+
+  const cardTst = document.getElementById('dds-card-teste');
+  if (cardTst) cardTst.style.display = 'none';
+  const structTst = document.getElementById('dds-struct-teste');
+  if (structTst) structTst.innerHTML = '';
+  const structTstMeta = document.getElementById('dds-struct-teste-meta');
+  if (structTstMeta) structTstMeta.textContent = '';
+
+  const cardHom = document.getElementById('dds-card-resultado-homologacao');
+  if (cardHom) cardHom.style.display = 'none';
+  const structHom = document.getElementById('dds-struct-resultado-homologacao');
+  if (structHom) structHom.innerHTML = '';
+
+  // Texto bruto
+  const ddsNative = document.getElementById('dds-native-content');
+  if (ddsNative) ddsNative.textContent = 'Consultando e extraindo especificação da DDS...';
+
+  // Timeline / Comunicações
+  const commentsCount = document.getElementById('modal-comments-count');
+  if (commentsCount) commentsCount.textContent = '0';
+  const tlContainer = document.getElementById('modal-timeline-container');
+  if (tlContainer) tlContainer.innerHTML = '<div style="color:var(--text-muted); font-size:12px; padding:20px; text-align:center;"><div class=\"spinner\" style=\"margin:0 auto 10px auto;\"></div>Consultando histórico de comunicações...</div>';
+  const tlEmpty = document.getElementById('modal-timeline-empty');
+  if (tlEmpty) tlEmpty.style.display = 'none';
+
+  // Imagens
+  const imagesCount = document.getElementById('modal-images-count');
+  if (imagesCount) imagesCount.textContent = '0';
+  const imgGrid = document.getElementById('modal-images-grid');
+  if (imgGrid) imgGrid.innerHTML = '';
+  const imgEmpty = document.getElementById('modal-images-empty');
+  if (imgEmpty) imgEmpty.style.display = 'none';
+  const embSec = document.getElementById('dds-embedded-images-section');
+  if (embSec) embSec.style.display = 'none';
+  const embGrid = document.getElementById('dds-embedded-images-grid');
+  if (embGrid) embGrid.innerHTML = '';
+
+  // Anexos
+  const attCount = document.getElementById('modal-attachments-count');
+  if (attCount) attCount.textContent = '0';
+  const attContainer = document.getElementById('modal-attachments-container');
+  if (attContainer) attContainer.innerHTML = '';
+  const attEmpty = document.getElementById('modal-attachments-empty');
+  if (attEmpty) attEmpty.style.display = 'none';
+}
+
+function renderTicketDetailsData(data, key, preserveSubtab = false, previousSubtab = 'dds') {
+  const loadingView = document.getElementById('dds-loading-view');
+  if (loadingView) loadingView.style.display = 'none';
 
     // 0. Carrega imagens primeiro para permitir resolucao de miniaturas inline nas secoes da DDS
     const images = data.images || [];
@@ -5631,13 +6748,55 @@ async function openTicketDdsModal(key, forceRefresh = false, preserveSubtab = fa
       ? previousSubtab
       : 'dds';
     switchModalSubtab(targetTab);
+}
+
+async function openTicketDdsModal(key, forceRefresh = false, preserveSubtab = false) {
+  const previousSubtab = preserveSubtab ? getActiveModalSubtab() : 'dds';
+  currentModalTicketKey = key;
+  const modal = document.getElementById('ticket-dds-modal');
+  if (!modal) return;
+
+  if (forceRefresh) {
+    clientTicketDetailsCache.delete(key);
+  }
+
+  // Resposta instantanea via cache em memoria do cliente (0ms)
+  const now = Date.now();
+  if (!forceRefresh && clientTicketDetailsCache.has(key)) {
+    const entry = clientTicketDetailsCache.get(key);
+    if (now - entry.timestamp < CLIENT_TICKET_CACHE_TTL_MS) {
+      if (!preserveSubtab) resetTicketDdsModalFields(key);
+      modal.classList.add('open');
+      renderTicketDetailsData(entry.data, key, preserveSubtab, previousSubtab);
+      return;
+    }
+  }
+
+  // Reseta completamente o modal para nao exibir residuos do ticket anterior
+  if (!preserveSubtab) {
+    resetTicketDdsModalFields(key);
+  }
+
+  modal.classList.add('open');
+
+  try {
+    const urlApi = '/api/jira/ticket-details?key=' + encodeURIComponent(key) + (forceRefresh ? '&refresh=1' : '');
+    const data = await apiCall(urlApi);
+    if (data.error) throw new Error(data.error);
+
+    clientTicketDetailsCache.set(key, { timestamp: Date.now(), data });
+    renderTicketDetailsData(data, key, preserveSubtab, previousSubtab);
   } catch (err) {
+    const loadingView = document.getElementById('dds-loading-view');
+    if (loadingView) loadingView.style.display = 'none';
+    const rawView = document.getElementById('dds-raw-view');
+    if (rawView) rawView.style.display = 'block';
     document.getElementById('dds-native-content').textContent = 'Erro ao carregar detalhes: ' + err.message;
   }
 }
-
 function closeTicketDdsModal() {
   stopSharepointPoll();
+  resetTicketDdsModalFields('');
   const modal = document.getElementById('ticket-dds-modal');
   if (modal) modal.classList.remove('open');
   const iframe = document.getElementById('modal-sharepoint-iframe');
@@ -5652,15 +6811,16 @@ async function startTimerFromModal() {
 }
 
 /* ==================== WORKLOGS DO JIRA E MULTI-SELECAO EM LOTE ==================== */
-async function loadJiraWorklogs() {
+async function loadJiraWorklogs(forceRefresh = false) {
   const days = document.getElementById('wl-filter-days').value;
   const issue = document.getElementById('wl-filter-issue').value.trim().toUpperCase();
   const tbody = document.getElementById('jira-worklogs-tbody');
-  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);">Consultando lançamentos no Jira... Aguarde.</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 24px; color:var(--text-muted);"><div class="spinner" style="margin:0 auto 12px auto;"></div>Consultando lançamentos no Jira... Aguarde.</td></tr>';
 
   try {
     const q = new URLSearchParams({ days });
     if (issue) q.set('issue_key', issue);
+    if (forceRefresh) q.set('refresh', '1');
     const res = await apiCall('/api/worklogs?' + q.toString());
     loadedWorklogs = res.worklogs || [];
     selectedWorklogIds.clear();
@@ -6866,6 +8026,19 @@ function populateCalculatorFields(p) {
     }
     // Perfil sem calculadora salva: deriva alvo (ponto medio) e folgas (metade da largura) da janela salva
     const w = p[f.win] || {};
+    // Perfil sem calculadora salva: se for carga >= 7.5h e campos de 6h herdados
+    if (p.target_hours >= 7.5 && f.key === 'lunch_end' && (!w.start || w.start === '13:20')) {
+      document.getElementById(f.hm).value = '13:00';
+      document.getElementById(f.bef).value = 15;
+      document.getElementById(f.aft).value = 30;
+      return;
+    }
+    if (p.target_hours >= 7.5 && f.key === 'exit' && (!w.start || w.start === '15:05')) {
+      document.getElementById(f.hm).value = '17:30';
+      document.getElementById(f.bef).value = 20;
+      document.getElementById(f.aft).value = 30;
+      return;
+    }
     const s = hmToMinutes(w.start);
     const e = hmToMinutes(w.end);
     if (s !== null && e !== null && e >= s) {
@@ -6908,6 +8081,7 @@ function applyToleranceCalculator(silent = false) {
 }
 
 async function saveProfileSettings() {
+  applyToleranceCalculator(true);
   const active_profile = document.getElementById('prof-active-select').value;
   const profile_data = {
     name: active_profile,
@@ -7273,6 +8447,199 @@ window.addEventListener('DOMContentLoaded', () => {
 /*__UI_FX_JS__*/
 
 /*__ANALYTICS_JS__*/
+
+
+/* ==================== HISTORICO DE RECUPERACAO E SNAPSHOTS DO DIA ==================== */
+async function openSnapshotsModal() {
+  const modal = document.getElementById('modal-snapshots');
+  if (modal) modal.style.display = 'flex';
+  await loadSnapshotsList();
+}
+
+function closeSnapshotsModal() {
+  const modal = document.getElementById('modal-snapshots');
+  if (modal) modal.style.display = 'none';
+}
+
+async function loadSnapshotsList() {
+  const container = document.getElementById('snapshots-list-container');
+  if (!container) return;
+  container.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text-muted);"><div class="spinner" style="margin:0 auto 8px auto;"></div>Carregando pontos de recuperação...</div>';
+
+  try {
+    const res = await apiCall('/api/snapshots');
+    const snaps = res.snapshots || [];
+    if (snaps.length === 0) {
+      container.innerHTML = '<div style="text-align:center; padding:32px 16px; color:var(--text-muted); font-size:13px;">Nenhum ponto de restauração gravado hoje até o momento.<br><span style="font-size:11.5px; margin-top:6px; display:inline-block;">Clique em <strong>+ Criar Ponto Agora</strong> para registrar o estado atual manualmente.</span></div>';
+      return;
+    }
+
+    container.innerHTML = snaps.map(s => {
+      const isAuto = s.reason === 'auto';
+      const isPreRestore = s.reason === 'pre_restore';
+      const badgeColor = isPreRestore
+        ? 'background:rgba(234,179,8,0.15); color:#eab308;'
+        : isAuto
+        ? 'background:rgba(148,163,184,0.15); color:var(--text-muted);'
+        : 'background:rgba(14,165,233,0.15); color:#38bdf8;';
+
+      return `
+        <div class="card" style="margin-bottom:0; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; gap:14px; border:1px solid var(--border-color);">
+          <div style="flex:1;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+              <strong style="font-size:13.5px; color:var(--text-main);">${escapeHtml(s.time_hm)}</strong>
+              <span class="badge" style="${badgeColor} font-size:11px;">${escapeHtml(s.reason_label || s.reason)}</span>
+            </div>
+            <div style="font-size:12px; color:var(--text-muted);">
+              <strong>Tempo total:</strong> ${escapeHtml(s.total_formatted || '0m')} &bull;
+              <strong>Tickets (${s.tickets_count || 0}):</strong> ${escapeHtml(s.tickets_preview || 'Nenhum')}
+            </div>
+          </div>
+          <div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="confirmRestoreSnapshot('${escapeHtml(s.id)}', '${escapeHtml(s.time_hm)}')" style="white-space:nowrap;">
+              Restaurar Este Ponto
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    container.innerHTML = `<div style="text-align:center; color:var(--danger); padding:20px;">Erro ao carregar histórico: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function createManualSnapshot() {
+  try {
+    const res = await apiCall('/api/snapshots/create', 'POST', { reason: 'manual' });
+    if (res.error) throw new Error(res.error);
+    showToast('Ponto de restauração manual criado com sucesso!', 'success');
+    await loadSnapshotsList();
+  } catch (err) {
+    showToast('Erro ao criar ponto de restauração: ' + err.message, 'error');
+  }
+}
+
+async function confirmRestoreSnapshot(snapshotId, timeHm) {
+  if (!confirm(`Deseja restaurar o estado da jornada para o ponto das ${timeHm}?\n\nO JiraBot criará automaticamente um ponto de segurança do estado atual antes de aplicar a restauração.`)) {
+    return;
+  }
+
+  try {
+    const res = await apiCall('/api/snapshots/restore', 'POST', { snapshot_id: snapshotId });
+    if (res.error) throw new Error(res.error);
+    showToast(res.message || 'Ponto de restauração aplicado com sucesso!', 'success');
+    closeSnapshotsModal();
+    await loadDashboard();
+  } catch (err) {
+    showToast('Erro ao restaurar ponto: ' + err.message, 'error');
+  }
+}
+
+/* ==================== RESUMO PARA DAILY SCRUM / MICROSOFT TEAMS ==================== */
+let currentDailySummaryData = null;
+let currentDailySummaryPeriod = 'today';
+
+async function openDailySummaryModal(period = 'today') {
+  currentDailySummaryPeriod = period;
+  const modal = document.getElementById('modal-daily-summary');
+  if (modal) modal.style.display = 'flex';
+  selectDailyPeriod(period);
+}
+
+function closeDailySummaryModal() {
+  const modal = document.getElementById('modal-daily-summary');
+  if (modal) modal.style.display = 'none';
+}
+
+function selectDailyPeriod(period) {
+  currentDailySummaryPeriod = period;
+  ['today', 'yesterday', 'week'].forEach(p => {
+    const btn = document.getElementById('btn-period-' + p);
+    if (btn) {
+      if (p === period) {
+        btn.classList.add('active', 'btn-primary');
+        btn.classList.remove('btn-outline');
+      } else {
+        btn.classList.remove('active', 'btn-primary');
+        btn.classList.add('btn-outline');
+      }
+    }
+  });
+  loadDailySummaryData(period);
+}
+
+async function loadDailySummaryData(period) {
+  const ta = document.getElementById('daily-summary-textarea');
+  if (ta) ta.value = 'Carregando resumo da jornada...';
+
+  try {
+    const res = await apiCall('/api/daily-summary?period=' + encodeURIComponent(period));
+    currentDailySummaryData = res;
+    updateDailySummaryText();
+  } catch (err) {
+    if (ta) ta.value = 'Erro ao carregar resumo: ' + err.message;
+  }
+}
+
+function updateDailySummaryText() {
+  if (!currentDailySummaryData) return;
+  const ta = document.getElementById('daily-summary-textarea');
+  if (!ta) return;
+
+  const incTimes = document.getElementById('daily-opt-times') ? document.getElementById('daily-opt-times').checked : true;
+  const incMeta = document.getElementById('daily-opt-meta') ? document.getElementById('daily-opt-meta').checked : true;
+  const incGreeting = document.getElementById('daily-opt-greeting') ? document.getElementById('daily-opt-greeting').checked : false;
+
+  const d = currentDailySummaryData;
+  const lines = [];
+
+  if (incGreeting) {
+    lines.push('Bom dia equipe!');
+    lines.push('');
+  }
+
+  lines.push('*Resumo da Jornada (' + (d.period_label || 'Período') + '):*');
+
+  const items = d.items || [];
+  if (items.length > 0) {
+    items.forEach(it => {
+      const timeStr = incTimes ? ' (' + (it.formatted || '0m') + ')' : '';
+      lines.push('- ' + it.issue_key + ': ' + it.display_description + timeStr);
+    });
+  } else {
+    lines.push('- Nenhuma atividade registrada no período.');
+  }
+
+  if (incMeta && d.total_formatted) {
+    lines.push('');
+    if (d.period === 'today') {
+      lines.push('*Total:* ' + d.total_formatted + ' (Meta: ' + (d.target_hours || 6) + 'h - ' + (d.target_status || '') + ')');
+    } else {
+      lines.push('*Total acumulado:* ' + d.total_formatted);
+    }
+  }
+
+  const finalStr = lines.join('\n');
+  ta.value = finalStr;
+
+  const cc = document.getElementById('daily-summary-char-count');
+  if (cc) cc.textContent = finalStr.length + ' caracteres';
+}
+
+async function copyDailySummaryText() {
+  const ta = document.getElementById('daily-summary-textarea');
+  if (!ta || !ta.value.trim()) return;
+
+  try {
+    await navigator.clipboard.writeText(ta.value.trim());
+    showToast('Resumo copiado com sucesso para a área de transferência!', 'success');
+  } catch (err) {
+    ta.select();
+    document.execCommand('copy');
+    showToast('Resumo copiado!', 'success');
+  }
+}
+
 </script>
 </body>
 </html>
@@ -7416,19 +8783,37 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 self._send_json(build_weekly_payload(ref_date_str=ref_date, fetch_jira=fetch_jira))
                 return
 
+            if path == "/api/daily-summary":
+                period = (query.get("period", ["today"])[0] or "today").strip()
+                self._send_json(build_daily_summary_payload(period=period))
+                return
+
+            if path == "/api/today/audit":
+                self._send_json(audit_today_worklogs_payload())
+                return
+
+            if path == "/api/snapshots":
+                date_filter = (query.get("date", [""])[0] or "").strip() or date.today().isoformat()
+                state_mgr = StateManager()
+                snaps = state_mgr.list_snapshots(date_filter)
+                self._send_json({"success": True, "date": date_filter, "snapshots": snaps})
+                return
+
             if path == "/api/worklogs/range":
                 s_date = (query.get("start_date", [""])[0] or "").strip()
                 e_date = (query.get("end_date", [""])[0] or "").strip()
+                force_refresh = (query.get("refresh", ["0"])[0] or "0").strip().lower() in ("1", "true", "yes")
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
                 client = JiraClient(cfg.jira, state_mgr)
-                worklogs = client.get_user_worklogs_by_date_range(s_date, e_date)
+                worklogs = client.get_user_worklogs_by_date_range(s_date, e_date, force_refresh=force_refresh)
                 self._send_json({"worklogs": worklogs})
                 return
 
             if path == "/api/worklogs":
                 days = int(query.get("days", ["14"])[0])
                 issue_filter = (query.get("issue_key", [""])[0] or "").strip().upper()
+                force_refresh = (query.get("refresh", ["0"])[0] or "0").strip().lower() in ("1", "true", "yes")
 
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
@@ -7437,11 +8822,11 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 if issue_filter:
                     worklogs = client.get_formatted_issue_worklogs(issue_filter)
                 else:
-                    worklogs = client.get_user_recent_worklogs(days=days)
+                    worklogs = client.get_user_recent_worklogs(days=days, force_refresh=force_refresh)
 
-                is_8h = cfg.active_profile == "8h"
-                def_ls = "12:00"
-                def_le = "13:00" if is_8h else "13:30"
+                prof_act = cfg.get_active_profile()
+                def_ls = prof_act.get_lunch_start_hm()
+                def_le = prof_act.get_lunch_end_hm()
 
                 for w in worklogs:
                     sec = int(w.get("time_spent_seconds", 0) or 0)
@@ -7458,6 +8843,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 status_filter = (query.get("status", ["open"])[0] or "open").strip()
                 q_text = (query.get("q", [""])[0] or "").strip()
                 limit_str = (query.get("limit", ["50"])[0] or "50").strip()
+                force_refresh = (query.get("refresh", ["0"])[0] or "0").strip().lower() in ("1", "true", "yes")
                 try:
                     limit = int(limit_str)
                 except ValueError:
@@ -7465,7 +8851,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
                 client = JiraClient(cfg.jira, state_mgr)
-                tickets = client.get_my_assigned_tickets(max_results=limit, status_filter=status_filter, query_text=q_text)
+                tickets = client.get_my_assigned_tickets(max_results=limit, status_filter=status_filter, query_text=q_text, force_refresh=force_refresh)
                 state = state_mgr.load_state()
                 active_issue = (state.target_issue or cfg.jira.default_issue or "").strip().upper()
                 self._send_json({
@@ -7488,6 +8874,17 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 client = JiraClient(cfg.jira, state_mgr)
                 details = client.get_ticket_dds_details(issue_key, force_refresh=force_refresh)
                 self._send_json(details)
+                return
+
+            if path == "/api/jira/dds/images/list":
+                issue_key = clean_jira_issue_key(query.get("key", [""])[0] or query.get("issue_key", [""])[0] or "")
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket não informada."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                imgs = sp_mgr.list_dds_images(issue_key)
+                self._send_json({"success": True, "images": imgs})
                 return
 
             if path == "/api/sharepoint/status":
@@ -7549,6 +8946,28 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json_body()
 
+            if path == "/api/snapshots/restore":
+                snap_id = (body.get("snapshot_id") or body.get("id") or "").strip()
+                if not snap_id:
+                    self._send_json({"error": "ID do ponto de restauração não informado."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                res = state_mgr.restore_snapshot(snap_id)
+                status_code = 200 if res.get("success") else 400
+                self._send_json(res, status_code=status_code)
+                return
+
+            if path == "/api/snapshots/create":
+                reason = (body.get("reason") or "manual").strip()
+                state_mgr = StateManager()
+                cur_state = state_mgr.load_state()
+                snap_path = state_mgr.create_snapshot(cur_state, reason=reason)
+                if snap_path:
+                    self._send_json({"success": True, "message": "Ponto de restauração criado com sucesso!", "id": snap_path.stem})
+                else:
+                    self._send_json({"error": "Falha ao criar ponto de restauração."}, status_code=500)
+                return
+
             if path == "/api/theme":
                 theme = (body.get("theme") or "auto").strip().lower()
                 allowed = {"auto", "dark", "light", "halloween", "natal", "ano_novo", "pascoa"}
@@ -7583,6 +9002,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 state_mgr = StateManager()
                 sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
                 res = sp_mgr.disconnect()
+                JiraClient.invalidate_ticket_cache()
                 if not res.get("success"):
                     self._send_json({"error": res.get("error", "Falha ao desconectar conta Microsoft 365.")}, status_code=400)
                     return
@@ -7613,6 +9033,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 if not res.get("success"):
                     self._send_json({"error": res.get("error", "Arquivo .docx inválido.")}, status_code=400)
                     return
+                JiraClient.invalidate_ticket_cache(issue_key)
                 self._send_json(res)
                 return
 
@@ -7630,6 +9051,8 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     ticket_summary=summary,
                     explicit_filename=explicit_filename,
                 )
+                if res.get("success"):
+                    JiraClient.invalidate_ticket_cache(issue_key)
                 self._send_json(res)
                 return
 
@@ -7645,6 +9068,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 if not res.get("success"):
                     self._send_json({"error": res.get("error", "Texto inválido.")}, status_code=400)
                     return
+                JiraClient.invalidate_ticket_cache(issue_key)
                 self._send_json(res)
                 return
 
@@ -7674,6 +9098,8 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 state_mgr = StateManager()
                 sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
                 res = sp_mgr.save_filled_dds(issue_key=issue_key, fill_data=body)
+                if res.get("success"):
+                    JiraClient.invalidate_ticket_cache(issue_key)
 
                 # Opcional: comentar no Jira caso solicitado
                 if body.get("post_jira_comment"):
@@ -7692,6 +9118,48 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         res["jira_comment_error"] = str(je)
 
                 self._send_json(res)
+                return
+
+            if path == "/api/jira/dds/images/upload":
+                import base64
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                filename = (body.get("filename") or "evidencia.png").strip()
+                b64_content = body.get("content_base64") or ""
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket inválida."}, status_code=400)
+                    return
+                if not b64_content:
+                    self._send_json({"error": "Nenhum dado de imagem recebido."}, status_code=400)
+                    return
+                if "," in b64_content:
+                    b64_content = b64_content.split(",", 1)[1]
+                try:
+                    raw_bytes = base64.b64decode(b64_content)
+                except Exception as ex_b64:
+                    self._send_json({"error": f"Conteúdo Base64 inválido: {ex_b64}"}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                res = sp_mgr.save_dds_image(issue_key, filename, raw_bytes)
+                if res.get("success"):
+                    JiraClient.invalidate_ticket_cache(issue_key)
+                self._send_json(res)
+                return
+
+            if path == "/api/jira/dds/images/delete":
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                img_id = (body.get("id") or body.get("image_id") or "").strip()
+                if not issue_key or not img_id:
+                    self._send_json({"error": "Chave ou ID da imagem não informados."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                ok = sp_mgr.delete_dds_image(issue_key, img_id)
+                if ok:
+                    JiraClient.invalidate_ticket_cache(issue_key)
+                    self._send_json({"success": True, "message": "Imagem removida com sucesso."})
+                else:
+                    self._send_json({"error": "Imagem não encontrada ou falha ao excluir."}, status_code=404)
                 return
 
             if path == "/api/update":
@@ -7745,6 +9213,10 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 elif action == "test_popup":
                     show_pre_exit_popup(state_mgr, force=True)
                     self._send_json({"success": True, "message": "Janela gráfica de revisão pré-saída disparada."})
+                elif action == "open_mini_widget":
+                    from mini_window import toggle_mini_window
+                    toggle_mini_window()
+                    self._send_json({"success": True, "message": "Mini janela flutuante acionada."})
                 elif action == "flush_queue":
                     client = JiraClient(cfg.jira, state_mgr)
                     count = client.flush_queue()
@@ -7757,21 +9229,43 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": f"Ação desconhecida: {action}"}, status_code=400)
                 return
 
+            if path == "/api/mini-widget/open":
+                from mini_window import toggle_mini_window
+                toggle_mini_window()
+                self._send_json({"success": True, "message": "Mini janela flutuante acionada com sucesso."})
+                return
+
             if path == "/api/today/schedule":
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
                 state = state_mgr.load_state()
+                state_mgr.create_snapshot(state, reason="pre_schedule_edit")
+                start_hm = body.get("start_hm", "")
+                ls_hm = body.get("lunch_start_hm", "")
+                le_hm = body.get("lunch_end_hm", "")
+                end_hm = body.get("end_hm", "")
                 res = state.apply_shift_schedule(
-                    start_hm=body.get("start_hm", ""),
-                    lunch_start_hm=body.get("lunch_start_hm", ""),
-                    lunch_end_hm=body.get("lunch_end_hm", ""),
-                    end_hm=body.get("end_hm", ""),
+                    start_hm=start_hm,
+                    lunch_start_hm=ls_hm,
+                    lunch_end_hm=le_hm,
+                    end_hm=end_hm,
                     default_issue=cfg.jira.default_issue,
                 )
                 if not res.get("success"):
                     self._send_json({"error": res.get("message", "Horário inválido")}, status_code=400)
                     return
                 state_mgr.save_state(state)
+                # Persiste os horarios explicitos para o dia e sincroniza worklogs associados
+                sch_meta = {
+                    "start_hm": start_hm,
+                    "lunch_start_hm": ls_hm,
+                    "lunch_end_hm": le_hm,
+                    "end_hm": end_hm,
+                }
+                state_mgr.save_day_shift_schedule(state.date_str, sch_meta)
+                for wid in state.jira_worklog_ids:
+                    state_mgr.save_worklog_schedule(wid, sch_meta)
+
                 dur_str = format_duration(state.get_total_seconds())
                 self._send_json({
                     "success": True,
@@ -7784,6 +9278,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
                 state = state_mgr.load_state()
+                state_mgr.create_snapshot(state, reason="pre_interval_edit")
                 active_issue = clean_jira_issue_key(body.get("issue_key") or state.target_issue or cfg.jira.default_issue)
 
                 if action in ["add", "update"]:
@@ -7840,6 +9335,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 if action == "switch":
                     issue_key = clean_jira_issue_key(body.get("issue_key") or "")
                     comment = (body.get("comment") or "").strip()
+                    state_mgr.create_snapshot(state_mgr.load_state(), reason="pre_switch")
                     engine = BotEngine(config=cfg, state_manager=state_mgr)
                     engine.switch_ticket(issue_key, comment=comment if comment else None)
                     self._send_json({"success": True, "message": f"Ticket ativo alterado para {issue_key}."})
@@ -7869,6 +9365,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     tgt = clean_jira_issue_key(body.get("target_issue") or "")
                     t_str = (body.get("time_str") or "").strip()
                     sec = parse_duration_input(t_str) if t_str else None
+                    state_mgr.create_snapshot(state_mgr.load_state(), reason="pre_transfer")
                     engine = BotEngine(config=cfg, state_manager=state_mgr)
                     transferred = engine.transfer_today_hours(source_issue=src, target_issue=tgt, seconds=sec)
                     if transferred <= 0:

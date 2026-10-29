@@ -3751,21 +3751,142 @@ html:not(.fx-paused) .tab-pane.active .grid-kpi > *:nth-child(6) { animation-del
 }
 
 .dds-offline-toolbar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 12px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-bottom: 14px;
+}
+
+.dds-partition-card {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 14px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
-  margin-bottom: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.dds-partition-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dds-partition-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dds-partition-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modal-container {
+  background: var(--bg-solid, #0f172a);
+  color: var(--text-main, #f8fafc);
+  border: 1px solid var(--border-strong, #334155);
+  border-radius: var(--radius, 8px);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85);
+  position: relative;
+  z-index: 1;
 }
 
 .modal-container.dds-drag-active {
   border-color: var(--primary) !important;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.35) !important;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.35), 0 25px 60px rgba(0, 0, 0, 0.9) !important;
+}
+
+.dds-image-upload-zone {
+  border: 2px dashed var(--border-strong, #334155);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-subtle, #1e293b);
+  padding: 16px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.dds-image-upload-zone:hover,
+.dds-image-upload-zone.dragover {
+  border-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.dds-image-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.dds-image-thumb-card {
+  position: relative;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dds-image-thumb-card img {
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+  display: block;
+  cursor: pointer;
+}
+
+.dds-image-thumb-card .thumb-info {
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dds-image-thumb-card .thumb-del-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(239, 68, 68, 0.85);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.dds-image-thumb-card .thumb-del-btn:hover {
+  background: #dc2626;
 }
 
 .sp-auth-panel {
@@ -4223,9 +4344,11 @@ td .btn-group {
 }
 
 .form-control {
+  width: 100%;
+  box-sizing: border-box;
   padding: 8px 11px;
   border: 1px solid var(--border-strong);
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 13px;
   font-family: inherit;
   color: var(--text-main);
@@ -4248,8 +4371,10 @@ td .btn-group {
 }
 
 textarea.form-control {
+  width: 100%;
+  box-sizing: border-box;
   resize: vertical;
-  min-height: 68px;
+  min-height: 80px;
 }
 
 /* ------------------------------------------------------------------------------------------

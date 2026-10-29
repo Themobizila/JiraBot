@@ -195,6 +195,8 @@ class SharePointManager:
         self.auth_meta_path = self.base_dir / "sharepoint_auth_meta.json"
         self.docx_cache_dir = self.base_dir / "dds_docx_cache"
         self.docx_cache_dir.mkdir(parents=True, exist_ok=True)
+        self.dds_images_dir = self.base_dir / "dds_images"
+        self.dds_images_dir.mkdir(parents=True, exist_ok=True)
 
     def _load_auth_meta(self) -> Dict[str, Any]:
         if self.auth_meta_path.exists():
@@ -720,6 +722,97 @@ class SharePointManager:
                 meta_path.write_text(json.dumps(cur_meta, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
+    # ==================== IMAGENS E EVIDENCIAS LOCAIS DA DDS ====================
+
+    def save_dds_image(self, issue_key: str, filename: str, content_bytes: bytes) -> Dict[str, Any]:
+        """Salva uma imagem avulsa ou captura colada para a DDS deste ticket."""
+        clean_key = self._safe_key(issue_key.upper())
+        if not clean_key:
+            return {"success": False, "error": "Chave do ticket inválida."}
+        if not content_bytes or len(content_bytes) < 10:
+            return {"success": False, "error": "Arquivo de imagem vazio."}
+        if len(content_bytes) > 20 * 1024 * 1024:
+            return {"success": False, "error": "A imagem excede o tamanho limite de 20MB."}
+
+        safe_fname = re.sub(r"[^a-zA-Z0-9_.-]", "_", filename or "captura.png")
+        if not safe_fname.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")):
+            safe_fname = f"{safe_fname}.png"
+
+        target_dir = self.dds_images_dir / clean_key
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
+        file_path = target_dir / f"{timestamp_str}_{safe_fname}"
+        file_path.write_bytes(content_bytes)
+
+        return {
+            "success": True,
+            "filename": file_path.name,
+            "size": len(content_bytes),
+            "id": file_path.stem,
+            "message": "Imagem anexada à DDS com sucesso!",
+        }
+
+    def list_dds_images(self, issue_key: str) -> List[Dict[str, Any]]:
+        """Lista todas as imagens locais anexadas à DDS do ticket."""
+        import base64
+        clean_key = self._safe_key(issue_key.upper())
+        target_dir = self.dds_images_dir / clean_key
+        if not target_dir.exists():
+            return []
+
+        images: List[Dict[str, Any]] = []
+        for p in sorted(target_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=False):
+            if not p.is_file():
+                continue
+            low_name = p.name.lower()
+            if not low_name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")):
+                continue
+            try:
+                raw_bytes = p.read_bytes()
+                ext = low_name.rsplit(".", 1)[-1]
+                if ext == "jpg":
+                    ext = "jpeg"
+                b64 = base64.b64encode(raw_bytes).decode("ascii")
+                data_uri = f"data:image/{ext};base64,{b64}"
+                display_name = re.sub(r"^\d{8}_\d{6}_\d{3}_", "", p.name)
+                mtime_str = datetime.fromtimestamp(p.stat().st_mtime).strftime("%d/%m/%Y %H:%M")
+                images.append({
+                    "id": f"local-dds-img-{p.stem}",
+                    "name": display_name,
+                    "filename": p.name,
+                    "size": len(raw_bytes),
+                    "url": data_uri,
+                    "proxy_url": data_uri,
+                    "thumbnail_url": data_uri,
+                    "created": mtime_str,
+                    "author": "Anexado Localmente (DDS)",
+                    "section": "Evidências e Imagens Anexadas",
+                    "is_embedded": False,
+                    "is_local": True,
+                })
+            except Exception as e:
+                logger.warning("Falha ao ler imagem DDS local %s: %s", p, e)
+        return images
+
+    def delete_dds_image(self, issue_key: str, image_id: str) -> bool:
+        """Exclui uma imagem local da DDS."""
+        clean_key = self._safe_key(issue_key.upper())
+        target_dir = self.dds_images_dir / clean_key
+        if not target_dir.exists():
+            return False
+
+        clean_id = re.sub(r"^local-dds-img-", "", image_id).strip()
+        for p in target_dir.iterdir():
+            if p.is_file() and (p.stem == clean_id or p.name == clean_id):
+                try:
+                    p.unlink()
+                    return True
+                except Exception as e:
+                    logger.warning("Erro ao excluir imagem local DDS %s: %s", p, e)
+                    return False
+        return False
+
 
     # ==================== DOWNLOAD VIA MICROSOFT GRAPH API ====================
 
@@ -858,128 +951,157 @@ class SharePointManager:
             item_id = str(item_json.get("id") or "")
             item_name = str(item_json.get("name") or "")
 
+            def _process_folder_children(children_list: List[Dict[str, Any]], depth: int = 1) -> None:
+                """Processa arquivos de uma pasta, extraindo imagens e documentos, inclusive em subpastas."""
+                nonlocal best_docx_bytes, best_docx_meta
+                for ch in children_list:
+                    ch_id = str(ch.get("id") or "")
+                    ch_name = str(ch.get("name") or "")
+                    low_name = ch_name.lower()
+                    ch_size = int(ch.get("size") or 0)
+
+                    # Subpastas de evidencias (Prints, Evidencias, Imagens, etc.)
+                    if "folder" in ch and depth > 0:
+                        sub_drive_id = ((ch.get("parentReference") or {}).get("driveId") or "")
+                        if sub_drive_id and ch_id:
+                            sub_url = f"https://graph.microsoft.com/v1.0/drives/{sub_drive_id}/items/{ch_id}/children?$top=100"
+                            try:
+                                sub_resp = requests.get(sub_url, headers=headers, timeout=15)
+                                if sub_resp.status_code == 200:
+                                    sub_children = (sub_resp.json() or {}).get("value") or []
+                                    _process_folder_children(sub_children, depth=depth - 1)
+                            except Exception as ex_sub:
+                                errors.append(f"Aviso subpasta {ch_name}: {ex_sub}")
+                        continue
+
+                    if "file" not in ch:
+                        continue
+
+                    # Candidato a DOCX
+                    if low_name.endswith(".docx"):
+                        ch_mod = str(ch.get("lastModifiedDateTime") or "")
+                        if best_docx_bytes is None or ch_mod > best_docx_meta.get("lastModifiedDateTime", ""):
+                            drive_id = ((ch.get("parentReference") or {}).get("driveId") or "")
+                            fb_url = (
+                                f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{ch_id}/content"
+                                if drive_id and ch_id else ""
+                            )
+                            b_data = self._download_drive_item_bytes(
+                                ch, headers=headers, fallback_content_url=fb_url, force_refresh=force_refresh
+                            )
+                            if b_data:
+                                seen_item_ids.add(ch_id)
+                                mod_by = ((ch.get("lastModifiedBy") or {}).get("user") or {}).get("displayName") or ""
+                                best_docx_bytes = b_data
+                                best_docx_meta = {
+                                    "filename": ch_name or "DDS.docx",
+                                    "lastModifiedDateTime": ch_mod,
+                                    "lastModifiedBy": mod_by,
+                                    "webUrl": ch.get("webUrl") or raw_url,
+                                    "size": len(b_data),
+                                }
+
+                    # Imagens e evidencias
+                    elif low_name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")) and ch_size <= 15 * 1024 * 1024:
+                        if ch_id in seen_item_ids:
+                            continue
+                        seen_item_ids.add(ch_id)
+                        drive_id = ((ch.get("parentReference") or {}).get("driveId") or "")
+                        fb_url = (
+                            f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{ch_id}/content"
+                            if drive_id and ch_id else ""
+                        )
+                        img_bytes = self._download_drive_item_bytes(
+                            ch, headers=headers, fallback_content_url=fb_url, force_refresh=force_refresh
+                        )
+                        if img_bytes:
+                            ext = low_name.rsplit(".", 1)[-1]
+                            if ext == "jpg":
+                                ext = "jpeg"
+                            b64_img = base64.b64encode(img_bytes).decode("ascii")
+                            data_uri = f"data:image/{ext};base64,{b64_img}"
+                            mod_by = ((ch.get("lastModifiedBy") or {}).get("user") or {}).get("displayName") or "SharePoint"
+                            folder_images.append({
+                                "id": f"sp-img-{ch_id[:12]}",
+                                "name": ch_name,
+                                "size": len(img_bytes),
+                                "url": data_uri,
+                                "proxy_url": data_uri,
+                                "thumbnail_url": data_uri,
+                                "created": str(ch.get("createdDateTime") or ""),
+                                "author": f"SharePoint ({mod_by})",
+                                "is_embedded": False,
+                            })
+
+                    # Outros arquivos / documentos
+                    else:
+                        if ch_id not in seen_item_ids:
+                            seen_item_ids.add(ch_id)
+                            folder_files.append({
+                                "id": f"sp-file-{ch_id[:12]}",
+                                "name": ch_name,
+                                "size": ch_size,
+                                "url": ch.get("webUrl") or raw_url,
+                                "proxy_url": ch.get("webUrl") or raw_url,
+                                "created": str(ch.get("createdDateTime") or ""),
+                                "author": "SharePoint",
+                                "is_doc": low_name.endswith((".doc", ".pdf", ".xlsx", ".pbix", ".csv", ".sql")),
+                            })
+
             # Caso 1: O link aponta diretamente para um arquivo (.docx)
             if "file" in item_json:
-                if item_id in seen_item_ids:
-                    continue
-                seen_item_ids.add(item_id)
+                if item_id not in seen_item_ids:
+                    seen_item_ids.add(item_id)
+                    if item_name.lower().endswith(".docx"):
+                        content_url = f"https://graph.microsoft.com/v1.0/shares/{matched_sid}/driveItem/content"
+                        b_data = self._download_drive_item_bytes(
+                            item_json, headers=headers, fallback_content_url=content_url, force_refresh=force_refresh
+                        )
+                        if b_data:
+                            item_mod = str(item_json.get("lastModifiedDateTime") or "")
+                            if best_docx_bytes is None or item_mod > best_docx_meta.get("lastModifiedDateTime", ""):
+                                mod_by = ((item_json.get("lastModifiedBy") or {}).get("user") or {}).get("displayName") or ""
+                                best_docx_bytes = b_data
+                                best_docx_meta = {
+                                    "filename": item_name,
+                                    "lastModifiedDateTime": item_mod,
+                                    "lastModifiedBy": mod_by,
+                                    "webUrl": item_json.get("webUrl") or raw_url,
+                                    "size": len(b_data),
+                                }
 
-                if item_name.lower().endswith(".docx"):
-                    content_url = f"https://graph.microsoft.com/v1.0/shares/{matched_sid}/driveItem/content"
-                    b_data = self._download_drive_item_bytes(
-                        item_json, headers=headers, fallback_content_url=content_url, force_refresh=force_refresh
-                    )
-                    if b_data:
-                        item_mod = str(item_json.get("lastModifiedDateTime") or "")
-                        if best_docx_bytes is None or item_mod > best_docx_meta.get("lastModifiedDateTime", ""):
-                            mod_by = ((item_json.get("lastModifiedBy") or {}).get("user") or {}).get("displayName") or ""
-                            best_docx_bytes = b_data
-                            best_docx_meta = {
-                                "filename": item_name,
-                                "lastModifiedDateTime": item_mod,
-                                "lastModifiedBy": mod_by,
-                                "webUrl": item_json.get("webUrl") or raw_url,
-                                "size": len(b_data),
-                            }
+                # Inspeciona a pasta-mae do arquivo para obter imagens e capturas irmas presentes na mesma pasta
+                parent_ref = item_json.get("parentReference") or {}
+                parent_drive_id = parent_ref.get("driveId") or ""
+                parent_folder_id = parent_ref.get("id") or ""
+                if parent_drive_id and parent_folder_id:
+                    parent_children_url = f"https://graph.microsoft.com/v1.0/drives/{parent_drive_id}/items/{parent_folder_id}/children?$top=100"
+                    try:
+                        p_resp = requests.get(parent_children_url, headers=headers, timeout=18)
+                        if p_resp.status_code == 200:
+                            p_children = (p_resp.json() or {}).get("value") or []
+                            _process_folder_children(p_children, depth=1)
+                    except Exception as ex_p:
+                        errors.append(f"Aviso ao consultar pasta-mãe do SharePoint: {ex_p}")
 
             # Caso 2: O link aponta para uma pasta (:f:) no SharePoint
             elif "folder" in item_json and matched_sid:
                 children_url = f"https://graph.microsoft.com/v1.0/shares/{matched_sid}/driveItem/children?$top=100"
-                try:
-                    c_resp = requests.get(children_url, headers=headers, timeout=18)
-                    if c_resp.status_code == 200:
-                        children = (c_resp.json() or {}).get("value") or []
-                        # Ordena candidatos .docx priorizando nome contendo 'dds' e data mais recente
-                        docx_children = [
-                            ch for ch in children
-                            if "file" in ch and str(ch.get("name") or "").lower().endswith(".docx")
-                        ]
-                        docx_children.sort(
-                            key=lambda ch: (
-                                1 if "dds" in str(ch.get("name") or "").lower() else 0,
-                                str(ch.get("lastModifiedDateTime") or ""),
-                            ),
-                            reverse=True,
-                        )
-
-                        for d_ch in docx_children[:1]:
-                            ch_id = str(d_ch.get("id") or "")
-                            if ch_id in seen_item_ids:
-                                continue
-                            seen_item_ids.add(ch_id)
-                            ch_mod = str(d_ch.get("lastModifiedDateTime") or "")
-                            if best_docx_bytes is None or ch_mod > best_docx_meta.get("lastModifiedDateTime", ""):
-                                drive_id = ((d_ch.get("parentReference") or {}).get("driveId") or "")
-                                fb_url = (
-                                    f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{ch_id}/content"
-                                    if drive_id and ch_id else ""
-                                )
-                                b_data = self._download_drive_item_bytes(
-                                    d_ch, headers=headers, fallback_content_url=fb_url, force_refresh=force_refresh
-                                )
-                                if b_data:
-                                    mod_by = ((d_ch.get("lastModifiedBy") or {}).get("user") or {}).get("displayName") or ""
-                                    best_docx_bytes = b_data
-                                    best_docx_meta = {
-                                        "filename": str(d_ch.get("name") or "DDS.docx"),
-                                        "lastModifiedDateTime": ch_mod,
-                                        "lastModifiedBy": mod_by,
-                                        "webUrl": d_ch.get("webUrl") or raw_url,
-                                        "size": len(b_data),
-                                    }
-
-                        # Coleta imagens avulsas e anexos complementares presentes na pasta do SharePoint
-                        for ch in children:
-                            if "file" not in ch:
-                                continue
-                            ch_id = str(ch.get("id") or "")
-                            ch_name = str(ch.get("name") or "")
-                            low_name = ch_name.lower()
-                            ch_size = int(ch.get("size") or 0)
-
-                            if low_name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")) and ch_size <= 12 * 1024 * 1024:
-                                if ch_id in seen_item_ids:
-                                    continue
-                                seen_item_ids.add(ch_id)
-                                drive_id = ((ch.get("parentReference") or {}).get("driveId") or "")
-                                fb_url = (
-                                    f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{ch_id}/content"
-                                    if drive_id and ch_id else ""
-                                )
-                                img_bytes = self._download_drive_item_bytes(
-                                    ch, headers=headers, fallback_content_url=fb_url, force_refresh=force_refresh
-                                )
-                                if img_bytes:
-                                    ext = low_name.rsplit(".", 1)[-1]
-                                    if ext == "jpg":
-                                        ext = "jpeg"
-                                    b64_img = base64.b64encode(img_bytes).decode("ascii")
-                                    data_uri = f"data:image/{ext};base64,{b64_img}"
-                                    mod_by = ((ch.get("lastModifiedBy") or {}).get("user") or {}).get("displayName") or "SharePoint"
-                                    folder_images.append({
-                                        "id": f"sp-img-{ch_id[:12]}",
-                                        "name": ch_name,
-                                        "size": len(img_bytes),
-                                        "url": data_uri,
-                                        "proxy_url": data_uri,
-                                        "thumbnail_url": data_uri,
-                                        "created": str(ch.get("createdDateTime") or ""),
-                                        "author": f"Pasta SharePoint ({mod_by})",
-                                        "is_embedded": False,
-                                    })
-                            elif not low_name.endswith(".docx"):
-                                folder_files.append({
-                                    "id": f"sp-file-{ch_id[:12]}",
-                                    "name": ch_name,
-                                    "size": ch_size,
-                                    "url": ch.get("webUrl") or raw_url,
-                                    "proxy_url": ch.get("webUrl") or raw_url,
-                                    "created": str(ch.get("createdDateTime") or ""),
-                                    "author": "Pasta SharePoint",
-                                    "is_doc": low_name.endswith((".doc", ".pdf", ".xlsx", ".pbix", ".csv", ".sql")),
-                                })
-                except Exception as ex_f:
-                    errors.append(str(ex_f))
+                pages_count = 0
+                while children_url and pages_count < 3:
+                    pages_count += 1
+                    try:
+                        c_resp = requests.get(children_url, headers=headers, timeout=18)
+                        if c_resp.status_code == 200:
+                            c_data = c_resp.json() or {}
+                            children = c_data.get("value") or []
+                            _process_folder_children(children, depth=1)
+                            children_url = c_data.get("@odata.nextLink") or ""
+                        else:
+                            break
+                    except Exception as ex_f:
+                        errors.append(str(ex_f))
+                        break
 
         return {
             "has_sharepoint_link": True,
