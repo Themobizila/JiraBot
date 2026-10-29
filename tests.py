@@ -2863,9 +2863,9 @@ Não aplicável
             self.assertTrue(new_state.unlocked_during_lunch)
             self.assertEqual(len(new_state.intervals), 1)
 
-            # E valida que ao atingir 13:25 via transicao agendada, o servico retoma o expediente automaticamente
-            now_1325 = datetime.combine(date.today(), time(13, 25, 0))
-            sched_state = engine.check_scheduled_transitions(now=now_1325)
+            # E valida que ao atingir 13:30 (horario nominal planejado) via transicao agendada, o servico retoma o expediente automaticamente
+            now_1330 = datetime.combine(date.today(), time(13, 30, 0))
+            sched_state = engine.check_scheduled_transitions(now=now_1330)
 
             self.assertEqual(sched_state.status, "RUNNING")
             self.assertEqual(sched_state.last_event, "RESUMED_LUNCH_SCHEDULED")

@@ -386,10 +386,10 @@ class BotEngine:
         profile = self.get_profile()
 
         # Retomada automatica de almoco caso o usuario tenha desbloqueado antecipadamente para mexer no PC
-        # e o horario tenha atingido a janela de retorno do almoco
+        # e o relogio tenha atingido o horario nominal planejado de retorno do almoco (ex: 13:30)
         try:
             if self.state.status == "PAUSED_LUNCH" and getattr(self.state, "unlocked_during_lunch", False):
-                if now.time() >= profile.lunch_end_window.start_time:
+                if now.time() >= profile.get_planned_lunch_end_time():
                     now_iso = now.isoformat()
                     self.state.unlocked_during_lunch = False
                     self.state.status = "RUNNING"
