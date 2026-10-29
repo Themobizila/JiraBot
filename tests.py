@@ -2824,6 +2824,56 @@ Não aplicável
         self.assertEqual(profile.lunch_start_window.start_str, "11:55")
         self.assertEqual(profile.lunch_start_window.end_str, "12:25")
 
+    def test_engine_unlock_before_lunch_end_window_keeps_pause_and_flags_unlocked(self):
+        """Valida que desbloquear as 13:07 com janela 13:25-13:35 mantem PAUSED_LUNCH e marca unlocked_during_lunch."""
+        from engine import BotEngine
+        from config import BotConfig, ShiftProfile, TimeWindow
+        from storage import StateManager, DailyState, TimeInterval
+        import tempfile
+        import shutil
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            cfg = BotConfig()
+            cfg.profiles["custom"] = ShiftProfile(
+                name="custom",
+                target_hours=6.0,
+                entry_window=TimeWindow("07:40", "07:50"),
+                lunch_start_window=TimeWindow("11:55", "12:25"),
+                lunch_end_window=TimeWindow("13:25", "13:35"),
+                exit_window=TimeWindow("15:10", "15:20"),
+            )
+            cfg.active_profile = "custom"
+            mgr = StateManager(base_dir=temp_dir)
+
+            today_str = date.today().isoformat()
+            state = DailyState(date_str=today_str, status="PAUSED_LUNCH", target_issue="ATIVDIV-32")
+            state.intervals.append(TimeInterval(
+                start=f"{today_str}T07:48:00",
+                end=f"{today_str}T12:10:00",
+                issue_key="ATIVDIV-32"
+            ))
+            mgr.save_state(state)
+
+            engine = BotEngine(config=cfg, state_manager=mgr)
+            now_1307 = datetime.combine(date.today(), time(13, 7, 53))
+            new_state = engine.handle_unlock(now=now_1307)
+
+            self.assertEqual(new_state.status, "PAUSED_LUNCH")
+            self.assertTrue(new_state.unlocked_during_lunch)
+            self.assertEqual(len(new_state.intervals), 1)
+
+            # E valida que ao atingir 13:25 via transicao agendada, o servico retoma o expediente automaticamente
+            now_1325 = datetime.combine(date.today(), time(13, 25, 0))
+            sched_state = engine.check_scheduled_transitions(now=now_1325)
+
+            self.assertEqual(sched_state.status, "RUNNING")
+            self.assertEqual(sched_state.last_event, "RESUMED_LUNCH_SCHEDULED")
+            self.assertFalse(sched_state.unlocked_during_lunch)
+            self.assertEqual(len(sched_state.intervals), 2)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

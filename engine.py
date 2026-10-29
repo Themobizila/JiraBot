@@ -163,24 +163,20 @@ class BotEngine:
 
         elif self.state.status == "PAUSED_LUNCH":
             current_time = now.time()
-            lunch_pause_sec = 0
-            if self.state.intervals and self.state.intervals[-1].end:
-                try:
-                    ls_end_dt = datetime.fromisoformat(self.state.intervals[-1].end)
-                    lunch_pause_sec = max(0, int((now - ls_end_dt).total_seconds()))
-                except Exception:
-                    pass
 
-            # Permite retomar se o horario atingiu a janela de retorno OU se ja decorreram ao menos 30 minutos de almoco (1800s)
-            can_resume = (current_time >= profile.lunch_end_window.start_time) or (lunch_pause_sec >= 1800)
-            if not can_resume:
+            # Se o desbloqueio ocorrer antes do inicio da janela de retorno (ex: antes das 13:25 para retorno as 13:30):
+            # O usuario esta apenas mexendo no PC para uso pessoal; o cronometro e mantido em pausa
+            if current_time < profile.lunch_end_window.start_time:
+                self.state.unlocked_during_lunch = True
+                self.state_manager.save_state(self.state)
                 logger.info(
                     f"Desbloqueio as {now.strftime('%H:%M')} antes da janela de retorno do almoco "
-                    f"({profile.lunch_end_window.start_str}) e com apenas {lunch_pause_sec // 60}m de pausa. Cronometro mantido em pausa."
+                    f"({profile.lunch_end_window.start_str}). Usuario mexendo no PC; cronometro mantido em pausa."
                 )
                 return self.state
 
             # Retorno valido do intervalo de almoco
+            self.state.unlocked_during_lunch = False
             self.state.status = "RUNNING"
             self.state.intervals.append(TimeInterval(start=now_iso, issue_key=active_issue))
             self.state.last_event = "RESUMED_LUNCH_UNLOCK"
@@ -242,6 +238,10 @@ class BotEngine:
 
         self.refresh_state()
         logger.info(f"Processando LOCK as {now.strftime('%H:%M:%S')}. Estado atual: {self.state.status}")
+
+        if self.state.status == "PAUSED_LUNCH":
+            self.state.unlocked_during_lunch = False
+            self.state_manager.save_state(self.state)
 
         if self.state.status == "RUNNING":
             # Fecha o intervalo de trabalho corrente
@@ -377,10 +377,34 @@ class BotEngine:
     def check_scheduled_transitions(self, now: Optional[datetime] = None) -> DailyState:
         """
         Verificacao periodica executada pelo daemon:
-        1. Alerta de revisao de descricao configuravel antes do horario nominal de saida.
+        1. Retomada automatica de almoco caso o usuario tenha desbloqueado antecipadamente para mexer no PC
+           e o horario de retorno tenha sido atingido.
+        2. Alerta de revisao de descricao configuravel antes do horario nominal de saida.
         """
         now = now or datetime.now()
         self.refresh_state()
+        profile = self.get_profile()
+
+        # Retomada automatica de almoco caso o usuario tenha desbloqueado antecipadamente para mexer no PC
+        # e o horario tenha atingido a janela de retorno do almoco
+        try:
+            if self.state.status == "PAUSED_LUNCH" and getattr(self.state, "unlocked_during_lunch", False):
+                if now.time() >= profile.lunch_end_window.start_time:
+                    now_iso = now.isoformat()
+                    self.state.unlocked_during_lunch = False
+                    self.state.status = "RUNNING"
+                    active_issue = self.get_active_issue()
+                    self.state.intervals.append(TimeInterval(start=now_iso, issue_key=active_issue))
+                    self.state.last_event = "RESUMED_LUNCH_SCHEDULED"
+                    self.state.last_event_time = now_iso
+                    self.state_manager.save_state(self.state)
+
+                    total_str = format_duration(self.state.get_total_seconds())
+                    msg = f"Retorno do almoco iniciado as {now.strftime('%H:%M')} conforme planejado. Tempo acumulado: {total_str}"
+                    logger.info(msg)
+                    send_notification("JiraBot - Retorno do Almoco", msg, self.config.notifications_enabled)
+        except Exception as e:
+            logger.error(f"Erro ao avaliar retorno agendado de almoco: {e}")
 
         if not getattr(self.config, "exit_warning_enabled", True):
             return self.state

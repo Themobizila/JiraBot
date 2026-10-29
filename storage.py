@@ -72,6 +72,7 @@ class DailyState:
     jira_worklog_ids: List[str] = field(default_factory=list)
     last_event: str = "INITIALIZED"
     last_event_time: str = field(default_factory=lambda: datetime.now().isoformat())
+    unlocked_during_lunch: bool = False
 
     def close_previous_day_intervals(self) -> None:
         """Fecha com seguranca qualquer intervalo em aberto que pertenca a um dia anterior."""
@@ -480,6 +481,7 @@ class DailyState:
             "jira_worklog_ids": self.jira_worklog_ids,
             "last_event": self.last_event,
             "last_event_time": self.last_event_time,
+            "unlocked_during_lunch": self.unlocked_during_lunch,
             "total_seconds_calculated": self.get_total_seconds(),
             "seconds_by_issue": self.get_seconds_by_issue(),
             "shift_times": self.get_shift_times_summary(),
@@ -505,6 +507,7 @@ class DailyState:
             jira_worklog_ids=worklog_ids,
             last_event=data.get("last_event", "INITIALIZED"),
             last_event_time=data.get("last_event_time", datetime.now().isoformat()),
+            unlocked_during_lunch=bool(data.get("unlocked_during_lunch", False)),
         )
 
 
