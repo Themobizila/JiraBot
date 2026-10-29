@@ -2721,6 +2721,109 @@ Não aplicável
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_engine_lock_during_lunch_period_not_ignored_with_ignore_mode(self):
+        """Valida que o bloqueio as 12:07 e tratado como almoço mesmo com modo ignore e janela estreita."""
+        from engine import BotEngine
+        from config import BotConfig, ShiftProfile, TimeWindow
+        from storage import StateManager, DailyState, TimeInterval
+        import tempfile
+        import shutil
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            cfg = BotConfig()
+            cfg.intermediate_lock_mode = "ignore"
+            cfg.profiles["custom"] = ShiftProfile(
+                name="custom",
+                target_hours=6.0,
+                entry_window=TimeWindow("07:40", "07:50"),
+                lunch_start_window=TimeWindow("11:55", "12:05"),
+                lunch_end_window=TimeWindow("13:25", "13:35"),
+                exit_window=TimeWindow("15:10", "15:20"),
+                calculator={"lunch_start_hm": "12:00", "lunch_end_hm": "13:30"}
+            )
+            cfg.active_profile = "custom"
+            mgr = StateManager(base_dir=temp_dir)
+
+            today_str = date.today().isoformat()
+            state = DailyState(date_str=today_str, status="RUNNING", target_issue="ATIVDIV-32")
+            state.intervals.append(TimeInterval(
+                start=f"{today_str}T07:48:00",
+                issue_key="ATIVDIV-32"
+            ))
+            mgr.save_state(state)
+
+            engine = BotEngine(config=cfg, state_manager=mgr)
+            now_1207 = datetime.combine(date.today(), time(12, 7, 15))
+            new_state = engine.handle_lock(now=now_1207)
+
+            self.assertEqual(new_state.status, "PAUSED_LUNCH")
+            self.assertEqual(new_state.last_event, "PAUSED_LUNCH_LOCK")
+            self.assertIsNotNone(new_state.intervals[-1].end)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_engine_manual_pause_during_lunch_period_sets_paused_lunch(self):
+        """Valida que a pausa manual durante o horario de almoco registra status PAUSED_LUNCH."""
+        from engine import BotEngine
+        from config import BotConfig, ShiftProfile, TimeWindow
+        from storage import StateManager, DailyState, TimeInterval
+        import tempfile
+        import shutil
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            cfg = BotConfig()
+            cfg.profiles["custom"] = ShiftProfile(
+                name="custom",
+                target_hours=6.0,
+                entry_window=TimeWindow("07:40", "07:50"),
+                lunch_start_window=TimeWindow("11:55", "12:05"),
+                lunch_end_window=TimeWindow("13:25", "13:35"),
+                exit_window=TimeWindow("15:10", "15:20"),
+                calculator={"lunch_start_hm": "12:00", "lunch_end_hm": "13:30"}
+            )
+            cfg.active_profile = "custom"
+            mgr = StateManager(base_dir=temp_dir)
+
+            today_str = date.today().isoformat()
+            state = DailyState(date_str=today_str, status="RUNNING", target_issue="ATIVDIV-32")
+            state.intervals.append(TimeInterval(
+                start=f"{today_str}T07:48:00",
+                issue_key="ATIVDIV-32"
+            ))
+            mgr.save_state(state)
+
+            engine = BotEngine(config=cfg, state_manager=mgr)
+            now_1210 = datetime.combine(date.today(), time(12, 10, 50))
+            new_state = engine.manual_pause(now=now_1210)
+
+            self.assertEqual(new_state.status, "PAUSED_LUNCH")
+            self.assertEqual(new_state.last_event, "PAUSED_LUNCH_MANUAL")
+            self.assertIsNotNone(new_state.intervals[-1].end)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_shift_profile_from_dict_applies_safety_margin_to_lunch_start(self):
+        """Valida que ShiftProfile.from_dict garante margem de seguranca de pelo menos 25m para lunch_start."""
+        from config import ShiftProfile
+        data = {
+            "name": "custom",
+            "target_hours": 6.0,
+            "entry_window": {"start": "07:40", "end": "07:50"},
+            "lunch_start_window": {"start": "11:55", "end": "12:05"},
+            "lunch_end_window": {"start": "13:25", "end": "13:35"},
+            "exit_window": {"start": "15:10", "end": "15:20"},
+            "calculator": {
+                "lunch_start_hm": "12:00",
+                "lunch_start_before": 5,
+                "lunch_start_after": 5,
+            }
+        }
+        profile = ShiftProfile.from_dict(data)
+        self.assertEqual(profile.lunch_start_window.start_str, "11:55")
+        self.assertEqual(profile.lunch_start_window.end_str, "12:25")
+
 
 if __name__ == "__main__":
     unittest.main()

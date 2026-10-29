@@ -171,8 +171,8 @@ class BotEngine:
                 except Exception:
                     pass
 
-            # Permite retomar se o horario atingiu a janela de retorno OU se ja decorreram ao menos 35 minutos de almoco
-            can_resume = (current_time >= profile.lunch_end_window.start_time) or (lunch_pause_sec >= 2100)
+            # Permite retomar se o horario atingiu a janela de retorno OU se ja decorreram ao menos 30 minutos de almoco (1800s)
+            can_resume = (current_time >= profile.lunch_end_window.start_time) or (lunch_pause_sec >= 1800)
             if not can_resume:
                 logger.info(
                     f"Desbloqueio as {now.strftime('%H:%M')} antes da janela de retorno do almoco "
@@ -214,6 +214,25 @@ class BotEngine:
 
         return self.state
 
+    def _has_completed_lunch_today(self) -> bool:
+        """Verifica se o usuario ja concluiu o intervalo de almoco hoje."""
+        if self.state.last_event == "RESUMED_LUNCH_UNLOCK":
+            return True
+        for i in range(len(self.state.intervals) - 1):
+            cur_end = self.state.intervals[i].end
+            nxt_start = self.state.intervals[i + 1].start
+            if cur_end and nxt_start:
+                try:
+                    ce_dt = datetime.fromisoformat(cur_end)
+                    ns_dt = datetime.fromisoformat(nxt_start)
+                    gap_sec = (ns_dt - ce_dt).total_seconds()
+                    # Pausa de pelo menos 20 min com saida entre 11h e 14h
+                    if gap_sec >= 1200 and 11 <= ce_dt.hour <= 14:
+                        return True
+                except Exception:
+                    pass
+        return False
+
     def handle_lock(self, now: Optional[datetime] = None) -> DailyState:
         """Processa o evento de bloqueio de tela (WTS_SESSION_LOCK)."""
         now = now or datetime.now()
@@ -234,8 +253,18 @@ class BotEngine:
             total_seconds = self.state.get_total_seconds()
             target_seconds = profile.target_hours * 3600
 
-            # Avalia em qual janela de horario o bloqueio ocorreu
-            if profile.lunch_start_window.contains(current_time):
+            # Avalia em qual janela de horario o bloqueio ocorreu.
+            # E considerado pausa para almoco se:
+            # 1. Estiver na janela nominal lunch_start_window; OU
+            # 2. Estiver entre o inicio da janela de almoco e o horario planejado de retorno,
+            #    desde que o usuario ainda nao tenha completado o almoco hoje
+            is_lunch_window = profile.lunch_start_window.contains(current_time) or (
+                current_time >= profile.lunch_start_window.start_time
+                and current_time <= profile.get_planned_lunch_end_time()
+                and not self._has_completed_lunch_today()
+            )
+
+            if is_lunch_window:
                 # Pausa para almoco
                 self.state.status = "PAUSED_LUNCH"
                 self.state.last_event = "PAUSED_LUNCH_LOCK"
@@ -325,7 +354,12 @@ class BotEngine:
                 self._trigger_worklog_all_issues()
 
         elif was_running:
-            if profile.lunch_start_window.contains(current_time):
+            is_lunch_window = profile.lunch_start_window.contains(current_time) or (
+                current_time >= profile.lunch_start_window.start_time
+                and current_time <= profile.get_planned_lunch_end_time()
+                and not self._has_completed_lunch_today()
+            )
+            if is_lunch_window:
                 self.state.status = "PAUSED_LUNCH"
                 self.state.last_event = "PAUSED_LUNCH_SHUTDOWN"
                 self.state.last_event_time = now_iso
@@ -457,8 +491,23 @@ class BotEngine:
                 if not self.state.intervals[-1].issue_key:
                     self.state.intervals[-1].issue_key = self.get_active_issue()
 
-            self.state.status = "PAUSED_AWAY"
-            self.state.last_event = "MANUAL_PAUSE"
+            profile = self.get_profile()
+            current_time = now.time()
+            is_lunch_window = profile.lunch_start_window.contains(current_time) or (
+                current_time >= profile.lunch_start_window.start_time
+                and current_time <= profile.get_planned_lunch_end_time()
+                and not self._has_completed_lunch_today()
+            )
+
+            if is_lunch_window:
+                self.state.status = "PAUSED_LUNCH"
+                self.state.last_event = "PAUSED_LUNCH_MANUAL"
+                logger.info(f"Pausa de almoco registrada manualmente as {now.strftime('%H:%M')}.")
+            else:
+                self.state.status = "PAUSED_AWAY"
+                self.state.last_event = "MANUAL_PAUSE"
+                logger.info(f"Pausa temporaria registrada manualmente as {now.strftime('%H:%M')}.")
+
             self.state.last_event_time = now_iso
             self.state_manager.save_state(self.state)
         return self.state

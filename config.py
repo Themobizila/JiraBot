@@ -110,12 +110,14 @@ class ShiftProfile:
 
     def get_planned_lunch_start_time(self) -> time:
         """Retorna o horario nominal planejado de saida para almoco."""
-        if self.calculator and "ls_hm" in self.calculator:
-            try:
-                parts = str(self.calculator["ls_hm"]).strip().split(":")
-                return time(int(parts[0]), int(parts[1]), 0)
-            except Exception:
-                pass
+        if self.calculator:
+            calc_val = self.calculator.get("lunch_start_hm") or self.calculator.get("ls_hm")
+            if calc_val:
+                try:
+                    parts = str(calc_val).strip().split(":")
+                    return time(int(parts[0]), int(parts[1]), 0)
+                except Exception:
+                    pass
         st = self.lunch_start_window.start_time
         et = self.lunch_start_window.end_time
         st_sec = st.hour * 3600 + st.minute * 60
@@ -127,12 +129,14 @@ class ShiftProfile:
 
     def get_planned_lunch_end_time(self) -> time:
         """Retorna o horario nominal planejado de retorno do almoco."""
-        if self.calculator and "le_hm" in self.calculator:
-            try:
-                parts = str(self.calculator["le_hm"]).strip().split(":")
-                return time(int(parts[0]), int(parts[1]), 0)
-            except Exception:
-                pass
+        if self.calculator:
+            calc_val = self.calculator.get("lunch_end_hm") or self.calculator.get("le_hm")
+            if calc_val:
+                try:
+                    parts = str(calc_val).strip().split(":")
+                    return time(int(parts[0]), int(parts[1]), 0)
+                except Exception:
+                    pass
         if self.name == "8h" or self.target_hours >= 7.5:
             return time(13, 0, 0)
         elif self.name in ("6h_0745", "6h_0800"):
@@ -249,15 +253,26 @@ class ShiftProfile:
         le_w = TimeWindow.from_dict(data.get("lunch_end_window", {}))
         ex_w = TimeWindow.from_dict(data.get("exit_window", {}))
 
+        # Garante que a janela de inicio de almoco tenha uma margem de seguranca suficiente
+        calc_ls = (calculator.get("lunch_start_hm") or calculator.get("ls_hm")) if calculator else None
+        if calculator and calc_ls:
+            try:
+                ls_bef = int(calculator.get("lunch_start_before") or calculator.get("ls_before") or 15)
+                ls_aft = int(calculator.get("lunch_start_after") or calculator.get("ls_after") or 25)
+                ls_w = build_window(str(calc_ls).strip(), ls_bef, max(25, ls_aft))
+            except Exception:
+                pass
+
         # Se houver calculadora ou carga >= 7.5h:
         # Garante que a janela de retorno de almoco e saida nao fiquem presas em valores legados de 6h (13:20 / 15:05)
-        if calculator and calculator.get("le_hm"):
+        calc_le = (calculator.get("lunch_end_hm") or calculator.get("le_hm")) if calculator else None
+        if calculator and calc_le:
             try:
-                le_str = str(calculator["le_hm"]).strip()
+                le_str = str(calc_le).strip()
                 le_parts = le_str.split(":")
                 le_m = int(le_parts[0]) * 60 + int(le_parts[1])
-                bef = int(calculator.get("le_before", 10))
-                aft = int(calculator.get("le_after", 15))
+                bef = int(calculator.get("lunch_end_before") or calculator.get("le_before") or 10)
+                aft = int(calculator.get("lunch_end_after") or calculator.get("le_after") or 15)
                 c_start = f"{max(0, le_m - bef) // 60:02d}:{max(0, le_m - bef) % 60:02d}"
                 c_end = f"{min(1439, le_m + aft) // 60:02d}:{min(1439, le_m + aft) % 60:02d}"
                 if le_w.start_str in ("13:20", "13:15") and le_str in ("13:00", "12:55", "12:50"):
@@ -292,7 +307,7 @@ def make_custom_profile(
     entry_tol_before: int = 20,
     entry_tol_after: int = 20,
     lunch_start_tol_before: int = 20,
-    lunch_start_tol_after: int = 20,
+    lunch_start_tol_after: int = 25,
     lunch_end_tol_before: int = 10,
     lunch_end_tol_after: int = 15,
     exit_tol_before: int = 15,
@@ -306,14 +321,33 @@ def make_custom_profile(
         lunch_end_tol_before = lunch_end_tol_after = tolerance_minutes
         exit_tol_before = exit_tol_after = tolerance_minutes
 
+    # Garante margem posterior de seguranca de pelo menos 25 minutos para o inicio do almoco
+    actual_ls_after = max(25, lunch_start_tol_after)
+
+    calc = {
+        "entry_hm": entry_hm,
+        "lunch_start_hm": lunch_start_hm,
+        "lunch_end_hm": lunch_end_hm,
+        "exit_hm": exit_hm,
+        "entry_before": entry_tol_before,
+        "entry_after": entry_tol_after,
+        "lunch_start_before": lunch_start_tol_before,
+        "lunch_start_after": lunch_start_tol_after,
+        "lunch_end_before": lunch_end_tol_before,
+        "lunch_end_after": lunch_end_tol_after,
+        "exit_before": exit_tol_before,
+        "exit_after": exit_tol_after,
+    }
+
     return ShiftProfile(
         name=name,
         target_hours=target_hours,
         entry_window=build_window(entry_hm, entry_tol_before, entry_tol_after),
-        lunch_start_window=build_window(lunch_start_hm, lunch_start_tol_before, lunch_start_tol_after),
+        lunch_start_window=build_window(lunch_start_hm, lunch_start_tol_before, actual_ls_after),
         lunch_end_window=build_window(lunch_end_hm, lunch_end_tol_before, lunch_end_tol_after),
         exit_window=build_window(exit_hm, exit_tol_before, exit_tol_after),
         description=description or f"Turno Personalizado {target_hours}h (Entrada {entry_hm}, Retorno {lunch_end_hm}, Saida {exit_hm})",
+        calculator=calc,
     )
 
 
