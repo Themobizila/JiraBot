@@ -1,0 +1,228 @@
+{
+  "input_sha256": {
+    "C:\\Users\\joao.moura\\Downloads\\pixellab-Create-3-intermediate-frames-f-1794229290034.png": "2f1f947f262f2570f2b531c2ec35af8f3be0ad38fae3371c1c87feb8ea18e31d",
+    "C:\\Users\\joao.moura\\Downloads\\pixellab-Create-4-intermediate-frames-f-1794229318149.png": "9c0826f08542c0166bd434dfc562ffd024c7e5ea43fe7b536b557bed92bd5110",
+    "mascote\\experimentos\\09-11-2026\\impacto_referencias\\impacto_lateral_alinhado.png": "ccbdb7537f6b55e89e6315932be1af4b86b193dc310cb3f903d5ceec2b3db36f",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\referencias\\baixo.png": "9eeeb233d864e8a9d9ba5dd3e86db819db94d2138dc005816684175ef9bf4790",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\manifest.json": "e47452ff3bebcf6250c3d590a482f6a970f6cd567905628bded38ba6a7f0e0b6",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_00.png": "c1568f9f001b80cd3fe4a89e1343ec32af2740ef79f8e50e3902d00153bbed78",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_01.png": "df9f1948d4da4a641b80848a3c448b2a2122fec7a4d12e2ce7e3774ca55ce6a0",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_02.png": "f5d098699987183cc2b9c3877836883e8bcefd8ffe8bc07205819932e75b87ae",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_03.png": "59b77cc5157267648d3afd9a707a000510f3aac9603efae90173cdc8b853013a",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_04.png": "a625d10ec459ae948ff507b060394df0265811239848c28dce15df960fe1dbc4",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_05.png": "6ee8a25df445f06441cb2c02966b6779d0cc70922be3f5b53517ea18e31c6b8f",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_06.png": "aeababcadce5d166dc2012d4cb31fe468b3278cebd4e29a2704aa9e60b4e2d57",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_07.png": "3a937369fbc2e9990a59073d3ddf7338b6f34164d2f3cd420b98f156318fdb48",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_08.png": "fe1bc91296c5008833917cb9c69c624fd474e8dd606ff1be0b7e1f8773c5c38e",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_09.png": "5cfb891ba75bd00612022ffe8e269a24535c4de2c3ea964d8691011e859361e7",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_10.png": "4ca746f25e262115e4e57e05f7d71e4685fe2c3930947852295ef3403ba72e42",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_11.png": "15b6e56dd7ea2c816ca78c1fd457d663bfd2a920f7f3537107518013b92e3e94",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_12.png": "86ef661decba1ddd6aa2b2ec0e5fbcf0371215be0b3a4c79f9d040884da67166",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_13.png": "45190f1d10aa60ae668979abd1b00e15a9c2d7ea738880e383d6c49028f2241d",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_14.png": "9eeeb233d864e8a9d9ba5dd3e86db819db94d2138dc005816684175ef9bf4790",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_15.png": "17a89be3ca2073685a8b4e3f9109c4b7b84201c21905b52ededce8594f66b22c",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_16.png": "94e3480310374a0d355bcbcca6fd87ce7e531ec0f26780ab84ebe1c5777677c3",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_17.png": "a1358fee5df8e133bdabe0493ca67b70a6c8f953bf6d274719a7dc4ad9bf5be7",
+    "mascote\\experimentos\\09-11-2026\\recuperacao_apos_impacto_v1\\frames\\frame_18.png": "0b48b11411b89d452a2435b43ba061b53728ba89a595b659ea94e19f9de7c670"
+  },
+  "frame_size": [
+    256,
+    256
+  ],
+  "ground_y": 238,
+  "impact_frames": 8,
+  "impact_duration_ms": 950,
+  "duration_ms": 4700,
+  "frames": [
+    {
+      "index": 0,
+      "phase": "contato",
+      "source_frame": 0,
+      "dy": 0,
+      "duration_ms": 90
+    },
+    {
+      "index": 1,
+      "phase": "tombada",
+      "source_frame": 1,
+      "dy": 0,
+      "duration_ms": 90
+    },
+    {
+      "index": 2,
+      "phase": "tombada",
+      "source_frame": 2,
+      "dy": 2,
+      "duration_ms": 90
+    },
+    {
+      "index": 3,
+      "phase": "tombada",
+      "source_frame": 3,
+      "dy": 4,
+      "duration_ms": 110
+    },
+    {
+      "index": 4,
+      "phase": "lateral",
+      "source_frame": 0,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 5,
+      "phase": "rolamento",
+      "source_frame": 1,
+      "dy": 1,
+      "duration_ms": 130
+    },
+    {
+      "index": 6,
+      "phase": "rolamento",
+      "source_frame": 2,
+      "dy": -2,
+      "duration_ms": 140
+    },
+    {
+      "index": 7,
+      "phase": "rolamento",
+      "source_frame": 3,
+      "dy": 4,
+      "duration_ms": 170
+    },
+    {
+      "index": 8,
+      "phase": "recuperacao",
+      "source_frame": 0,
+      "dy": 0,
+      "duration_ms": 280
+    },
+    {
+      "index": 9,
+      "phase": "recuperacao",
+      "source_frame": 1,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 10,
+      "phase": "recuperacao",
+      "source_frame": 2,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 11,
+      "phase": "recuperacao",
+      "source_frame": 3,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 12,
+      "phase": "recuperacao",
+      "source_frame": 4,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 13,
+      "phase": "recuperacao",
+      "source_frame": 5,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 14,
+      "phase": "recuperacao",
+      "source_frame": 6,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 15,
+      "phase": "recuperacao",
+      "source_frame": 7,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 16,
+      "phase": "recuperacao",
+      "source_frame": 8,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 17,
+      "phase": "recuperacao",
+      "source_frame": 9,
+      "dy": 0,
+      "duration_ms": 160
+    },
+    {
+      "index": 18,
+      "phase": "recuperacao",
+      "source_frame": 10,
+      "dy": 0,
+      "duration_ms": 160
+    },
+    {
+      "index": 19,
+      "phase": "recuperacao",
+      "source_frame": 11,
+      "dy": 0,
+      "duration_ms": 160
+    },
+    {
+      "index": 20,
+      "phase": "recuperacao",
+      "source_frame": 12,
+      "dy": 0,
+      "duration_ms": 160
+    },
+    {
+      "index": 21,
+      "phase": "recuperacao",
+      "source_frame": 13,
+      "dy": 0,
+      "duration_ms": 160
+    },
+    {
+      "index": 22,
+      "phase": "recuperacao",
+      "source_frame": 14,
+      "dy": 0,
+      "duration_ms": 180
+    },
+    {
+      "index": 23,
+      "phase": "recuperacao",
+      "source_frame": 15,
+      "dy": 0,
+      "duration_ms": 150
+    },
+    {
+      "index": 24,
+      "phase": "recuperacao",
+      "source_frame": 16,
+      "dy": 0,
+      "duration_ms": 150
+    },
+    {
+      "index": 25,
+      "phase": "recuperacao",
+      "source_frame": 17,
+      "dy": 0,
+      "duration_ms": 150
+    },
+    {
+      "index": 26,
+      "phase": "recuperacao",
+      "source_frame": 18,
+      "dy": 0,
+      "duration_ms": 1000
+    }
+  ],
+  "missing_segment": "airborne"
+}

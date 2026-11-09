@@ -1,0 +1,55 @@
+{
+  "input_sha256": {
+    "C:\\Users\\joao.moura\\Downloads\\pixellab-Animate-this-capybara-finishin-1794222428299.png": "c20e6655cb899255d4cd6237bfe8d3e614105f501d1bf0744aeb7dda75fe8035",
+    "C:\\Users\\joao.moura\\Downloads\\pixellab-Create-a-single-quadrupedal-st-1793979485070.png": "f9cc336459872310df75b07c1be44a2f117a4e886ce358228d608abe08ebb131",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_00.png": "0b48b11411b89d452a2435b43ba061b53728ba89a595b659ea94e19f9de7c670",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_01.png": "375a3e1a0b564406252c78ae1d7e77568188179dbed9852e55dae749e99390a9",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_02.png": "0b977bd0d7b3551454d21aa3bf0bce711bb9d8ae8b7d732631ac3e87b13e9a20",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_03.png": "16d3e97030c781d8ea4146934485db3232a61dcf9153c20b3810028263d7025b",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_04.png": "021b0000bd9640eb4bd3cf477e8806625f40e52ed0de1d0f731099e58bee6ad7",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_05.png": "f4b92b37a2c720421b93b2edf50c0b9464b4d6cd832cf8431efc2d97656e41b4",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_06.png": "97dec7124b22e7e64447bea9df6097b7a4d029f61d85d0ad4a2eba8f041d2c33",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_07.png": "fd02151b716781c7352991c550ab8aedbbd3d4f4e2ef127f35b2880ea6a0dfca",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_08.png": "78cd09f9028aedb667a842e9f303be621120100c946d6d4f1bb12fab708a0397",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_09.png": "cc5ae86d2535365f820aaed98c19b5ccdbb7ca3fc1683929d8f4ce55a685cd2a",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_10.png": "d0885a303c4b996b81150c40b5752b92bba5b4baad566d4576ccec6e0f3b391d",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda\\frame_11.png": "bc58a2d4b27761d2f2921268f6d4af5473a78925bbab9e451880542e94bcdec3"
+  },
+  "frame_size": [
+    256,
+    256
+  ],
+  "intermediate_frames": 3,
+  "offsets_xy": [
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      6
+    ],
+    [
+      -1,
+      4
+    ],
+    [
+      -5,
+      1
+    ],
+    [
+      0,
+      0
+    ]
+  ],
+  "stop_duration_ms": [
+    160,
+    150,
+    150,
+    160,
+    1000
+  ],
+  "walk_stop_duration_ms": 3820,
+  "first_frame_matches_walk": true,
+  "final_frame_matches_shared_pose": true
+}

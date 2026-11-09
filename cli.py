@@ -846,6 +846,17 @@ def cmd_mini(args: Optional[argparse.Namespace] = None) -> None:
         print("Mini janela finalizada.")
 
 
+def cmd_mascote(args: Optional[argparse.Namespace] = None) -> None:
+    """Controla o mascote sem carregar dados de autenticação."""
+    from mascote_runtime.control import command
+    action = getattr(args, "action", "toggle") if args else "toggle"
+    values = [action]
+    theme = getattr(args, "theme", None) if args else None
+    if theme:
+        values.extend(["--theme", theme])
+    command(values)
+
+
 def cmd_web(args: Optional[argparse.Namespace] = None) -> None:
     """Inicia o servidor do Painel Web Interativo do JiraBot e abre no navegador."""
     from web_panel import run_web_server
@@ -911,6 +922,7 @@ def interactive_menu() -> None:
         print("-" * 60)
         print(" [W] Abrir Painel Web Interativo no Navegador (Interface Visual)")
         print(" [J] Abrir Mini Janela Flutuante (Always-on-Top) [Atalho: Ctrl+Alt+J ou Ctrl+Shift+J]")
+        print(" [B] Ativar / Desativar Mascote")
         print(" [1] Iniciar Bot em Background (com Icone na Bandeja)")
         print(" [2] Parar Bot em Background")
         print(" [X] Reiniciar Bot em Background (restart)")
@@ -933,12 +945,14 @@ def interactive_menu() -> None:
         print(" [0] Sair do Painel")
         print("=" * 60)
 
-        choice = input("Escolha uma opcao [W, 0-9, D, R, E, M, T, P, A, U, C ou X]: ").strip().upper()
+        choice = input("Escolha uma opcao [W, J, B, 0-9, D, R, E, M, T, P, A, U, C ou X]: ").strip().upper()
 
         if choice == "W":
             cmd_web()
         elif choice == "J":
             cmd_mini()
+        elif choice == "B":
+            cmd_mascote()
         elif choice == "1":
             cmd_start()
         elif choice == "2":
@@ -1125,6 +1139,10 @@ def main() -> None:
     widget_p = subparsers.add_parser("widget", help="Abre a mini janela flutuante Always-on-Top do JiraBot")
     widget_p.add_argument("--detached", "-d", action="store_true", help="Executa em processo desacoplado em segundo plano")
 
+    mascot_p = subparsers.add_parser("mascote", help="Controla o mascote animado opcional")
+    mascot_p.add_argument("action", nargs="?", default="status", choices=["on", "off", "toggle", "status", "demo"])
+    mascot_p.add_argument("--theme", choices=["auto", "normal", "halloween", "natal", "ano_novo", "pascoa"])
+
     args = parser.parse_args()
 
     if args.command == "setup":
@@ -1147,6 +1165,8 @@ def main() -> None:
         cmd_test_popup(args)
     elif args.command in ["mini", "widget"]:
         cmd_mini(args)
+    elif args.command == "mascote":
+        cmd_mascote(args)
     elif args.command == "adjust-start":
         cmd_adjust_start(args.time)
     elif args.command == "switch":

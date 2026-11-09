@@ -26,3 +26,10 @@
 
 # Autenticacao Oficial Microsoft 365 / SharePoint Online (Graph API - Device Code Flow)
 msal>=1.28.0
+
+# Renderização e leitura das sheets PNG do mascote opcional
+Pillow>=10.0
+
+# Somente para scripts/build_sprites.py; não carregadas pelo overlay
+numpy>=1.24
+opencv-python>=4.8

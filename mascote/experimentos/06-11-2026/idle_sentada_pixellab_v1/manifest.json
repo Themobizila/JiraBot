@@ -1,0 +1,197 @@
+{
+  "date": "06/11/2026 - 12:04:22",
+  "source": "C:\\Users\\joao.moura\\Downloads\\pixellab-Create-a-subtle--seamless-seat-1793976650636.png",
+  "source_sha256": "621e135d98edb32589855d64113867c3280dee4e477d6d56f75ef8d4cd850779",
+  "frame_size": [
+    256,
+    256
+  ],
+  "frame_count": 9,
+  "cleanup_region": [
+    105,
+    0,
+    145,
+    54
+  ],
+  "artifact_pixels_removed": 640,
+  "frames": [
+    {
+      "frame": 0,
+      "removed_artifact_pixels": 0,
+      "bbox": [
+        53,
+        49,
+        210,
+        244
+      ],
+      "source_cell": [
+        0,
+        0,
+        256,
+        256
+      ],
+      "clean_rgba_sha256": "4737f46edafc6aacbf919396ddf28c6dfb238595d0b7ee76fb34f6b4ca5da1b9"
+    },
+    {
+      "frame": 1,
+      "removed_artifact_pixels": 194,
+      "bbox": [
+        53,
+        46,
+        210,
+        244
+      ],
+      "source_cell": [
+        256,
+        0,
+        512,
+        256
+      ],
+      "clean_rgba_sha256": "78fe511c9cc27098638ae425849e1761d8e23204a8dff8695e2c226f3b3d9613"
+    },
+    {
+      "frame": 2,
+      "removed_artifact_pixels": 184,
+      "bbox": [
+        53,
+        47,
+        210,
+        244
+      ],
+      "source_cell": [
+        512,
+        0,
+        768,
+        256
+      ],
+      "clean_rgba_sha256": "8b174a6e2130caf110137a4d37a698045c57bcbab7b9469d92cde2bb5fd07f5d"
+    },
+    {
+      "frame": 3,
+      "removed_artifact_pixels": 178,
+      "bbox": [
+        53,
+        50,
+        209,
+        244
+      ],
+      "source_cell": [
+        0,
+        256,
+        256,
+        512
+      ],
+      "clean_rgba_sha256": "f0b589645c88de414ae2a6165ecfce40e9934725b335ac372d6cca3226f4ba8c"
+    },
+    {
+      "frame": 4,
+      "removed_artifact_pixels": 71,
+      "bbox": [
+        52,
+        54,
+        210,
+        244
+      ],
+      "source_cell": [
+        256,
+        256,
+        512,
+        512
+      ],
+      "clean_rgba_sha256": "d4b67308c57832b4e49a13f8104ec429994fa758bbdbea92e43aa9c5b4e856a2"
+    },
+    {
+      "frame": 5,
+      "removed_artifact_pixels": 0,
+      "bbox": [
+        52,
+        54,
+        209,
+        244
+      ],
+      "source_cell": [
+        512,
+        256,
+        768,
+        512
+      ],
+      "clean_rgba_sha256": "17ee6427bd0a7760543266b080ba23ad363e6f1aeb9db3362c8eab7d8c4646a0"
+    },
+    {
+      "frame": 6,
+      "removed_artifact_pixels": 13,
+      "bbox": [
+        52,
+        52,
+        208,
+        244
+      ],
+      "source_cell": [
+        0,
+        512,
+        256,
+        768
+      ],
+      "clean_rgba_sha256": "a655498738464c621c3cda6e777904269e31445bd0141c63c489269dabf982fa"
+    },
+    {
+      "frame": 7,
+      "removed_artifact_pixels": 0,
+      "bbox": [
+        53,
+        49,
+        210,
+        244
+      ],
+      "source_cell": [
+        256,
+        512,
+        512,
+        768
+      ],
+      "clean_rgba_sha256": "7b05d902479b2a2e19d9b16ddb99ce1fd356756d23434fdbc8ba89e6de51cc7f"
+    },
+    {
+      "frame": 8,
+      "removed_artifact_pixels": 0,
+      "bbox": [
+        53,
+        47,
+        210,
+        244
+      ],
+      "source_cell": [
+        512,
+        512,
+        768,
+        768
+      ],
+      "clean_rgba_sha256": "48100439054f529528fb9b5c2cccfa8bfefcd259e3c9e1dfc50228f1b00a8b12"
+    }
+  ],
+  "duration_ms": [
+    875,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    250
+  ],
+  "idle_duration_ms": 2000,
+  "combined_duration_ms": 6000,
+  "idle_first_frame_matches_end_of_sitting": true,
+  "checks": {
+    "original_crop_rgba_exact": true,
+    "all_pixels_outside_artifact_mask_unchanged": true,
+    "no_resize_or_warp": true,
+    "ground_244_all_frames": true,
+    "alpha_binary": true,
+    "canvas_not_clipped": true,
+    "apng_decoded_rgba_exact": true,
+    "gif_durations_exact": true,
+    "source_unchanged": true
+  }
+}

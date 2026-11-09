@@ -1,0 +1,201 @@
+{
+  "date": "06/11/2026 - 12:54:56",
+  "source": "C:\\Users\\joao.moura\\Downloads\\pixellab-Continue-the-quadrupedal-walki-1793980299131.png",
+  "input_sha256": {
+    "C:\\Users\\joao.moura\\Downloads\\pixellab-Continue-the-quadrupedal-walki-1793980299131.png": "a9bb669c68b3d27485d59e1fe2cacf8177be1e21f2b7bad67c357d4ccd8d0360",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v1\\esquerda\\frame_00.png": "0b48b11411b89d452a2435b43ba061b53728ba89a595b659ea94e19f9de7c670",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v1\\esquerda\\frame_01.png": "375a3e1a0b564406252c78ae1d7e77568188179dbed9852e55dae749e99390a9",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v1\\esquerda\\frame_02.png": "0b977bd0d7b3551454d21aa3bf0bce711bb9d8ae8b7d732631ac3e87b13e9a20",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v1\\esquerda\\frame_03.png": "16d3e97030c781d8ea4146934485db3232a61dcf9153c20b3810028263d7025b",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v1\\esquerda\\frame_04.png": "021b0000bd9640eb4bd3cf477e8806625f40e52ed0de1d0f731099e58bee6ad7",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v1\\esquerda\\frame_05.png": "f4b92b37a2c720421b93b2edf50c0b9464b4d6cd832cf8431efc2d97656e41b4",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v1\\esquerda\\frame_06.png": "97dec7124b22e7e64447bea9df6097b7a4d029f61d85d0ad4a2eba8f041d2c33",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v1\\esquerda\\frame_07.png": "fd02151b716781c7352991c550ab8aedbbd3d4f4e2ef127f35b2880ea6a0dfca",
+    "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v1\\esquerda\\frame_08.png": "78cd09f9028aedb667a842e9f303be621120100c946d6d4f1bb12fab708a0397"
+  },
+  "frame_size": [
+    256,
+    256
+  ],
+  "frame_count": 12,
+  "frames": [
+    {
+      "index": 0,
+      "origin": "original/frame_00",
+      "bbox": [
+        49,
+        59,
+        215,
+        238
+      ],
+      "rgba_sha256": "832378055c03b426f52c121b4a1ef7c81e05a4e806bdc8bd33841a9cacb79f4d"
+    },
+    {
+      "index": 1,
+      "origin": "original/frame_01",
+      "bbox": [
+        50,
+        57,
+        215,
+        238
+      ],
+      "rgba_sha256": "d4462dcd33cd04d3cced87266034798ca1c276f0e28eb4432b5026cab8ace948"
+    },
+    {
+      "index": 2,
+      "origin": "original/frame_02",
+      "bbox": [
+        50,
+        55,
+        215,
+        238
+      ],
+      "rgba_sha256": "00f7f04bbca665a1e5bdb16e30cc49f93986cb2fa51212d585b61bfdbccb6f5a"
+    },
+    {
+      "index": 3,
+      "origin": "original/frame_03",
+      "bbox": [
+        49,
+        57,
+        215,
+        234
+      ],
+      "rgba_sha256": "37b4b17d6672f33adcfb3ce281e1dce2225e3b2f9304b94be9dda3490cf95a6a"
+    },
+    {
+      "index": 4,
+      "origin": "original/frame_04",
+      "bbox": [
+        47,
+        61,
+        213,
+        236
+      ],
+      "rgba_sha256": "77fde8e5556be6ce55efe86610b1a3cb30cd7902642cd1c0f2e0d21add13c73a"
+    },
+    {
+      "index": 5,
+      "origin": "original/frame_05",
+      "bbox": [
+        46,
+        60,
+        213,
+        237
+      ],
+      "rgba_sha256": "22594362e6612030a065d45ce928a24c274a5b1d33c0139323c62c8be97c3a7b"
+    },
+    {
+      "index": 6,
+      "origin": "original/frame_06",
+      "bbox": [
+        46,
+        56,
+        215,
+        237
+      ],
+      "rgba_sha256": "dc55b052baf5ff04f054d1d01211bf885c9c34640e6d15a20a7f58f2737e5e62"
+    },
+    {
+      "index": 7,
+      "origin": "original/frame_07",
+      "bbox": [
+        46,
+        56,
+        219,
+        238
+      ],
+      "rgba_sha256": "50280ada8292d63804444b52302b04ae13def9fc14cb950a330ed775374b38cf"
+    },
+    {
+      "index": 8,
+      "origin": "original/frame_08",
+      "bbox": [
+        45,
+        59,
+        220,
+        238
+      ],
+      "rgba_sha256": "daf21d829985d7307c9881914e92df728ac897591ffaca494c34b6bf8871bb14"
+    },
+    {
+      "index": 9,
+      "origin": "interpolacao/celula_01",
+      "bbox": [
+        42,
+        59,
+        214,
+        238
+      ],
+      "rgba_sha256": "392571db7133ac884eebe0b2361e97a1b162f3921b01887b24990e85f3a34180"
+    },
+    {
+      "index": 10,
+      "origin": "interpolacao/celula_02",
+      "bbox": [
+        40,
+        62,
+        210,
+        238
+      ],
+      "rgba_sha256": "7b298b4b46e0615d001ca9bc9276dc32f1813cc5a01d1b70a4aa6947b71b384a"
+    },
+    {
+      "index": 11,
+      "origin": "interpolacao/celula_03",
+      "bbox": [
+        46,
+        62,
+        213,
+        239
+      ],
+      "rgba_sha256": "f69132a6b6e9f5b5ce69a13a6d3d37ff4f465d580639f204041cca9deced4342"
+    }
+  ],
+  "duration_ms": [
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200
+  ],
+  "cycle_duration_ms": 2400,
+  "bridge_cells_used": [
+    1,
+    2,
+    3
+  ],
+  "initial_endpoint_exact": true,
+  "generated_final_endpoint_rgba_difference_pixels": 2784,
+  "generated_final_endpoint_alpha_difference_pixels": 3,
+  "alpha_difference_to_next_including_loop": [
+    2619,
+    1998,
+    2056,
+    2091,
+    1499,
+    2815,
+    1487,
+    2696,
+    2874,
+    3497,
+    3163,
+    3075
+  ],
+  "checks": {
+    "saved_rgba_exact": true,
+    "apng_decoded_rgba_exact": true,
+    "gif_durations_exact": true,
+    "source_files_unchanged": true,
+    "mirroring_reversible_exact": true,
+    "no_clipping": true,
+    "no_resize_warp_or_interpolation": true
+  }
+}

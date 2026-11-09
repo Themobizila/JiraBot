@@ -1,0 +1,274 @@
+{
+  "date": "06/11/2026 - 11:39:52",
+  "source": "C:\\Users\\joao.moura\\Downloads\\pixellab-Animate-this-capybara-slowly-t-1793975445719.png",
+  "seated_source": "C:\\Users\\joao.moura\\Downloads\\pixellab-Create-one-seated-pose-of-the--1793975158960.png",
+  "source_sha256": [
+    "77ac40a1db6255dec1281e69403eed5591dc7d455ff2131c0bae70ec19effe2b",
+    "4a16f81950fdc88cd5a115c3b87393a4087a483fe9c9304369290f9a5edb0235"
+  ],
+  "frame_count": 9,
+  "frame_size": [
+    256,
+    256
+  ],
+  "ground_anchor": 244,
+  "alignment": "integer_vertical_translation_only",
+  "original_last_frame_matches_static_seated_pose": false,
+  "cycle_order": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    7,
+    6,
+    5,
+    4,
+    3,
+    2,
+    1
+  ],
+  "duration_ms": [
+    750,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    1500,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125
+  ],
+  "cycle_duration_ms": 4000,
+  "one_way_duration_ms": 2000,
+  "frames": [
+    {
+      "frame": 0,
+      "cell": [
+        0,
+        0,
+        256,
+        256
+      ],
+      "source_bbox": [
+        71,
+        39,
+        210,
+        244
+      ],
+      "aligned_bbox": [
+        71,
+        39,
+        210,
+        244
+      ],
+      "vertical_offset_px": 0,
+      "rgba_sha256": "3be18a9a7fcf74352dd7061a8ded1b52f82ea77a3c933c27c47ba73c0bc6251b"
+    },
+    {
+      "frame": 1,
+      "cell": [
+        256,
+        0,
+        512,
+        256
+      ],
+      "source_bbox": [
+        70,
+        33,
+        209,
+        239
+      ],
+      "aligned_bbox": [
+        70,
+        38,
+        209,
+        244
+      ],
+      "vertical_offset_px": 5,
+      "rgba_sha256": "6121c9414b754d0f65994d169c7dca56dc7d22f073b5ff69ff978069fa6fd9e5"
+    },
+    {
+      "frame": 2,
+      "cell": [
+        512,
+        0,
+        768,
+        256
+      ],
+      "source_bbox": [
+        69,
+        28,
+        209,
+        236
+      ],
+      "aligned_bbox": [
+        69,
+        36,
+        209,
+        244
+      ],
+      "vertical_offset_px": 8,
+      "rgba_sha256": "bc227b5b6a30f855d1f4b115be110007feee2f52c69a4daadcf9771c1577efd7"
+    },
+    {
+      "frame": 3,
+      "cell": [
+        0,
+        256,
+        256,
+        512
+      ],
+      "source_bbox": [
+        63,
+        35,
+        207,
+        237
+      ],
+      "aligned_bbox": [
+        63,
+        42,
+        207,
+        244
+      ],
+      "vertical_offset_px": 7,
+      "rgba_sha256": "c172186a9200d9a54e2e5758d0e3fe6b659896c8ef95fb0a5dc555696d1b70c9"
+    },
+    {
+      "frame": 4,
+      "cell": [
+        256,
+        256,
+        512,
+        512
+      ],
+      "source_bbox": [
+        51,
+        46,
+        204,
+        237
+      ],
+      "aligned_bbox": [
+        51,
+        53,
+        204,
+        244
+      ],
+      "vertical_offset_px": 7,
+      "rgba_sha256": "9e8215a1dfb24306107c22bbf346dd82b04e30951361af87a73e92164245afc6"
+    },
+    {
+      "frame": 5,
+      "cell": [
+        512,
+        256,
+        768,
+        512
+      ],
+      "source_bbox": [
+        58,
+        48,
+        205,
+        233
+      ],
+      "aligned_bbox": [
+        58,
+        59,
+        205,
+        244
+      ],
+      "vertical_offset_px": 11,
+      "rgba_sha256": "d1479792a21f22c56c6b0b5a655c786478a8a46e09aa75a962a9cb3ea156e20d"
+    },
+    {
+      "frame": 6,
+      "cell": [
+        0,
+        512,
+        256,
+        768
+      ],
+      "source_bbox": [
+        60,
+        48,
+        207,
+        233
+      ],
+      "aligned_bbox": [
+        60,
+        59,
+        207,
+        244
+      ],
+      "vertical_offset_px": 11,
+      "rgba_sha256": "628bba9a296d37412b9ee12538037dfe867e3efd015db73596c6ca4d3492149d"
+    },
+    {
+      "frame": 7,
+      "cell": [
+        256,
+        512,
+        512,
+        768
+      ],
+      "source_bbox": [
+        53,
+        44,
+        209,
+        236
+      ],
+      "aligned_bbox": [
+        53,
+        52,
+        209,
+        244
+      ],
+      "vertical_offset_px": 8,
+      "rgba_sha256": "401538590b1b534b0be6a7a04cb42f28e5c9e56ccafdb2db250ed206e28e5185"
+    },
+    {
+      "frame": 8,
+      "cell": [
+        512,
+        512,
+        768,
+        768
+      ],
+      "source_bbox": [
+        53,
+        39,
+        210,
+        234
+      ],
+      "aligned_bbox": [
+        53,
+        49,
+        210,
+        244
+      ],
+      "vertical_offset_px": 10,
+      "rgba_sha256": "fddd22632d6c64c60718a5280d3daa1b88a855429fdf4a2e6ed01b579551e1bf"
+    }
+  ],
+  "checks": {
+    "extracted_rgba_exact": true,
+    "translated_rgba_preserved": true,
+    "alpha_histogram_preserved": true,
+    "all_aligned_bases_244": true,
+    "apng_decoded_rgba_exact": true,
+    "gif_duration_ms": 4000,
+    "sources_unchanged": true,
+    "no_resize_or_deformation": true
+  }
+}

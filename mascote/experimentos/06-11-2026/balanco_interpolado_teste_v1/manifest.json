@@ -1,0 +1,330 @@
+{
+  "date": "06/11/2026 - 14:15:15",
+  "inputs": [
+    "C:\\Users\\joao.moura\\Downloads\\pixellab-Interpolate-from-the-starting--1793984635732.png",
+    "C:\\Users\\joao.moura\\Downloads\\pixellab-Animate-this-exact-capybara-ge-1793982578061.png",
+    "mascote\\experimentos\\06-11-2026\\balanco_detalhes_v1\\frames\\frame_08.png",
+    "mascote\\experimentos\\06-11-2026\\balanco_detalhes_v1\\frames\\frame_10.png",
+    "mascote\\experimentos\\06-11-2026\\balanco_detalhes_v1\\frames\\frame_12.png",
+    "mascote\\experimentos\\06-11-2026\\balanco_detalhes_v1\\frames\\frame_14.png",
+    "mascote\\experimentos\\06-11-2026\\balanco_detalhes_v1\\frames\\frame_16.png",
+    "mascote\\experimentos\\06-11-2026\\balanco_detalhes_v1\\frames\\frame_18.png",
+    "mascote\\experimentos\\06-11-2026\\balanco_detalhes_v1\\frames\\frame_20.png",
+    "mascote\\experimentos\\06-11-2026\\balanco_detalhes_v1\\frames\\frame_22.png",
+    "mascote\\experimentos\\06-11-2026\\balanco_detalhes_v1\\frames\\frame_24.png"
+  ],
+  "input_sha256": [
+    "2d93ea5cf98e097612ca2aaf658afc0fda5fa122717c73a7c1b4914caf51076f",
+    "8d7b96ee7b2b64c4685be57cd9eea8b8ddafbf9caf5b5a9d013de61073e2dc7a",
+    "7bea19c2e6e3ad21164f3e2dcc51b73e66a71d78155b0cd4eddc54ac283532d5",
+    "d2bd5d7d239f3359700c905988068f4860c3eab66d9a7f8ed7b504b328153fa9",
+    "2f320e1803a0de87937dba34620d3d9be0e5ec90e444b57ca653c688fb44a3e4",
+    "73e50e7d3c6a25b9907f81a5c12ea831840dfc6241a8aadc11cba25692755edb",
+    "568480402b0a8262c3321a9a32ecb57ceaf4e6d2912a62be9fef5878635e41a6",
+    "83d48da269247ce9cab318fc739a8757c047371cd23a1f7c021fadc1efccd53c",
+    "7458be50afbcc98372c303182b296c08a43d170d156bf4b2e56869ec49fdda8f",
+    "cd8d20b7a6bf87cc02f6ca56a9e05cc4f24591fa1e73b1c3f8ec8c0794e14132",
+    "044a1e2c1f281662b3542eb9dcd86bbe3b69132e10eef4358a722c930947d5c0"
+  ],
+  "frame_size": [
+    256,
+    256
+  ],
+  "frame_count": 9,
+  "half_duration_ms": 1600,
+  "half_duration_by_frame": [
+    100,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    100
+  ],
+  "preview_order": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    7,
+    6,
+    5,
+    4,
+    3,
+    2,
+    1
+  ],
+  "preview_duration_ms": 3200,
+  "preview_return": "reversed_for_review_only",
+  "frames": [
+    {
+      "index": 0,
+      "source_cell": [
+        0,
+        0,
+        256,
+        256
+      ],
+      "bbox": [
+        64,
+        0,
+        229,
+        239
+      ],
+      "rig_frame": 8,
+      "top_opaque_x": [
+        67,
+        68,
+        69,
+        70,
+        71,
+        188,
+        189,
+        190,
+        191,
+        192
+      ]
+    },
+    {
+      "index": 1,
+      "source_cell": [
+        256,
+        0,
+        512,
+        256
+      ],
+      "bbox": [
+        62,
+        0,
+        229,
+        240
+      ],
+      "rig_frame": 10,
+      "top_opaque_x": [
+        67,
+        68,
+        69,
+        70,
+        71,
+        188,
+        189,
+        190,
+        191,
+        192
+      ]
+    },
+    {
+      "index": 2,
+      "source_cell": [
+        512,
+        0,
+        768,
+        256
+      ],
+      "bbox": [
+        56,
+        0,
+        227,
+        241
+      ],
+      "rig_frame": 12,
+      "top_opaque_x": [
+        67,
+        68,
+        69,
+        70,
+        71,
+        188,
+        189,
+        190,
+        191,
+        192
+      ]
+    },
+    {
+      "index": 3,
+      "source_cell": [
+        0,
+        256,
+        256,
+        512
+      ],
+      "bbox": [
+        49,
+        0,
+        222,
+        242
+      ],
+      "rig_frame": 14,
+      "top_opaque_x": [
+        67,
+        68,
+        69,
+        70,
+        71,
+        188,
+        189,
+        190,
+        191,
+        192
+      ]
+    },
+    {
+      "index": 4,
+      "source_cell": [
+        256,
+        256,
+        512,
+        512
+      ],
+      "bbox": [
+        41,
+        0,
+        214,
+        243
+      ],
+      "rig_frame": 16,
+      "top_opaque_x": [
+        67,
+        68,
+        69,
+        70,
+        71,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192
+      ]
+    },
+    {
+      "index": 5,
+      "source_cell": [
+        512,
+        256,
+        768,
+        512
+      ],
+      "bbox": [
+        35,
+        0,
+        207,
+        242
+      ],
+      "rig_frame": 18,
+      "top_opaque_x": [
+        67,
+        68,
+        69,
+        70,
+        71,
+        188,
+        189,
+        190,
+        191,
+        192
+      ]
+    },
+    {
+      "index": 6,
+      "source_cell": [
+        0,
+        512,
+        256,
+        768
+      ],
+      "bbox": [
+        28,
+        0,
+        199,
+        241
+      ],
+      "rig_frame": 20,
+      "top_opaque_x": [
+        67,
+        68,
+        69,
+        70,
+        71,
+        188,
+        189,
+        190,
+        191,
+        192
+      ]
+    },
+    {
+      "index": 7,
+      "source_cell": [
+        256,
+        512,
+        512,
+        768
+      ],
+      "bbox": [
+        26,
+        0,
+        193,
+        239
+      ],
+      "rig_frame": 22,
+      "top_opaque_x": [
+        67,
+        68,
+        69,
+        70,
+        71,
+        188,
+        189,
+        190,
+        191,
+        192
+      ]
+    },
+    {
+      "index": 8,
+      "source_cell": [
+        512,
+        512,
+        768,
+        768
+      ],
+      "bbox": [
+        28,
+        0,
+        193,
+        239
+      ],
+      "rig_frame": 24,
+      "top_opaque_x": [
+        67,
+        68,
+        69,
+        70,
+        71,
+        188,
+        189,
+        190,
+        191,
+        192
+      ]
+    }
+  ],
+  "checks": {
+    "extracted_rgba_exact": true,
+    "apng_decoded_rgba_exact": true,
+    "gif_duration_exact": true,
+    "no_resize_or_warp_in_animation_frames": true,
+    "no_clipping": true,
+    "binary_alpha": true,
+    "inputs_unchanged": true
+  }
+}

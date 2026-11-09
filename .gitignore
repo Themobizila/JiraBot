@@ -28,3 +28,12 @@ dds_cache/
 relatorios/
 backupP/
 backupCore/
+.test_runs/
+
+# Mascote local runtime e locks
+mascote.lock
+mascote_runtime.json
+mascote_settings.json
+mascote_runtime/
+mascote_test_err.log
+assets/debug_preview.png

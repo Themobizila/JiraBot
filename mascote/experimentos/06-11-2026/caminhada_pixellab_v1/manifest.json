@@ -1,0 +1,201 @@
+{
+  "date": "06/11/2026 - 12:44:17",
+  "source": "C:\\Users\\joao.moura\\Downloads\\pixellab-Animate-this-exact-capybara-pe-1793979618981.png",
+  "source_sha256": "71516bff724ead35158e91c08d9908d88acfea24608dd7cd8582e3e971dfe560",
+  "frame_size": [
+    256,
+    256
+  ],
+  "frame_count": 9,
+  "frame_order": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "duration_ms": [
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200
+  ],
+  "cycle_duration_ms": 1800,
+  "frames": [
+    {
+      "index": 0,
+      "cell": [
+        0,
+        0,
+        256,
+        256
+      ],
+      "bbox": [
+        49,
+        59,
+        215,
+        238
+      ],
+      "rgba_sha256": "832378055c03b426f52c121b4a1ef7c81e05a4e806bdc8bd33841a9cacb79f4d"
+    },
+    {
+      "index": 1,
+      "cell": [
+        256,
+        0,
+        512,
+        256
+      ],
+      "bbox": [
+        50,
+        57,
+        215,
+        238
+      ],
+      "rgba_sha256": "d4462dcd33cd04d3cced87266034798ca1c276f0e28eb4432b5026cab8ace948"
+    },
+    {
+      "index": 2,
+      "cell": [
+        512,
+        0,
+        768,
+        256
+      ],
+      "bbox": [
+        50,
+        55,
+        215,
+        238
+      ],
+      "rgba_sha256": "00f7f04bbca665a1e5bdb16e30cc49f93986cb2fa51212d585b61bfdbccb6f5a"
+    },
+    {
+      "index": 3,
+      "cell": [
+        0,
+        256,
+        256,
+        512
+      ],
+      "bbox": [
+        49,
+        57,
+        215,
+        234
+      ],
+      "rgba_sha256": "37b4b17d6672f33adcfb3ce281e1dce2225e3b2f9304b94be9dda3490cf95a6a"
+    },
+    {
+      "index": 4,
+      "cell": [
+        256,
+        256,
+        512,
+        512
+      ],
+      "bbox": [
+        47,
+        61,
+        213,
+        236
+      ],
+      "rgba_sha256": "77fde8e5556be6ce55efe86610b1a3cb30cd7902642cd1c0f2e0d21add13c73a"
+    },
+    {
+      "index": 5,
+      "cell": [
+        512,
+        256,
+        768,
+        512
+      ],
+      "bbox": [
+        46,
+        60,
+        213,
+        237
+      ],
+      "rgba_sha256": "22594362e6612030a065d45ce928a24c274a5b1d33c0139323c62c8be97c3a7b"
+    },
+    {
+      "index": 6,
+      "cell": [
+        0,
+        512,
+        256,
+        768
+      ],
+      "bbox": [
+        46,
+        56,
+        215,
+        237
+      ],
+      "rgba_sha256": "dc55b052baf5ff04f054d1d01211bf885c9c34640e6d15a20a7f58f2737e5e62"
+    },
+    {
+      "index": 7,
+      "cell": [
+        256,
+        512,
+        512,
+        768
+      ],
+      "bbox": [
+        46,
+        56,
+        219,
+        238
+      ],
+      "rgba_sha256": "50280ada8292d63804444b52302b04ae13def9fc14cb950a330ed775374b38cf"
+    },
+    {
+      "index": 8,
+      "cell": [
+        512,
+        512,
+        768,
+        768
+      ],
+      "bbox": [
+        45,
+        59,
+        220,
+        238
+      ],
+      "rgba_sha256": "daf21d829985d7307c9881914e92df728ac897591ffaca494c34b6bf8871bb14"
+    }
+  ],
+  "alpha_difference_to_next_including_loop": [
+    2619,
+    1998,
+    2056,
+    2091,
+    1499,
+    2815,
+    1487,
+    2696,
+    3805
+  ],
+  "alignment": "original_positions_preserved",
+  "checks": {
+    "extracted_rgba_exact": true,
+    "mirroring_reversible_exact": true,
+    "apng_decoded_rgba_exact": true,
+    "gif_duration_exact": true,
+    "no_resize_warp_or_interpolation": true,
+    "margins_not_clipped": true,
+    "binary_alpha": true,
+    "source_unchanged": true
+  }
+}

@@ -73,15 +73,40 @@ CALCULATOR_MIN_KEYS = (
     "lunch_end_before", "lunch_end_after",
     "exit_before", "exit_after",
 )
+LEGACY_CALCULATOR_ALIASES = {
+    "ls_hm": "lunch_start_hm",
+    "le_hm": "lunch_end_hm",
+    "ls_before": "lunch_start_before",
+    "ls_after": "lunch_start_after",
+    "le_before": "lunch_end_before",
+    "le_after": "lunch_end_after",
+}
+
+
+def _window_midpoint_time(w: TimeWindow) -> time:
+    """Calcula o ponto medio exato de uma TimeWindow como objeto datetime.time."""
+    st = w.start_time
+    et = w.end_time
+    st_sec = st.hour * 3600 + st.minute * 60
+    et_sec = et.hour * 3600 + et.minute * 60
+    if et_sec < st_sec:
+        et_sec += 86400
+    mid_sec = ((st_sec + et_sec) // 2) % 86400
+    return time(mid_sec // 3600, (mid_sec % 3600) // 60, 0)
 
 
 def sanitize_calculator(raw: Any) -> Dict[str, Any]:
-    """Filtra os parametros da Calculadora de Janelas: apenas chaves conhecidas, HH:MM valido e folgas 0-240 min."""
+    """Filtra os parametros da Calculadora de Janelas: normaliza chaves legadas, HH:MM valido e folgas 0-240 min."""
     if not isinstance(raw, dict):
         return {}
+    normalized: Dict[str, Any] = dict(raw)
+    for short_key, full_key in LEGACY_CALCULATOR_ALIASES.items():
+        if short_key in normalized and full_key not in normalized:
+            normalized[full_key] = normalized[short_key]
+
     clean: Dict[str, Any] = {}
     for key in CALCULATOR_HM_KEYS:
-        val = str(raw.get(key) or "").strip()
+        val = str(normalized.get(key) or "").strip()
         try:
             datetime.strptime(val, "%H:%M")
             clean[key] = val
@@ -89,7 +114,7 @@ def sanitize_calculator(raw: Any) -> Dict[str, Any]:
             continue
     for key in CALCULATOR_MIN_KEYS:
         try:
-            num = int(raw.get(key))
+            num = int(normalized.get(key))
         except (TypeError, ValueError):
             continue
         clean[key] = max(0, min(240, num))
@@ -118,14 +143,7 @@ class ShiftProfile:
                     return time(int(parts[0]), int(parts[1]), 0)
                 except Exception:
                     pass
-        st = self.lunch_start_window.start_time
-        et = self.lunch_start_window.end_time
-        st_sec = st.hour * 3600 + st.minute * 60
-        et_sec = et.hour * 3600 + et.minute * 60
-        if et_sec < st_sec:
-            et_sec += 86400
-        mid_sec = ((st_sec + et_sec) // 2) % 86400
-        return time(mid_sec // 3600, (mid_sec % 3600) // 60, 0)
+        return _window_midpoint_time(self.lunch_start_window)
 
     def get_planned_lunch_end_time(self) -> time:
         """Retorna o horario nominal planejado de retorno do almoco."""
@@ -137,18 +155,11 @@ class ShiftProfile:
                     return time(int(parts[0]), int(parts[1]), 0)
                 except Exception:
                     pass
-        if self.name == "8h" or self.target_hours >= 7.5:
-            return time(13, 0, 0)
-        elif self.name in ("6h_0745", "6h_0800"):
-            return time(13, 30, 0)
-        st = self.lunch_end_window.start_time
-        et = self.lunch_end_window.end_time
-        st_sec = st.hour * 3600 + st.minute * 60
-        et_sec = et.hour * 3600 + et.minute * 60
-        if et_sec < st_sec:
-            et_sec += 86400
-        mid_sec = ((st_sec + et_sec) // 2) % 86400
-        return time(mid_sec // 3600, (mid_sec % 3600) // 60, 0)
+        w_pair = (self.lunch_end_window.start_str, self.lunch_end_window.end_str)
+        if w_pair in (("12:55", "13:30"), ("12:45", "13:30"), ("12:00", "13:30")):
+            if self.name == "8h" or self.target_hours >= 7.5:
+                return time(13, 0, 0)
+        return _window_midpoint_time(self.lunch_end_window)
 
     def get_planned_entry_time(self) -> time:
         """Retorna o horario nominal planejado de inicio do expediente."""
@@ -158,22 +169,12 @@ class ShiftProfile:
                 return time(int(parts[0]), int(parts[1]), 0)
             except Exception:
                 pass
-        if self.name == "8h":
+        w_pair = (self.entry_window.start_str, self.entry_window.end_str)
+        if w_pair in (("07:15", "08:15"), ("07:15", "08:30")) and (self.name == "8h" or self.target_hours >= 7.5):
             return time(7, 42, 0)
-        elif self.name == "6h_0745":
-            return time(7, 45, 0)
-        elif self.name == "6h_0800":
+        if w_pair == ("07:35", "08:30") and self.name == "6h_0800":
             return time(8, 0, 0)
-        elif self.target_hours >= 7.5:
-            return time(7, 42, 0)
-        st = self.entry_window.start_time
-        et = self.entry_window.end_time
-        st_sec = st.hour * 3600 + st.minute * 60
-        et_sec = et.hour * 3600 + et.minute * 60
-        if et_sec < st_sec:
-            et_sec += 86400
-        mid_sec = ((st_sec + et_sec) // 2) % 86400
-        return time(mid_sec // 3600, (mid_sec % 3600) // 60, 0)
+        return _window_midpoint_time(self.entry_window)
 
     def get_planned_exit_time(self) -> time:
         """Retorna o horario nominal planejado de saida do expediente."""
@@ -184,25 +185,17 @@ class ShiftProfile:
             except Exception:
                 pass
 
-        # Para perfis padrao pre-configurados conhecidos
-        if self.name == "8h":
+        w_pair = (self.exit_window.start_str, self.exit_window.end_str)
+        if w_pair == ("17:25", "18:30") and self.name == "8h":
             return time(17, 42, 0)
-        elif self.name == "6h_0745":
-            return time(15, 15, 0)
-        elif self.name == "6h_0800":
-            return time(15, 30, 0)
-        elif self.target_hours >= 7.5:
+        if w_pair == ("17:00", "18:30") and self.target_hours >= 7.5:
             return time(17, 30, 0)
+        if w_pair == ("15:05", "16:00") and self.name == "6h_0745":
+            return time(15, 15, 0)
+        if w_pair == ("15:15", "16:00") and self.name == "6h_0800":
+            return time(15, 30, 0)
 
-        # Fallback: centro da janela de saida
-        st = self.exit_window.start_time
-        et = self.exit_window.end_time
-        st_sec = st.hour * 3600 + st.minute * 60
-        et_sec = et.hour * 3600 + et.minute * 60
-        if et_sec < st_sec:
-            et_sec += 86400
-        mid_sec = ((st_sec + et_sec) // 2) % 86400
-        return time(mid_sec // 3600, (mid_sec % 3600) // 60, 0)
+        return _window_midpoint_time(self.exit_window)
 
     def get_lunch_start_hm(self) -> str:
         """Retorna o horario de saida para almoco no formato HH:MM."""
@@ -253,36 +246,69 @@ class ShiftProfile:
         le_w = TimeWindow.from_dict(data.get("lunch_end_window", {}))
         ex_w = TimeWindow.from_dict(data.get("exit_window", {}))
 
+        # Saneamento de configuracoes legadas onde o HTML antigo gravou defaults de 6h (07:45 / 13:30 / 15:30)
+        # em perfis de 8h ou onde lunch_end_hm ficou igual ao limite final (13:30) de uma janela de 13:00
+        if calculator:
+            calc_le_val = calculator.get("lunch_end_hm")
+            calc_ex_val = calculator.get("exit_hm")
+            if (name == "8h" or target_hours >= 7.5) and calc_le_val == "13:30":
+                if calc_ex_val in ("15:30", "15:15") or le_w.start_str in ("12:45", "12:50", "12:55"):
+                    calculator["lunch_end_hm"] = "13:00"
+                    if calc_ex_val in ("15:30", "15:15"):
+                        calculator["exit_hm"] = "17:42" if name == "8h" else "17:30"
+                        if calculator.get("entry_hm") == "07:45":
+                            calculator["entry_hm"] = "07:42"
+
+        # Sincroniza a janela de entrada caso a calculadora defina entry_hm e nao esteja contido na janela
+        calc_en = calculator.get("entry_hm") if calculator else None
+        if calculator and calc_en:
+            try:
+                en_t = datetime.strptime(calc_en, "%H:%M").time()
+                if "entry_window" not in data or not entry_w.contains(en_t):
+                    en_bef = int(calculator.get("entry_before", 20))
+                    en_aft = int(calculator.get("entry_after", 20))
+                    entry_w = build_window(calc_en, en_bef, en_aft)
+            except Exception:
+                pass
+
         # Garante que a janela de inicio de almoco tenha uma margem de seguranca suficiente
-        calc_ls = (calculator.get("lunch_start_hm") or calculator.get("ls_hm")) if calculator else None
+        calc_ls = calculator.get("lunch_start_hm") if calculator else None
         if calculator and calc_ls:
             try:
-                ls_bef = int(calculator.get("lunch_start_before") or calculator.get("ls_before") or 15)
-                ls_aft = int(calculator.get("lunch_start_after") or calculator.get("ls_after") or 25)
+                ls_bef = int(calculator.get("lunch_start_before", 15))
+                ls_aft = int(calculator.get("lunch_start_after", 25))
                 ls_w = build_window(str(calc_ls).strip(), ls_bef, max(25, ls_aft))
             except Exception:
                 pass
 
-        # Se houver calculadora ou carga >= 7.5h:
-        # Garante que a janela de retorno de almoco e saida nao fiquem presas em valores legados de 6h (13:20 / 15:05)
-        calc_le = (calculator.get("lunch_end_hm") or calculator.get("le_hm")) if calculator else None
+        # Sincroniza a janela de retorno de almoco com o horario configurado pelo usuario
+        calc_le = calculator.get("lunch_end_hm") if calculator else None
         if calculator and calc_le:
             try:
                 le_str = str(calc_le).strip()
-                le_parts = le_str.split(":")
-                le_m = int(le_parts[0]) * 60 + int(le_parts[1])
-                bef = int(calculator.get("lunch_end_before") or calculator.get("le_before") or 10)
-                aft = int(calculator.get("lunch_end_after") or calculator.get("le_after") or 15)
-                c_start = f"{max(0, le_m - bef) // 60:02d}:{max(0, le_m - bef) % 60:02d}"
-                c_end = f"{min(1439, le_m + aft) // 60:02d}:{min(1439, le_m + aft) % 60:02d}"
-                if le_w.start_str in ("13:20", "13:15") and le_str in ("13:00", "12:55", "12:50"):
-                    le_w = TimeWindow(c_start, c_end)
+                le_t = datetime.strptime(le_str, "%H:%M").time()
+                bef = int(calculator.get("lunch_end_before", 10))
+                aft = int(calculator.get("lunch_end_after", 15))
+                if "lunch_end_window" not in data or not le_w.contains(le_t) or (le_w.start_str in ("13:20", "13:15") and le_str != "13:30"):
+                    le_w = build_window(le_str, bef, aft)
             except Exception:
                 pass
-        elif target_hours >= 7.5 and le_w.start_str in ("13:20", "13:15"):
+        elif target_hours >= 7.5 and le_w.start_str in ("13:20", "13:15") and le_w.end_str == "13:40":
             le_w = TimeWindow("12:45", "13:30")
             if ex_w.start_str == "15:05":
                 ex_w = TimeWindow("17:00", "18:30")
+
+        # Sincroniza a janela de saida caso exit_hm nao esteja contido na janela atual
+        calc_ex = calculator.get("exit_hm") if calculator else None
+        if calculator and calc_ex:
+            try:
+                ex_t = datetime.strptime(calc_ex, "%H:%M").time()
+                if "exit_window" not in data or not ex_w.contains(ex_t):
+                    ex_bef = int(calculator.get("exit_before", 15))
+                    ex_aft = int(calculator.get("exit_after", 30))
+                    ex_w = build_window(calc_ex, ex_bef, ex_aft)
+            except Exception:
+                pass
 
         return cls(
             name=name,
@@ -389,7 +415,7 @@ def get_default_profiles() -> Dict[str, ShiftProfile]:
             lunch_end_window=TimeWindow("12:45", "13:30"),
             exit_window=TimeWindow("17:00", "18:30"),
             description="Turno Personalizado (8h flexível / ajustável)",
-            calculator={"entry_hm": "07:42", "ls_hm": "12:00", "le_hm": "13:00", "exit_hm": "17:30"},
+            calculator={"entry_hm": "07:42", "lunch_start_hm": "12:00", "lunch_end_hm": "13:00", "exit_hm": "17:30"},
         ),
     }
 
@@ -438,6 +464,10 @@ class JiraConfig:
         )
 
 
+DEFAULT_GITHUB_REPO_URL = "https://github.com/Themobizila/JiraBot.git"
+DEFAULT_GITHUB_WEB_URL = "https://github.com/Themobizila/JiraBot"
+
+
 @dataclass
 class BotConfig:
     """Configuracao geral da aplicacao (armazenada individualmente em ~/.jirabot/config.json)."""
@@ -449,7 +479,7 @@ class BotConfig:
     auto_log_on_exit: bool = True
     min_log_minutes: int = 15
     theme: str = "dark"
-    update_source: str = ""
+    update_source: str = DEFAULT_GITHUB_REPO_URL
     auto_update_on_start: bool = False
     exit_warning_enabled: bool = True
     exit_warning_minutes: int = 5
@@ -457,7 +487,14 @@ class BotConfig:
     mini_window_hotkey: str = "ctrl+alt+j"
 
     def get_current_profile(self) -> ShiftProfile:
-        return self.profiles.get(self.active_profile, self.profiles["6h_0745"])
+        if self.active_profile in self.profiles:
+            return self.profiles[self.active_profile]
+        if "6h_0745" in self.profiles:
+            return self.profiles["6h_0745"]
+        return next(iter(self.profiles.values()))
+
+    def get_active_profile(self) -> ShiftProfile:
+        return self.get_current_profile()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -501,7 +538,7 @@ class BotConfig:
             auto_log_on_exit=data.get("auto_log_on_exit", True),
             min_log_minutes=int(data.get("min_log_minutes", 15)),
             theme=data.get("theme", "dark"),
-            update_source=data.get("update_source", ""),
+            update_source=data.get("update_source") or DEFAULT_GITHUB_REPO_URL,
             auto_update_on_start=bool(data.get("auto_update_on_start", False)),
             exit_warning_enabled=bool(data.get("exit_warning_enabled", True)),
             exit_warning_minutes=max(1, min(60, int(data.get("exit_warning_minutes", 5)))),

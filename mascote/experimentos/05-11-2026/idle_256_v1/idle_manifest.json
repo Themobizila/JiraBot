@@ -1,0 +1,220 @@
+{
+  "date": "05/11/2026 - 13:55:27",
+  "source": "C:\\Users\\joao.moura\\Downloads\\pixellab-Create-a-polished-pixel-art-ch-1793896396108.png",
+  "source_sha256": "47646c7d9a28a4fee4d8b8af35e0099d84dde9b412c69feac38f394e4463587a",
+  "method": "deterministic_pixel_rig",
+  "size": [
+    256,
+    256
+  ],
+  "frame_count": 16,
+  "fps": 8,
+  "duration_ms": 2000,
+  "fixed_feet_from_y": 226,
+  "max_upper_body_lift_px": 2,
+  "frames": [
+    {
+      "frame": 0,
+      "breathing": 0.0,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        71,
+        39,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 1,
+      "breathing": 0.0381,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        71,
+        39,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 2,
+      "breathing": 0.1464,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        71,
+        39,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 3,
+      "breathing": 0.3087,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        71,
+        38,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 4,
+      "breathing": 0.5,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        70,
+        38,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 5,
+      "breathing": 0.6913,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        70,
+        38,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 6,
+      "breathing": 0.8536,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        70,
+        37,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 7,
+      "breathing": 0.9619,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        70,
+        37,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 8,
+      "breathing": 1.0,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        70,
+        37,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 9,
+      "breathing": 0.9619,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        70,
+        37,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 10,
+      "breathing": 0.8536,
+      "eye": "half",
+      "duration_ms": 125,
+      "bbox": [
+        70,
+        37,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 11,
+      "breathing": 0.6913,
+      "eye": "closed",
+      "duration_ms": 125,
+      "bbox": [
+        70,
+        38,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 12,
+      "breathing": 0.5,
+      "eye": "half",
+      "duration_ms": 125,
+      "bbox": [
+        70,
+        38,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 13,
+      "breathing": 0.3087,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        71,
+        38,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 14,
+      "breathing": 0.1464,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        71,
+        39,
+        210,
+        244
+      ]
+    },
+    {
+      "frame": 15,
+      "breathing": 0.0381,
+      "eye": "open",
+      "duration_ms": 125,
+      "bbox": [
+        71,
+        39,
+        210,
+        244
+      ]
+    }
+  ],
+  "checks": {
+    "source_unchanged": true,
+    "feet_bit_exact": true,
+    "first_frame_bit_exact": true,
+    "no_canvas_clipping": true,
+    "alpha_binary": true,
+    "gif_duration_ms": 2000,
+    "gif_transparent_corner_all_frames": true
+  },
+  "distinct_pixel_poses": 10,
+  "gif_encoded_frames": 13
+}

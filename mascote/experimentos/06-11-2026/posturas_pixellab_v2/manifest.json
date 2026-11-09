@@ -1,0 +1,575 @@
+{
+  "date": "06/11/2026 - 11:46:26",
+  "frame_size": [
+    256,
+    256
+  ],
+  "alignment": "integer_vertical_translation",
+  "ground_anchor": 244,
+  "sitting": {
+    "source": "mascote\\experimentos\\06-11-2026\\sentar_pixellab_v1\\sheet_original.png",
+    "source_sha256": "77ac40a1db6255dec1281e69403eed5591dc7d455ff2131c0bae70ec19effe2b",
+    "frame_count": 9,
+    "frame_order": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "frames": [
+      {
+        "frame": 0,
+        "source_cell": [
+          0,
+          0,
+          256,
+          256
+        ],
+        "source_bbox": [
+          71,
+          39,
+          210,
+          244
+        ],
+        "aligned_bbox": [
+          71,
+          39,
+          210,
+          244
+        ],
+        "vertical_offset": 0,
+        "rgba_sha256": "3be18a9a7fcf74352dd7061a8ded1b52f82ea77a3c933c27c47ba73c0bc6251b"
+      },
+      {
+        "frame": 1,
+        "source_cell": [
+          256,
+          0,
+          512,
+          256
+        ],
+        "source_bbox": [
+          70,
+          33,
+          209,
+          239
+        ],
+        "aligned_bbox": [
+          70,
+          38,
+          209,
+          244
+        ],
+        "vertical_offset": 5,
+        "rgba_sha256": "6121c9414b754d0f65994d169c7dca56dc7d22f073b5ff69ff978069fa6fd9e5"
+      },
+      {
+        "frame": 2,
+        "source_cell": [
+          512,
+          0,
+          768,
+          256
+        ],
+        "source_bbox": [
+          69,
+          28,
+          209,
+          236
+        ],
+        "aligned_bbox": [
+          69,
+          36,
+          209,
+          244
+        ],
+        "vertical_offset": 8,
+        "rgba_sha256": "bc227b5b6a30f855d1f4b115be110007feee2f52c69a4daadcf9771c1577efd7"
+      },
+      {
+        "frame": 3,
+        "source_cell": [
+          0,
+          256,
+          256,
+          512
+        ],
+        "source_bbox": [
+          63,
+          35,
+          207,
+          237
+        ],
+        "aligned_bbox": [
+          63,
+          42,
+          207,
+          244
+        ],
+        "vertical_offset": 7,
+        "rgba_sha256": "c172186a9200d9a54e2e5758d0e3fe6b659896c8ef95fb0a5dc555696d1b70c9"
+      },
+      {
+        "frame": 4,
+        "source_cell": [
+          256,
+          256,
+          512,
+          512
+        ],
+        "source_bbox": [
+          51,
+          46,
+          204,
+          237
+        ],
+        "aligned_bbox": [
+          51,
+          53,
+          204,
+          244
+        ],
+        "vertical_offset": 7,
+        "rgba_sha256": "9e8215a1dfb24306107c22bbf346dd82b04e30951361af87a73e92164245afc6"
+      },
+      {
+        "frame": 5,
+        "source_cell": [
+          512,
+          256,
+          768,
+          512
+        ],
+        "source_bbox": [
+          58,
+          48,
+          205,
+          233
+        ],
+        "aligned_bbox": [
+          58,
+          59,
+          205,
+          244
+        ],
+        "vertical_offset": 11,
+        "rgba_sha256": "d1479792a21f22c56c6b0b5a655c786478a8a46e09aa75a962a9cb3ea156e20d"
+      },
+      {
+        "frame": 6,
+        "source_cell": [
+          0,
+          512,
+          256,
+          768
+        ],
+        "source_bbox": [
+          60,
+          48,
+          207,
+          233
+        ],
+        "aligned_bbox": [
+          60,
+          59,
+          207,
+          244
+        ],
+        "vertical_offset": 11,
+        "rgba_sha256": "628bba9a296d37412b9ee12538037dfe867e3efd015db73596c6ca4d3492149d"
+      },
+      {
+        "frame": 7,
+        "source_cell": [
+          256,
+          512,
+          512,
+          768
+        ],
+        "source_bbox": [
+          53,
+          44,
+          209,
+          236
+        ],
+        "aligned_bbox": [
+          53,
+          52,
+          209,
+          244
+        ],
+        "vertical_offset": 8,
+        "rgba_sha256": "401538590b1b534b0be6a7a04cb42f28e5c9e56ccafdb2db250ed206e28e5185"
+      },
+      {
+        "frame": 8,
+        "source_cell": [
+          512,
+          512,
+          768,
+          768
+        ],
+        "source_bbox": [
+          53,
+          39,
+          210,
+          234
+        ],
+        "aligned_bbox": [
+          53,
+          49,
+          210,
+          244
+        ],
+        "vertical_offset": 10,
+        "rgba_sha256": "fddd22632d6c64c60718a5280d3daa1b88a855429fdf4a2e6ed01b579551e1bf"
+      }
+    ]
+  },
+  "standing": {
+    "source": "C:\\Users\\joao.moura\\Downloads\\pixellab-Animate-this-capybara-slowly-t-1793975987672.png",
+    "source_sha256": "51becdcf50ccc2a7e17dc24006669b247760c026ebc3576bc49fa83096bb529e",
+    "frame_count": 9,
+    "frame_order": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "frames": [
+      {
+        "frame": 0,
+        "source_cell": [
+          0,
+          0,
+          256,
+          256
+        ],
+        "source_bbox": [
+          53,
+          39,
+          210,
+          234
+        ],
+        "aligned_bbox": [
+          53,
+          49,
+          210,
+          244
+        ],
+        "vertical_offset": 10,
+        "rgba_sha256": "f348e6b7a595f39f5861d87dfd0bcb54c67226cca0933767916736dca927c91a"
+      },
+      {
+        "frame": 1,
+        "source_cell": [
+          256,
+          0,
+          512,
+          256
+        ],
+        "source_bbox": [
+          54,
+          43,
+          211,
+          238
+        ],
+        "aligned_bbox": [
+          54,
+          49,
+          211,
+          244
+        ],
+        "vertical_offset": 6,
+        "rgba_sha256": "967c641a788cfb88df574947402bb36cf8db21788a7180b33b96a8ec550c75f9"
+      },
+      {
+        "frame": 2,
+        "source_cell": [
+          512,
+          0,
+          768,
+          256
+        ],
+        "source_bbox": [
+          58,
+          48,
+          211,
+          243
+        ],
+        "aligned_bbox": [
+          58,
+          49,
+          211,
+          244
+        ],
+        "vertical_offset": 1,
+        "rgba_sha256": "9273ce435a4ca39a51ac48d6d797ab3786070c2fa54c1324336b570d09084a07"
+      },
+      {
+        "frame": 3,
+        "source_cell": [
+          0,
+          256,
+          256,
+          512
+        ],
+        "source_bbox": [
+          63,
+          52,
+          211,
+          243
+        ],
+        "aligned_bbox": [
+          63,
+          53,
+          211,
+          244
+        ],
+        "vertical_offset": 1,
+        "rgba_sha256": "aea54bed8f57fcd93f99721c2d7a65100ad0e935d7ff76e5e4c81b7a87f5bb6c"
+      },
+      {
+        "frame": 4,
+        "source_cell": [
+          256,
+          256,
+          512,
+          512
+        ],
+        "source_bbox": [
+          60,
+          55,
+          210,
+          244
+        ],
+        "aligned_bbox": [
+          60,
+          55,
+          210,
+          244
+        ],
+        "vertical_offset": 0,
+        "rgba_sha256": "4b92850384e65d58c3434beedf472c7237b2e06aecff02f53243215dfe53e4be"
+      },
+      {
+        "frame": 5,
+        "source_cell": [
+          512,
+          256,
+          768,
+          512
+        ],
+        "source_bbox": [
+          63,
+          50,
+          210,
+          244
+        ],
+        "aligned_bbox": [
+          63,
+          50,
+          210,
+          244
+        ],
+        "vertical_offset": 0,
+        "rgba_sha256": "717a7bcfcc6f4409e6a17b0eca6be43bdff9ecc82e95e7d7e2025305632d138b"
+      },
+      {
+        "frame": 6,
+        "source_cell": [
+          0,
+          512,
+          256,
+          768
+        ],
+        "source_bbox": [
+          67,
+          44,
+          211,
+          244
+        ],
+        "aligned_bbox": [
+          67,
+          44,
+          211,
+          244
+        ],
+        "vertical_offset": 0,
+        "rgba_sha256": "c7b606fdd3033e5bdbdab4983a872d0b3a8b2989bed7c3a9fa8a0236bcdb7962"
+      },
+      {
+        "frame": 7,
+        "source_cell": [
+          256,
+          512,
+          512,
+          768
+        ],
+        "source_bbox": [
+          65,
+          39,
+          211,
+          244
+        ],
+        "aligned_bbox": [
+          65,
+          39,
+          211,
+          244
+        ],
+        "vertical_offset": 0,
+        "rgba_sha256": "9efafe8d0d1f1e5ffbb76007c46126efd694aec6fc80cbfc973eb7d30c7c5cf6"
+      },
+      {
+        "frame": 8,
+        "source_cell": [
+          512,
+          512,
+          768,
+          768
+        ],
+        "source_bbox": [
+          71,
+          39,
+          210,
+          244
+        ],
+        "aligned_bbox": [
+          71,
+          39,
+          210,
+          244
+        ],
+        "vertical_offset": 0,
+        "rgba_sha256": "e1b7d685e425ec9ac1f22df0d08bc9a87aae3b0283e0e14f8a5c101224f2ecc3"
+      }
+    ]
+  },
+  "cycle_order": [
+    {
+      "action": "sentar",
+      "frame": 0
+    },
+    {
+      "action": "sentar",
+      "frame": 1
+    },
+    {
+      "action": "sentar",
+      "frame": 2
+    },
+    {
+      "action": "sentar",
+      "frame": 3
+    },
+    {
+      "action": "sentar",
+      "frame": 4
+    },
+    {
+      "action": "sentar",
+      "frame": 5
+    },
+    {
+      "action": "sentar",
+      "frame": 6
+    },
+    {
+      "action": "sentar",
+      "frame": 7
+    },
+    {
+      "action": "sentar",
+      "frame": 8
+    },
+    {
+      "action": "levantar",
+      "frame": 0
+    },
+    {
+      "action": "levantar",
+      "frame": 1
+    },
+    {
+      "action": "levantar",
+      "frame": 2
+    },
+    {
+      "action": "levantar",
+      "frame": 3
+    },
+    {
+      "action": "levantar",
+      "frame": 4
+    },
+    {
+      "action": "levantar",
+      "frame": 5
+    },
+    {
+      "action": "levantar",
+      "frame": 6
+    },
+    {
+      "action": "levantar",
+      "frame": 7
+    },
+    {
+      "action": "levantar",
+      "frame": 8
+    }
+  ],
+  "clip_duration_ms": [
+    250,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    875
+  ],
+  "cycle_duration_ms": [
+    500,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    1000,
+    250,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    500
+  ],
+  "checks": {
+    "two_distinct_source_sheets": true,
+    "no_reversal_for_standing": true,
+    "original_frames_exact_rgba": true,
+    "translated_pixels_preserved": true,
+    "no_resize_or_deformation": true,
+    "alpha_preserved": true,
+    "no_canvas_clipping": true,
+    "apng_decoded_rgba_exact": true,
+    "gif_duration_ms": 4000
+  }
+}

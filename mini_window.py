@@ -211,6 +211,14 @@ def _attach_to_interactive_desktop() -> None:
     try:
         user32 = ctypes.windll.user32
         MAXIMUM_ALLOWED = 0x02000000
+        user32.OpenWindowStationW.argtypes = [wintypes.LPCWSTR, wintypes.BOOL, wintypes.DWORD]
+        user32.OpenWindowStationW.restype = wintypes.HANDLE
+        user32.SetProcessWindowStation.argtypes = [wintypes.HANDLE]
+        user32.SetProcessWindowStation.restype = wintypes.BOOL
+        user32.OpenDesktopW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        user32.OpenDesktopW.restype = wintypes.HANDLE
+        user32.SetThreadDesktop.argtypes = [wintypes.HANDLE]
+        user32.SetThreadDesktop.restype = wintypes.BOOL
         hwinsta = user32.OpenWindowStationW("WinSta0", False, MAXIMUM_ALLOWED)
         if hwinsta:
             user32.SetProcessWindowStation(hwinsta)
@@ -510,6 +518,13 @@ class MiniWidgetApp:
         )
         self.btn_web.pack(side="right", padx=2)
 
+        self.btn_mascot = tk.Button(
+            self.header_frame, text="Mascote", font=("Segoe UI", 7),
+            fg=self.text_secondary, bg=self.header_bg, bd=0,
+            cursor="hand2", padx=4, command=self.toggle_mascot,
+        )
+        self.btn_mascot.pack(side="right", padx=2)
+
         # ==================== MODO COMPLETO (PADRAO) ====================
         self.full_container = tk.Frame(self.main_frame, bg=self.bg_color)
         self.full_container.pack(fill="both", expand=True)
@@ -736,6 +751,15 @@ class MiniWidgetApp:
             command=self.toggle_compact_mode,
         )
         self.btn_compact_expand.pack(side="right", padx=2)
+
+    def toggle_mascot(self) -> None:
+        from tkinter import messagebox
+        from mascote_runtime.control import configure, preferences
+        try:
+            prefs = preferences()
+            configure({"enabled": not prefs["enabled"], "web_theme": getattr(self.config, "theme", "auto")})
+        except Exception as exc:
+            messagebox.showerror("Mascote", str(exc), parent=self.root)
 
     def _bind_drag_events(self) -> None:
         """Permite arrastar a janela segurando o cabecalho ou a barra principal."""
@@ -1062,6 +1086,11 @@ class MiniWidgetApp:
             cfg = BotConfig.load()
             profile = cfg.get_active_profile()
 
+            from mascote_runtime.control import status as mascot_status
+            mascot = mascot_status()
+            mascot_label = "on" if mascot["running"] else ("abrindo" if mascot["phase"] == "starting" else ("pausa" if mascot["phase"] == "suspended" else ("falha" if mascot["preferences"]["enabled"] else "off")))
+            self.btn_mascot.configure(text="Mascote: " + mascot_label, bg=self.header_bg, fg=self.text_secondary)
+
             # Sincroniza dinamicamente o tema caso tenha sido alterado no painel web
             theme_pref = getattr(cfg, "theme", "auto") or "auto"
             eff_theme = get_effective_theme(theme_pref)
@@ -1174,7 +1203,16 @@ class MiniWidgetApp:
 
 def run_mini_window() -> None:
     """Executa a aplicacao da mini janela flutuante na thread principal."""
+    from mascote_runtime.native import single_instance
     _attach_to_interactive_desktop()
+    with single_instance("MiniWidget", Path.home() / ".jirabot") as acquired:
+        if not acquired:
+            bring_existing_mini_window_to_top()
+            return
+        _run_single_mini_window()
+
+
+def _run_single_mini_window() -> None:
     if bring_existing_mini_window_to_top():
         logger.info("Janela existente do widget trazida para primeiro plano.")
         return
@@ -1227,6 +1265,10 @@ def launch_mini_window(detached: bool = True) -> None:
     err_log_path = Path.home() / ".jirabot" / "mini_window_err.log"
     err_log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(err_log_path, "a", encoding="utf-8") as err_file:
+        startup = None
+        if sys.platform == "win32":
+            startup = subprocess.STARTUPINFO()
+            startup.lpDesktop = r"WinSta0\Default"
         subprocess.Popen(
             [exe, str(script)],
             cwd=str(script.parent),
@@ -1235,6 +1277,7 @@ def launch_mini_window(detached: bool = True) -> None:
             stdout=err_file,
             stderr=err_file,
             stdin=subprocess.DEVNULL,
+            startupinfo=startup,
         )
 
 

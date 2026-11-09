@@ -373,6 +373,8 @@ class SystemTrayIcon:
                         toggle_mini_window()
                     except Exception as e:
                         logger.error(f"Erro ao processar toggle no loop: {e}")
+                # A mensagem foi consumida aqui; não a despachar novamente ao WndProc.
+                continue
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
 

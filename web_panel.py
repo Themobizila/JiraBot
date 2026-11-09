@@ -232,6 +232,10 @@ def build_dashboard_payload() -> Dict[str, Any]:
             "name": config.active_profile,
             "description": profile.description,
             "target_hours": profile.target_hours,
+            "entry_hm": profile.get_entry_hm(),
+            "lunch_start_hm": profile.get_lunch_start_hm(),
+            "lunch_end_hm": profile.get_lunch_end_hm(),
+            "exit_hm": profile.get_planned_exit_hm(),
             "entry_window": profile.entry_window.to_dict(),
             "lunch_start_window": profile.lunch_start_window.to_dict(),
             "lunch_end_window": profile.lunch_end_window.to_dict(),
@@ -603,7 +607,7 @@ def build_report_payload(days: int = 7, fetch_jira: bool = True) -> Dict[str, An
 
 
 HTML_PAGE = r"""<!DOCTYPE html>
-<html lang="pt-BR" data-theme="dark">
+<html lang="pt-BR" data-theme="dark" data-theme-preference="auto">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -739,20 +743,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
 <!-- Main Wrapper -->
 <div class="main-wrapper">
+  <div id="scroll-progress-bar" aria-hidden="true"><div id="scroll-progress-fill"></div></div>
   <header class="topbar">
     <div class="topbar-left">
       <button class="hamburger is-open" id="hamburger-btn" onclick="toggleSidebar()" aria-label="Recolher ou expandir o menu lateral" aria-expanded="true" title="Recolher ou expandir o menu lateral">
         <span class="hb-bar"></span><span class="hb-bar"></span><span class="hb-bar"></span>
       </button>
-      <div class="topbar-title" id="page-title">Painel do Dia e Controle de Expediente</div>
+      <div class="topbar-title" id="page-title">Painel do Dia</div>
       <span id="top-status-badge" class="badge badge-idle">CARREGANDO</span>
     </div>
     <div class="topbar-right">
-      <button class="btn btn-outline btn-sm fx-btn" id="fx-toggle-btn" onclick="toggleFx()" aria-pressed="false" title="Pausar animações e efeitos visuais">
-        <svg class="fx-ico-pause" viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="8" y1="5" x2="8" y2="19"/><line x1="16" y1="5" x2="16" y2="19"/></svg>
-        <svg class="fx-ico-play" viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="7 4 20 12 7 20 7 4"/></svg>
-        <span id="fx-toggle-label">Pausar Efeitos</span>
-      </button>
+      <button class="btn btn-primary btn-sm" onclick="openWorklogModal()">+ Novo Lançamento</button>
+
       <div class="theme-dropdown-wrap" id="theme-dropdown-wrap">
         <button type="button" class="btn btn-outline btn-sm theme-selector-btn" id="theme-selector-btn" onclick="toggleThemeDropdown(event)" aria-haspopup="true" aria-expanded="false" title="Selecionar Tema Visual e Datas Comemorativas">
           <span id="theme-icon-slot" class="theme-icon-slot"></span>
@@ -816,9 +818,62 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </button>
         </div>
       </div>
-      <button class="btn btn-outline btn-sm" onclick="refreshAll()">Atualizar Dados</button>
-      <button class="btn btn-outline btn-sm" onclick="switchTab('tab-batch')">Lançar em Lote</button>
-      <button class="btn btn-primary btn-sm" onclick="openWorklogModal()">+ Novo Lançamento no Jira</button>
+
+      <!-- Dropdown Universal: Ferramentas, Atualizacao e Mascote -->
+      <div class="ui-dropdown" id="dd-topbar-tools">
+        <button type="button" class="btn btn-outline btn-sm ui-dropdown-btn" onclick="toggleUiDropdown('dd-topbar-tools', event)" aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          <span>Ferramentas &amp; Opções</span>
+          <svg class="ui-dropdown-caret" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <div class="ui-dropdown-menu menu-wide">
+          <div class="ui-dropdown-header">Ações Rápidas</div>
+          <button type="button" class="ui-dropdown-item" onclick="refreshAll()">
+            <span>Atualizar Dados Agora</span>
+            <small style="color:var(--text-muted);">Sincronizar</small>
+          </button>
+          <button type="button" class="ui-dropdown-item" onclick="switchTab('tab-batch')">
+            <span>Lançamentos em Lote</span>
+            <small style="color:var(--text-muted);">Multi-dias</small>
+          </button>
+          <button type="button" class="ui-dropdown-item" onclick="openSnapshotsModal()">
+            <span>Seções Salvas / Recuperar Tickets</span>
+            <small style="color:var(--text-muted);">Backup</small>
+          </button>
+          <div class="ui-dropdown-divider"></div>
+          <div class="ui-dropdown-header">Ambiente &amp; Performance</div>
+          <div style="display:flex; gap:8px; padding:4px 6px; flex-wrap:wrap;">
+            <button class="btn btn-outline btn-sm fx-btn" id="fx-toggle-btn" onclick="toggleFx()" aria-pressed="false" title="Pausar animações e efeitos visuais" style="flex:1;">
+              <svg class="fx-ico-pause" viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="8" y1="5" x2="8" y2="19"/><line x1="16" y1="5" x2="16" y2="19"/></svg>
+              <svg class="fx-ico-play" viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="7 4 20 12 7 20 7 4"/></svg>
+              <span id="fx-toggle-label">Pausar Efeitos</span>
+            </button>
+            <button id="mascot-toggle" class="btn btn-outline btn-sm" onclick="toggleMascot()" aria-pressed="false" style="flex:1;">Ativar mascote</button>
+          </div>
+          <div class="ui-dropdown-divider"></div>
+          <div class="ui-dropdown-header">Mascote (<span id="mascot-state" role="status">desativado</span>)</div>
+          <div style="padding:6px 8px; display:flex; flex-direction:column; gap:8px; font-size:12px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <label style="display:flex; flex-direction:column; gap:3px; color:var(--text-muted);">
+                <span>Tema</span>
+                <select id="mascot-theme" class="form-control" style="padding:5px 8px; font-size:12px;" onchange="saveMascotOptions()">
+                  <option value="auto">Automático</option><option value="normal">Normal</option>
+                  <option value="halloween">Halloween</option><option value="natal">Natal</option><option value="ano_novo">Ano Novo</option><option value="pascoa">Páscoa</option>
+                </select>
+              </label>
+              <label style="display:flex; flex-direction:column; gap:3px; color:var(--text-muted);">
+                <span>Tamanho</span>
+                <select id="mascot-size" class="form-control" style="padding:5px 8px; font-size:12px;" onchange="saveMascotOptions()">
+                  <option value="128">Pequeno</option><option value="180">Médio</option><option value="256">Grande</option>
+                </select>
+              </label>
+            </div>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-secondary);">
+              <input id="mascot-reduced" type="checkbox" onchange="saveMascotOptions()"> Movimento reduzido
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -826,315 +881,466 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     <!-- ==================== TAB 1: DASHBOARD & EXPEDIENTE DE HOJE ==================== -->
     <section id="tab-dashboard" class="tab-pane active">
-      <div class="grid-4">
-        <div class="stat-card">
-          <div class="stat-label">Tempo Acumulado Hoje</div>
-          <div class="stat-value" id="stat-today-time">0s</div>
-          <div class="progress-bar-wrap">
-            <div class="progress-bar-fill" id="stat-progress-bar" style="width: 0%"></div>
-          </div>
-          <div class="stat-sub" id="stat-today-meta">Meta: 6.0h (0%)</div>
-        </div>
 
-        <div class="stat-card">
-          <div class="stat-label">Ticket Ativo Atual</div>
-          <div class="stat-value" id="stat-active-ticket">-</div>
-          <div class="stat-sub" id="stat-active-desc">Sem descrição definida</div>
-        </div>
-
-        <div class="stat-card">
-          <div class="stat-label">Serviço em Background</div>
-          <div class="stat-value" id="stat-daemon-state">Parado</div>
-          <div class="stat-sub" id="stat-last-event">Último evento: -</div>
-        </div>
-
-        <div class="stat-card">
-          <div class="stat-label">Sincronização Jira Hoje</div>
-          <div class="stat-value" id="stat-logged-state">Pendente</div>
-          <div class="stat-sub" id="stat-queue-count">Fila offline: 0 item(ns)</div>
-        </div>
-      </div>
-
-      <!-- Controles do Servico e Cronometro -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Controles Rápidos do Serviço e Cronômetro</div>
-          <div class="btn-group">
-            <button class="btn btn-success btn-sm" onclick="serviceAction('start_daemon')">Iniciar Serviço (Tray)</button>
-            <button class="btn btn-danger btn-sm" onclick="serviceAction('stop_daemon')">Parar Serviço</button>
-            <button class="btn btn-outline btn-sm" onclick="serviceAction('restart_daemon')">Reiniciar Serviço</button>
-          </div>
+      <!-- CABECALHO EDITORIAL E INDICE DE CAPITULOS -->
+      <div class="editorial-page-hero scroll-reveal is-visible">
+        <div class="editorial-hero-left">
+          <div class="editorial-kicker">01 / Estúdio de Operação Diária</div>
+          <h1 class="editorial-headline">Painel do Dia &amp; <span class="editorial-serif">Foco Ativo</span></h1>
+          <p class="editorial-sub">Cronometragem em tempo real, linha do tempo inteligente do turno e controle enxuto sem excesso de ruído visual.</p>
         </div>
         <div class="btn-group">
-          <button class="btn btn-primary" onclick="serviceAction('manual_start')">Iniciar / Retomar Contagem</button>
-          <button class="btn btn-warning" onclick="serviceAction('manual_pause')">Pausar Contagem</button>
-          <button class="btn btn-outline" onclick="serviceAction('simulate_unlock')">Simular Desbloqueio (Unlock)</button>
-          <button class="btn btn-outline" onclick="serviceAction('simulate_lock')">Simular Bloqueio (Lock)</button>
-          <button class="btn btn-outline" onclick="serviceAction('test_popup')">Abrir Janela de Revisão Pré-Saída</button>
-          <button class="btn btn-success" onclick="openLogNowModal()">Lançar Horas de Hoje no Jira Agora</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="openSnapshotsModal()">Seções Salvas (Backup)</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="switchTab('tab-tickets')">Meus Tickets &amp; DDS</button>
         </div>
       </div>
 
-      <!-- Grade Visual de Horarios de Hoje: Inicio, Pausa de Almoco, Retorno e Encerramento -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Horários do Expediente de Hoje (Início, Pausa de Almoço, Retorno e Encerramento)</div>
-          <span style="font-size: 12px; color: var(--text-muted);">Edite os horários abaixo para recalcular automaticamente o expediente de hoje</span>
+      <nav class="editorial-chapter-bar" aria-label="Sub-vistas do Painel do Dia">
+        <button type="button" class="chapter-pill is-active" onclick="switchSubView('tab-dashboard', 'dash-pane-focus', this)"><span class="chapter-num">01</span> Cronômetro &amp; Foco</button>
+        <button type="button" class="chapter-pill" onclick="switchSubView('tab-dashboard', 'dash-pane-timeline', this)"><span class="chapter-num">02</span> Linha do Tempo Hoje</button>
+        <button type="button" class="chapter-pill" onclick="switchSubView('tab-dashboard', 'dash-pane-intervals', this)"><span class="chapter-num">03</span> Intervalos &amp; Transferência</button>
+      </nav>
+
+      <!-- SUB-VISTA 1: HERO TIMER, TICKET ATIVO E FAIXA COMPACTA DE INDICADORES -->
+      <div class="subview-pane active" id="dash-pane-focus">
+        <div class="toggl-hero-card scroll-reveal is-visible" id="sec-dash-focus">
+          <div class="toggl-focus-side">
+            <div class="toggl-focus-top">
+              <span class="toggl-section-tag">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                Atividade em Foco
+              </span>
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <div class="ui-dropdown" id="dd-today-comment-opts">
+                  <button type="button" class="btn btn-outline btn-sm ui-dropdown-btn" onclick="toggleUiDropdown('dd-today-comment-opts', event)">
+                    <span>Opções de Descrição</span>
+                    <svg class="ui-dropdown-caret" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                  </button>
+                  <div class="ui-dropdown-menu menu-wide">
+                    <div class="ui-dropdown-header">Modo de Envio da Descrição</div>
+                    <label for="today-no-comment-chk" style="display:flex; align-items:flex-start; gap:8px; padding:8px; cursor:pointer; font-size:12.5px; color:var(--text-main); line-height:1.4;">
+                      <input type="checkbox" id="today-no-comment-chk" onchange="toggleTodayNoComment(this.checked)" style="margin-top:2px;">
+                      <span>Configurar expediente de hoje para enviar <strong>SEM NENHUMA DESCRIÇÃO</strong> no Jira</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="toggl-inputs-row">
+              <div>
+                <label for="switch-issue-input" style="font-size:11.5px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.06em;">Ticket Ativo</label>
+                <input type="text" id="switch-issue-input" class="form-control" placeholder="Ex: CONSISABI-442">
+              </div>
+              <div>
+                <label for="switch-comment-input" style="font-size:11.5px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.06em;">O que você está desenvolvendo neste chamado?</label>
+                <input type="text" id="switch-comment-input" class="form-control" placeholder="Descreva a atividade realizada neste ticket...">
+              </div>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-primary btn-sm" onclick="submitSwitchOrComment('switch')">Trocar Ticket Ativo</button>
+              <button class="btn btn-outline btn-sm" onclick="submitSwitchOrComment('set_comment')">Apenas Salvar Descrição</button>
+            </div>
+          </div>
+
+          <div class="toggl-timer-side">
+            <div class="toggl-clock-row">
+              <div>
+                <div class="stat-label" style="margin-bottom:2px;">Tempo Acumulado Hoje</div>
+                <div class="stat-sub" id="stat-today-meta" style="margin-top:0;">Meta: 6.0h (0%)</div>
+              </div>
+              <div class="toggl-clock-digits" id="stat-today-time">0s</div>
+            </div>
+
+            <div class="progress-bar-wrap" style="margin-top:2px;">
+              <div class="progress-bar-fill" id="stat-progress-bar" style="width: 0%"></div>
+            </div>
+
+            <div class="btn-group" style="justify-content:space-between; align-items:center; margin-top:4px;">
+              <div class="btn-group">
+                <button class="btn btn-primary btn-sm" onclick="serviceAction('manual_start')">Iniciar / Retomar</button>
+                <button class="btn btn-warning btn-sm" onclick="serviceAction('manual_pause')">Pausar</button>
+                <button class="btn btn-success btn-sm" onclick="openLogNowModal()">Lançar no Jira</button>
+              </div>
+
+              <!-- Dropdown Mais Acoes do Cronometro & Servico (Abre para cima para nao cobrir tickets) -->
+              <div class="ui-dropdown drop-up" id="dd-hero-actions">
+                <button type="button" class="btn btn-outline btn-sm ui-dropdown-btn" onclick="toggleUiDropdown('dd-hero-actions', event)">
+                  <span>Mais Ações</span>
+                  <svg class="ui-dropdown-caret" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+                <div class="ui-dropdown-menu">
+                  <div class="ui-dropdown-header">Recuperação &amp; Revisão</div>
+                  <button type="button" class="ui-dropdown-item" onclick="openSnapshotsModal()">
+                    <span>Seções Salvas / Recuperar Tickets</span>
+                  </button>
+                  <button type="button" class="ui-dropdown-item" onclick="serviceAction('test_popup')">
+                    <span>Abrir Revisão Pré-Saída (Popup)</span>
+                  </button>
+                  <div class="ui-dropdown-divider"></div>
+                  <div class="ui-dropdown-header">Serviço em Background (Tray)</div>
+                  <button type="button" class="ui-dropdown-item" onclick="serviceAction('start_daemon')">
+                    <span>Iniciar Serviço (Tray)</span>
+                  </button>
+                  <button type="button" class="ui-dropdown-item" onclick="serviceAction('restart_daemon')">
+                    <span>Reiniciar Serviço</span>
+                  </button>
+                  <button type="button" class="ui-dropdown-item text-danger" onclick="serviceAction('stop_daemon')">
+                    <span>Parar Serviço</span>
+                  </button>
+                  <div class="ui-dropdown-divider"></div>
+                  <div class="ui-dropdown-header">Simulação de Eventos</div>
+                  <button type="button" class="ui-dropdown-item" onclick="serviceAction('simulate_unlock')">
+                    <span>Simular Desbloqueio (Unlock)</span>
+                  </button>
+                  <button type="button" class="ui-dropdown-item" onclick="serviceAction('simulate_lock')">
+                    <span>Simular Bloqueio (Lock)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="schedule-box">
+        <!-- FAIXA COMPACTA DE INDICADORES DO DIA -->
+        <div class="bento-kpi-strip scroll-reveal" id="sec-dash-kpis">
+          <div class="bento-kpi-item" data-idx="01">
+            <div class="bento-kpi-head">
+              <span class="bento-kpi-label">Chamado em Foco</span>
+            </div>
+            <div class="bento-kpi-main" id="stat-active-ticket">-</div>
+            <div class="stat-sub" id="stat-active-desc" style="margin-top:0;">Sem descrição definida</div>
+          </div>
+
+          <div class="bento-kpi-item" data-idx="02">
+            <div class="bento-kpi-head">
+              <span class="bento-kpi-label">Monitor em Background</span>
+            </div>
+            <div class="bento-kpi-main" id="stat-daemon-state">Parado</div>
+            <div class="stat-sub" id="stat-last-event" style="margin-top:0;">Último evento: -</div>
+          </div>
+
+          <div class="bento-kpi-item" data-idx="03">
+            <div class="bento-kpi-head">
+              <span class="bento-kpi-label">Sincronização Jira</span>
+            </div>
+            <div class="bento-kpi-main" id="stat-logged-state">Pendente</div>
+            <div class="stat-sub" id="stat-queue-count" style="margin-top:0;">Fila offline: 0 item(ns)</div>
+          </div>
+
+          <div class="bento-kpi-item" data-idx="04">
+            <div class="bento-kpi-head">
+              <span class="bento-kpi-label">Tickets Trabalhados Hoje</span>
+            </div>
+            <div id="today-tickets-list" style="font-size:12.5px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SUB-VISTA 2: LINHA DO TEMPO DO EXPEDIENTE DE HOJE -->
+      <div class="subview-pane" id="dash-pane-timeline">
+        <div class="card scroll-reveal is-visible" id="sec-dash-timeline">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Linha do Tempo do Expediente de Hoje</div>
+              <div class="card-subtitle">Ajuste entrada, pausa de almoço, retorno ou saída usando os horários do seu turno</div>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-outline btn-sm" onclick="fillTodayDefaultSchedule()">Preencher Padrão do Meu Perfil</button>
+              <button class="btn btn-primary btn-sm" onclick="saveTodaySchedule()">Aplicar Horários ao Dia</button>
+            </div>
+          </div>
+
           <div class="schedule-grid">
-            <div class="form-group" style="margin-bottom:0">
-              <label>1. Horário de Início (Entrada)</label>
+            <div class="koalendar-step">
+              <span class="koalendar-step-num">1. Entrada</span>
               <input type="time" id="today-start-hm" class="form-control" oninput="previewTodaySchedule()">
             </div>
-            <div class="form-group" style="margin-bottom:0">
-              <label>2. Pausa de Almoço (Saída)</label>
+            <div class="koalendar-step">
+              <span class="koalendar-step-num">2. Saída Almoço</span>
               <input type="time" id="today-lunch-start-hm" class="form-control" oninput="previewTodaySchedule()">
             </div>
-            <div class="form-group" style="margin-bottom:0">
-              <label>3. Retorno do Almoço</label>
+            <div class="koalendar-step">
+              <span class="koalendar-step-num">3. Retorno Almoço</span>
               <input type="time" id="today-lunch-end-hm" class="form-control" oninput="previewTodaySchedule()">
             </div>
-            <div class="form-group" style="margin-bottom:0">
-              <label>4. Horário de Encerramento (Saída)</label>
+            <div class="koalendar-step">
+              <span class="koalendar-step-num">4. Encerramento</span>
               <input type="time" id="today-end-hm" class="form-control" oninput="previewTodaySchedule()">
             </div>
           </div>
 
-          <div class="schedule-summary-bar">
-            <div id="today-schedule-calc-text">
-              Preencha os horários para visualizar o cálculo líquido de manhã, almoço e tarde.
-            </div>
-            <div class="btn-group">
-              <button class="btn btn-outline btn-sm" onclick="fillTodayDefaultSchedule()">Preencher Padrão do Perfil</button>
-              <button class="btn btn-primary btn-sm" onclick="saveTodaySchedule()">Aplicar Horários ao Dia de Hoje</button>
+          <div class="schedule-summary-bar" style="margin-top:14px;">
+            <div id="today-schedule-calc-text" style="color:var(--text-secondary);">
+              Preencha os horários acima para visualizar o cálculo líquido de manhã, almoço e tarde.
             </div>
           </div>
         </div>
       </div>
 
-      <div class="grid-2">
-        <!-- Troca de Ticket Ativo e Edicao de Descricao -->
-        <div class="card" style="margin-bottom:0">
-          <div class="card-header">
-            <div class="card-title">Trocar Ticket Ativo e Definir Descrição</div>
-          </div>
-          <div class="form-group">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <label style="margin:0;">Chave do Ticket Ativo (ex: CONSISABI-442, ATIVDIV-32)</label>
-              <button type="button" class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:11px;" onclick="switchTab('tab-tickets')">Ver Meus Tickets & DDS</button>
+      <!-- SUB-VISTA 3: INTERVALOS REGISTRADOS HOJE E REMANEJAMENTO DE HORAS -->
+      <div class="subview-pane" id="dash-pane-intervals">
+        <details class="ui-drawer scroll-reveal is-visible" id="drawer-today-intervals" open>
+          <summary class="ui-drawer-header">
+            <div class="ui-drawer-title">
+              <span>Sessões &amp; Intervalos Registrados Hoje</span>
+              <span class="ui-drawer-sub">Inspecione, adicione ou edite intervalos individuais cronometrados hoje</span>
             </div>
-            <input type="text" id="switch-issue-input" class="form-control" placeholder="Ex: CONSISABI-442" style="margin-top:4px;">
-          </div>
-          <div class="form-group">
-            <label>Descrição da Atividade Realizada no Ticket</label>
-            <textarea id="switch-comment-input" class="form-control" placeholder="Descreva as atividades executadas neste ticket..."></textarea>
-          </div>
-          <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" id="today-no-comment-chk" onchange="toggleTodayNoComment(this.checked)">
-            <label for="today-no-comment-chk" style="margin:0; cursor:pointer;">Configurar expediente de hoje para enviar SEM NENHUMA DESCRIÇÃO</label>
-          </div>
-          <div class="btn-group">
-            <button class="btn btn-primary" onclick="submitSwitchOrComment('switch')">Trocar Ticket Ativo</button>
-            <button class="btn btn-outline" onclick="submitSwitchOrComment('set_comment')">Apenas Salvar Descrição</button>
-          </div>
-        </div>
-
-        <!-- Transferencia / Remanejamento de Horas de Hoje -->
-        <div class="card" style="margin-bottom:0">
-          <div class="card-header">
-            <div class="card-title">Transferir / Remanejar Horas entre Tickets (Hoje)</div>
-          </div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Ticket de Origem (Hoje)</label>
-              <input type="text" id="transfer-src-input" class="form-control" placeholder="Ex: ATIVDIV-32">
+            <div class="ui-drawer-right">
+              <span>Ver intervalos</span>
+              <svg class="ui-drawer-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
             </div>
-            <div class="form-group">
-              <label>Ticket de Destino</label>
-              <input type="text" id="transfer-tgt-input" class="form-control" placeholder="Ex: CONSISABI-427">
+          </summary>
+          <div class="ui-drawer-body">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+              <div style="font-size:12.5px; color:var(--text-secondary);">Histórico granular das sessões cronometradas ou ajustadas manualmente</div>
+              <div class="btn-group">
+                <button class="btn btn-outline btn-sm" onclick="openSnapshotsModal()" title="Recuperar tickets ou restaurar ponto anterior">Seções Salvas (Snapshots)</button>
+                <button class="btn btn-primary btn-sm" onclick="openIntervalModal(-1)">+ Intervalo Manual</button>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Ticket</th>
+                    <th>Início</th>
+                    <th>Fim</th>
+                    <th>Duração</th>
+                    <th>Descrição do Intervalo</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="today-intervals-tbody">
+                  <tr><td colspan="7" style="text-align:center; color:var(--text-muted);">Nenhum intervalo registrado hoje.</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
-          <div class="form-group">
-            <label>Tempo a Transferir (vazio = transferir TUDO da origem, ou informe ex: 01:30, 45m)</label>
-            <input type="text" id="transfer-time-input" class="form-control" placeholder="Deixe em branco para transferir todo o tempo">
-          </div>
-          <button class="btn btn-primary" onclick="submitTransferToday()">Transferir Horas de Hoje</button>
+        </details>
 
-          <div style="margin-top: 18px; border-top: 1px solid var(--border-color); padding-top: 12px;">
-            <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--text-muted);">RESUMO POR TICKET TRABALHADO HOJE</div>
-            <div id="today-tickets-list"></div>
+        <details class="ui-drawer scroll-reveal is-visible" id="drawer-transfer-today">
+          <summary class="ui-drawer-header">
+            <div class="ui-drawer-title">
+              <span>Remanejar / Transferir Horas entre Tickets (Hoje)</span>
+              <span class="ui-drawer-sub">Transfira todo o saldo ou parte dos minutos de um ticket para outro</span>
+            </div>
+            <div class="ui-drawer-right">
+              <span>Expandir ferramenta</span>
+              <svg class="ui-drawer-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+          </summary>
+          <div class="ui-drawer-body">
+            <div class="form-grid" style="align-items:end;">
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Ticket de Origem (Hoje)</label>
+                <input type="text" id="transfer-src-input" class="form-control" placeholder="Ex: ATIVDIV-32">
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Ticket de Destino</label>
+                <input type="text" id="transfer-tgt-input" class="form-control" placeholder="Ex: CONSISABI-427">
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Tempo a Transferir (vazio = tudo, ou ex: 01:30, 45m)</label>
+                <input type="text" id="transfer-time-input" class="form-control" placeholder="Em branco transfere 100%">
+              </div>
+              <div>
+                <button class="btn btn-primary" onclick="submitTransferToday()" style="width:100%;">Transferir Horas de Hoje</button>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-
-      <!-- Tabela de Intervalos Detalhados de Hoje -->
-      <div class="card" style="margin-top: 20px;">
-        <div class="card-header">
-          <div class="card-title">Intervalos de Trabalho Registrados Hoje</div>
-          <button class="btn btn-outline btn-sm" onclick="openIntervalModal(-1)">+ Adicionar Intervalo Manual</button>
-        </div>
-        <div class="table-responsive">
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Ticket</th>
-                <th>Início</th>
-                <th>Fim</th>
-                <th>Duração</th>
-                <th>Descrição do Intervalo</th>
-                <th>Ações</th>
-              </tr>
-            </thead>
-            <tbody id="today-intervals-tbody">
-              <tr><td colspan="7" style="text-align:center; color:var(--text-muted);">Nenhum intervalo registrado hoje.</td></tr>
-            </tbody>
-          </table>
-        </div>
+        </details>
       </div>
     </section>
 
     <!-- ==================== TAB: DASHBOARD ANALITICO ==================== -->
     <section id="tab-analytics" class="tab-pane">
-      <div class="card">
-        <div class="card-header" style="margin-bottom:0; padding-bottom:0; border-bottom:none;">
-          <div>
-            <div class="card-title">Dashboard Analítico dos Seus Lançamentos</div>
-            <div class="section-hint" id="an-subtitle">Indicadores calculados a partir dos worklogs reais que você lançou no Jira.</div>
+      <div class="editorial-page-hero scroll-reveal is-visible">
+        <div class="editorial-hero-left">
+          <div class="editorial-kicker">02 / Inteligência &amp; Métricas</div>
+          <h1 class="editorial-headline">Panorama Analítico &amp; <span class="editorial-serif">Performance</span></h1>
+          <p class="editorial-sub" id="an-subtitle">Indicadores calculados a partir dos worklogs reais que você lançou no Jira.</p>
+        </div>
+        <div class="an-controls">
+          <div class="seg" role="group" aria-label="Atalhos de período">
+            <button class="seg-btn" data-preset="today" onclick="setAnalyticsPreset('today')">Hoje</button>
+            <button class="seg-btn" data-preset="yesterday" onclick="setAnalyticsPreset('yesterday')">Ontem</button>
+            <button class="seg-btn" data-preset="this_month" onclick="setAnalyticsPreset('this_month')">Este Mês</button>
+            <button class="seg-btn" data-preset="last_month" onclick="setAnalyticsPreset('last_month')">Mês Anterior</button>
+            <button class="seg-btn active" data-preset="30d" onclick="setAnalyticsPreset('30d')">30 Dias</button>
+            <button class="seg-btn" data-preset="90d" onclick="setAnalyticsPreset('90d')">90 Dias</button>
           </div>
-          <div class="an-controls">
-            <div class="an-date-picker">
-              <label for="an-start-date" class="an-date-label">De:</label>
-              <input type="date" id="an-start-date" class="form-control an-date-input" title="Data inicial">
-              <label for="an-end-date" class="an-date-label">Até:</label>
-              <input type="date" id="an-end-date" class="form-control an-date-input" title="Data final">
-              <button class="btn btn-primary btn-sm" onclick="applyCustomAnalyticsDates()" title="Filtrar pelo intervalo selecionado">Filtrar</button>
+
+          <!-- Dropdown para Periodo Personalizado -->
+          <div class="ui-dropdown" id="dd-an-custom-dates">
+            <button type="button" class="btn btn-outline btn-sm ui-dropdown-btn" onclick="toggleUiDropdown('dd-an-custom-dates', event)">
+              <span>Período Personalizado</span>
+              <svg class="ui-dropdown-caret" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            </button>
+            <div class="ui-dropdown-menu menu-wide">
+              <div class="ui-dropdown-header">Filtrar por Datas Específicas</div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:6px 4px;">
+                <div>
+                  <label for="an-start-date" class="an-date-label" style="display:block; margin-bottom:4px;">De:</label>
+                  <input type="date" id="an-start-date" class="form-control an-date-input" style="width:100%;" title="Data inicial">
+                </div>
+                <div>
+                  <label for="an-end-date" class="an-date-label" style="display:block; margin-bottom:4px;">Até:</label>
+                  <input type="date" id="an-end-date" class="form-control an-date-input" style="width:100%;" title="Data final">
+                </div>
+              </div>
+              <button class="btn btn-primary btn-sm" style="margin-top:6px; width:100%;" onclick="applyCustomAnalyticsDates(); closeAllUiDropdowns();" title="Filtrar pelo intervalo selecionado">Aplicar Período</button>
             </div>
-            <div class="seg" role="group" aria-label="Atalhos de período">
-              <button class="seg-btn" data-preset="today" onclick="setAnalyticsPreset('today')">Hoje</button>
-              <button class="seg-btn" data-preset="yesterday" onclick="setAnalyticsPreset('yesterday')">Ontem</button>
-              <button class="seg-btn" data-preset="this_month" onclick="setAnalyticsPreset('this_month')">Este Mês</button>
-              <button class="seg-btn" data-preset="last_month" onclick="setAnalyticsPreset('last_month')">Mês Anterior</button>
-              <button class="seg-btn active" data-preset="30d" onclick="setAnalyticsPreset('30d')">30 Dias</button>
-              <button class="seg-btn" data-preset="90d" onclick="setAnalyticsPreset('90d')">90 Dias</button>
-            </div>
-            <button class="btn btn-outline btn-sm" onclick="loadAnalytics(true)" title="Forçar atualização dos dados diretamente do Jira">Atualizar do Jira</button>
           </div>
+
+          <button class="btn btn-outline btn-sm" onclick="loadAnalytics(true)" title="Forçar atualização dos dados diretamente do Jira">Atualizar do Jira</button>
         </div>
       </div>
+
+      <nav class="editorial-chapter-bar" aria-label="Sub-vistas do Dashboard Analítico">
+        <button type="button" class="chapter-pill is-active" onclick="switchSubView('tab-analytics', 'an-pane-overview', this)"><span class="chapter-num">01</span> Visão Geral &amp; Evolução</button>
+        <button type="button" class="chapter-pill" onclick="switchSubView('tab-analytics', 'an-pane-types', this)"><span class="chapter-num">02</span> Distribuição por Tipo</button>
+        <button type="button" class="chapter-pill" onclick="switchSubView('tab-analytics', 'an-pane-quality', this)"><span class="chapter-num">03</span> Qualidade &amp; Top Tickets</button>
+      </nav>
 
       <div id="an-state"></div>
 
       <div id="an-content" style="display:none;">
-        <div class="grid-kpi">
-          <div class="stat-card">
-            <div class="stat-label">Horas Lançadas no Período</div>
-            <div class="stat-value" id="an-kpi-hours">-</div>
-            <div class="stat-sub" id="an-kpi-hours-sub"></div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Tickets Trabalhados</div>
-            <div class="stat-value" id="an-kpi-tickets">-</div>
-            <div class="stat-sub" id="an-kpi-tickets-sub"></div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Finalizados por Mim no Jira</div>
-            <div class="stat-value" id="an-kpi-done">-</div>
-            <div class="stat-sub" id="an-kpi-done-sub"></div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Média de Finalizados por Semana</div>
-            <div class="stat-value" id="an-kpi-done-avg">-</div>
-            <div class="stat-sub" id="an-kpi-done-avg-sub"></div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Tempo Médio por Ticket</div>
-            <div class="stat-value" id="an-kpi-avg">-</div>
-            <div class="stat-sub" id="an-kpi-avg-sub"></div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Tempo Médio por Ticket Finalizado</div>
-            <div class="stat-value" id="an-kpi-avg-done">-</div>
-            <div class="stat-sub" id="an-kpi-avg-done-sub"></div>
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div class="card" style="margin-bottom:0;">
-            <div class="card-header"><div class="card-title">Tipos de Ticket com Mais Tempo</div></div>
-            <div id="an-bars-time"></div>
-          </div>
-          <div class="card" style="margin-bottom:0;">
-            <div class="card-header"><div class="card-title">Tipos de Ticket com Mais Lançamentos</div></div>
-            <div id="an-bars-count"></div>
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div class="card" style="margin-bottom:0;">
-            <div class="card-header"><div class="card-title">Lançamentos Com x Sem Descrição</div></div>
-            <div id="an-desc"></div>
-          </div>
-          <div class="card" style="margin-bottom:0;">
-            <div class="card-header"><div class="card-title">Tickets com Mais Tempo no Período</div></div>
-            <div id="an-top"></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">Evolução dos Tickets ao Longo do Período</div>
-          </div>
-          <div class="chart-controls">
-            <div class="chips" id="an-chips"></div>
-            <div class="seg" role="group" aria-label="Granularidade do gráfico">
-              <button class="seg-btn" data-gran="day" onclick="setAnalyticsGranularity('day')">Diário</button>
-              <button class="seg-btn" data-gran="week" onclick="setAnalyticsGranularity('week')">Semanal</button>
+        <!-- SUB-VISTA 1: INDICADORES + GRAFICO DE EVOLUCAO -->
+        <div class="subview-pane active" id="an-pane-overview">
+          <div class="grid-kpi scroll-reveal is-visible" id="sec-an-kpis">
+            <div class="stat-card">
+              <div class="stat-label">Horas Lançadas no Período</div>
+              <div class="stat-value" id="an-kpi-hours">-</div>
+              <div class="stat-sub" id="an-kpi-hours-sub"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Tickets Trabalhados</div>
+              <div class="stat-value" id="an-kpi-tickets">-</div>
+              <div class="stat-sub" id="an-kpi-tickets-sub"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Finalizados por Mim no Jira</div>
+              <div class="stat-value" id="an-kpi-done">-</div>
+              <div class="stat-sub" id="an-kpi-done-sub"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Média de Finalizados / Semana</div>
+              <div class="stat-value" id="an-kpi-done-avg">-</div>
+              <div class="stat-sub" id="an-kpi-done-avg-sub"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Tempo Médio por Ticket</div>
+              <div class="stat-value" id="an-kpi-avg">-</div>
+              <div class="stat-sub" id="an-kpi-avg-sub"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Média por Ticket Finalizado</div>
+              <div class="stat-value" id="an-kpi-avg-done">-</div>
+              <div class="stat-sub" id="an-kpi-avg-done-sub"></div>
             </div>
           </div>
-          <div id="an-chart"></div>
+
+          <div class="card scroll-reveal is-visible" id="sec-an-chart" style="margin-bottom:0;">
+            <div class="card-header">
+              <div>
+                <div class="card-title">Evolução Temporal dos Tickets</div>
+                <div class="card-subtitle">Volume de horas e lançamentos ao longo do período analisado</div>
+              </div>
+              <div class="seg" role="group" aria-label="Granularidade do gráfico">
+                <button class="seg-btn" data-gran="day" onclick="setAnalyticsGranularity('day')">Diário</button>
+                <button class="seg-btn" data-gran="week" onclick="setAnalyticsGranularity('week')">Semanal</button>
+              </div>
+            </div>
+            <div class="chart-controls">
+              <div class="chips" id="an-chips"></div>
+            </div>
+            <div id="an-chart"></div>
+          </div>
+        </div>
+
+        <!-- SUB-VISTA 2: DISTRIBUICAO POR TIPO -->
+        <div class="subview-pane" id="an-pane-types">
+          <div class="grid-2 scroll-reveal is-visible" id="sec-an-types" style="margin-bottom:0;">
+            <div class="card" style="margin-bottom:0;">
+              <div class="card-header"><div class="card-title">Tipos de Ticket com Mais Tempo</div></div>
+              <div id="an-bars-time"></div>
+            </div>
+            <div class="card" style="margin-bottom:0;">
+              <div class="card-header"><div class="card-title">Tipos de Ticket com Mais Lançamentos</div></div>
+              <div id="an-bars-count"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUB-VISTA 3: QUALIDADE DAS DESCRICOES & TOP TICKETS -->
+        <div class="subview-pane" id="an-pane-quality">
+          <div class="grid-2 scroll-reveal is-visible" id="drawer-an-deepdive" style="margin-bottom:0;">
+            <div class="card" style="margin-bottom:0;">
+              <div class="card-header"><div class="card-title">Qualidade das Descrições (Com x Sem Descrição)</div></div>
+              <div id="an-desc"></div>
+            </div>
+            <div class="card" style="margin-bottom:0;">
+              <div class="card-header"><div class="card-title">Tickets com Maior Dedicação no Período</div></div>
+              <div id="an-top"></div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- ==================== TAB: MEUS TICKETS & DDS (JIRA) ==================== -->
     <section id="tab-tickets" class="tab-pane">
-      <div class="card">
-        <div class="card-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
-          <div>
-            <div class="card-title">Meus Tickets Atribuídos no Jira Cloud</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top:2px;">
-              Visualize suas demandas em aberto, consulte a especificação e DDS do SharePoint e inicie o contador com um clique.
+      <div class="editorial-page-hero scroll-reveal is-visible">
+        <div class="editorial-hero-left">
+          <div class="editorial-kicker">03 / Central de Demandas &amp; Especificações</div>
+          <h1 class="editorial-headline">Meus Tickets &amp; <span class="editorial-serif">Leitor de DDS</span></h1>
+          <p class="editorial-sub">Consulte especificações do SharePoint, linha do tempo de comentários e inicie a contagem com um clique.</p>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <div class="metric-pill-bar" style="margin-bottom:0;">
+            <div class="metric-pill-card">
+              <span class="metric-pill-label">Total</span>
+              <span class="metric-pill-val" id="kpi-tickets-total">-</span>
+            </div>
+            <div class="metric-pill-card">
+              <span class="metric-pill-label">Em Execução</span>
+              <span class="metric-pill-val" id="kpi-tickets-in-progress" style="color:var(--primary);">-</span>
+            </div>
+            <div class="metric-pill-card">
+              <span class="metric-pill-label">Backlog</span>
+              <span class="metric-pill-val" id="kpi-tickets-todo" style="color:var(--warning);">-</span>
+            </div>
+            <div class="metric-pill-card">
+              <span class="metric-pill-label">Com DDS</span>
+              <span class="metric-pill-val" id="kpi-tickets-dds" style="color:var(--info);">-</span>
             </div>
           </div>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <button class="btn btn-outline btn-sm" id="btn-refresh-tickets" onclick="loadMyTickets(true)" title="Recarregar tickets do Jira Cloud">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-              Atualizar do Jira
-            </button>
-          </div>
+          <button class="btn btn-outline btn-sm" id="btn-refresh-tickets" onclick="loadMyTickets(true)" title="Recarregar tickets do Jira Cloud">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Atualizar
+          </button>
         </div>
+      </div>
 
-        <!-- Barra de Filtros e Busca -->
-        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:14px;">
-          <div style="flex:1; min-width:240px; position:relative;">
-            <input type="text" id="tickets-search-input" class="form-control" placeholder="Buscar por chave, título ou número Movidesk..." oninput="filterTicketsList()">
+      <div class="card scroll-reveal" id="sec-tickets-explorer">
+        <!-- Barra Unificada de Busca, Status e Modo de Exibicao -->
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px;">
+          <div style="flex:1; min-width:240px;">
+            <input type="text" id="tickets-search-input" class="form-control" placeholder="Buscar por chave (ex: CONSISABI-442), título ou ticket Movidesk..." oninput="filterTicketsList()">
           </div>
           <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-            <button type="button" class="btn btn-sm btn-outline ticket-filter-btn active" data-status="open" onclick="setTicketsFilter('open')">A Fazer / Em Andamento</button>
+            <button type="button" class="btn btn-sm btn-outline ticket-filter-btn active" data-status="open" onclick="setTicketsFilter('open')">Em Aberto</button>
             <button type="button" class="btn btn-sm btn-outline ticket-filter-btn" data-status="all" onclick="setTicketsFilter('all')">Todos</button>
             <button type="button" class="btn btn-sm btn-outline ticket-filter-btn" data-status="done" onclick="setTicketsFilter('done')">Concluídos</button>
           </div>
-          <!-- Seletor de Modo: Arvore Hierarquica vs Grade Plana -->
-          <div class="btn-group" id="tickets-view-mode-toggle" style="margin-left:auto; display:flex; gap:4px;">
-            <button type="button" class="btn btn-sm btn-outline active" id="btn-view-tree" onclick="setTicketsViewMode('tree')" title="Visualização em Árvore Hierárquica (Tickets Pai agrupando subtarefas)">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><line x1="10" y1="6" x2="14" y2="6"/><line x1="6.5" y1="10" x2="6.5" y2="17.5"/><line x1="6.5" y1="17.5" x2="14" y2="17.5"/></svg>
+          <div class="btn-group" id="tickets-view-mode-toggle" style="display:flex; gap:4px;">
+            <button type="button" class="btn btn-sm btn-outline active" id="btn-view-tree" onclick="setTicketsViewMode('tree')" title="Visualização em Árvore Hierárquica">
               Árvore
             </button>
-            <button type="button" class="btn btn-sm btn-outline" id="btn-view-grid" onclick="setTicketsViewMode('grid')" title="Visualização em Grade clássica">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            <button type="button" class="btn btn-sm btn-outline" id="btn-view-grid" onclick="setTicketsViewMode('grid')" title="Visualização em Grade">
               Grade
             </button>
           </div>
@@ -1143,35 +1349,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <!-- Barra de Acoes da Arvore (Expandir/Recolher) -->
         <div id="tree-actions-bar" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; font-size:12px; color:var(--text-muted);">
           <div id="tree-summary-label">
-            Organização hierárquica por Demanda Principal e Subtarefas
+            Agrupamento hierárquico por Demanda Principal (Pai) e Subtarefas
           </div>
-          <div style="display:flex; gap:8px;">
-            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:2px 8px;" onclick="expandAllTreeGroups()">
-              Expandir Todos
-            </button>
-            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:2px 8px;" onclick="collapseAllTreeGroups()">
-              Recolher Todos
-            </button>
-          </div>
-        </div>
-
-        <!-- Grade de Resumo de Contadores -->
-        <div class="grid-4" style="margin-bottom:20px;">
-          <div class="stat-card" style="padding:12px 16px;">
-            <div class="stat-label">Total Carregado</div>
-            <div class="stat-value" id="kpi-tickets-total" style="font-size:20px;">-</div>
-          </div>
-          <div class="stat-card" style="padding:12px 16px;">
-            <div class="stat-label">Em Desenvolvimento / Execução</div>
-            <div class="stat-value" id="kpi-tickets-in-progress" style="font-size:20px; color:var(--primary);">-</div>
-          </div>
-          <div class="stat-card" style="padding:12px 16px;">
-            <div class="stat-label">A Fazer / Backlog</div>
-            <div class="stat-value" id="kpi-tickets-todo" style="font-size:20px; color:var(--warning);">-</div>
-          </div>
-          <div class="stat-card" style="padding:12px 16px;">
-            <div class="stat-label">Com DDS / SharePoint</div>
-            <div class="stat-value" id="kpi-tickets-dds" style="font-size:20px; color:var(--info);">-</div>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 9px;" onclick="expandAllTreeGroups()">Expandir Todos</button>
+            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 9px;" onclick="collapseAllTreeGroups()">Recolher Todos</button>
           </div>
         </div>
 
@@ -1186,53 +1368,66 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     <!-- ==================== TAB 2: VISUALIZACAO SEMANAL ==================== -->
     <section id="tab-weekly" class="tab-pane">
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Visualização Semanal (Semana Atual ou Escolhida)</div>
-          <div class="btn-group">
-            <button class="btn btn-outline btn-sm" onclick="navigateWeek(-1)">&lt; Semana Anterior</button>
-            <button class="btn btn-primary btn-sm" onclick="navigateWeek(0)">Semana Atual (Hoje)</button>
-            <button class="btn btn-outline btn-sm" onclick="navigateWeek(1)">Próxima Semana &gt;</button>
-          </div>
+      <div class="editorial-page-hero scroll-reveal is-visible">
+        <div class="editorial-hero-left">
+          <div class="editorial-kicker">04 / Fechamento de Jornada</div>
+          <h1 class="editorial-headline">Visão Semanal &amp; <span class="editorial-serif">Balanço</span></h1>
+          <p class="editorial-sub">Acompanhe o saldo e os worklogs de cada dia de segunda a domingo e complete dias faltantes em lote.</p>
         </div>
-
-        <div class="schedule-box" style="display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:18px; padding:14px 16px;">
-          <div style="display:flex; align-items:flex-end; flex-wrap:wrap; gap:20px;">
-            <div class="form-group" style="margin-bottom:0;">
-              <label>Escolher Data no Calendário (Exibe de Segunda a Domingo)</label>
-              <input type="date" id="weekly-ref-date" class="form-control" style="width:210px;" onchange="loadWeeklyView(this.value)">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <div class="seg" role="group" aria-label="Navegação de semanas">
+            <button type="button" class="seg-btn" onclick="navigateWeek(-1)">&lt; Anterior</button>
+            <button type="button" class="seg-btn active" onclick="navigateWeek(0)">Semana Atual</button>
+            <button type="button" class="seg-btn" onclick="navigateWeek(1)">Próxima &gt;</button>
+          </div>
+          <input type="date" id="weekly-ref-date" class="form-control" style="width:155px; padding:6px 10px;" onchange="loadWeeklyView(this.value)" title="Escolher Data no Calendário (Exibe de Segunda a Domingo)">
+          <div class="ui-dropdown" id="dd-weekly-opts">
+            <button type="button" class="btn btn-outline btn-sm ui-dropdown-btn" onclick="toggleUiDropdown('dd-weekly-opts', event)">
+              Opções da Semana <span class="ui-dropdown-caret"></span>
+            </button>
+            <div class="ui-dropdown-menu" style="min-width:290px; padding:12px;">
+              <div class="ui-dropdown-header" style="padding:0 0 6px 0;">Sincronização e Lote</div>
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px; padding:6px 0;">
+                <input type="checkbox" id="weekly-fetch-jira-chk" checked onchange="loadWeeklyView(document.getElementById('weekly-ref-date').value)">
+                Sincronizar com worklogs reais do Jira
+              </label>
+              <div class="ui-dropdown-divider"></div>
+              <button type="button" class="ui-dropdown-item" onclick="closeAllUiDropdowns(); openBatchForCurrentWeek();">Lançar Dias Faltantes Desta Semana em Lote</button>
             </div>
-            <div class="form-group" style="margin-bottom:0; flex-direction:row; align-items:center; gap:8px; height:36px;">
-              <input type="checkbox" id="weekly-fetch-jira-chk" checked onchange="loadWeeklyView(document.getElementById('weekly-ref-date').value)">
-              <label for="weekly-fetch-jira-chk" style="margin:0; cursor:pointer; font-size:13px;">Sincronizar com worklogs reais lançados no Jira nesta semana</label>
-            </div>
           </div>
-          <div class="btn-group" style="justify-content:flex-end;">
-            <button class="btn btn-success" onclick="openBatchForCurrentWeek()">Lançar Dias Faltantes Desta Semana em Lote</button>
-          </div>
+          <button class="btn btn-success btn-sm" onclick="openBatchForCurrentWeek()">Completar Semana em Lote</button>
         </div>
+      </div>
 
-        <div class="grid-4">
-          <div class="stat-card">
-            <div class="stat-label">Semana Selecionada</div>
-            <div class="stat-value" id="wk-range-label" style="font-size:17px;">-</div>
-            <div class="stat-sub" id="wk-days-logged-sub">Dias úteis lançados: 0 / 5</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Total Trabalhado na Semana</div>
-            <div class="stat-value" id="wk-total-worked">-</div>
-            <div class="stat-sub" id="wk-full-target-sub">Meta semanal (5 dias): -</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Meta Esperada até Hoje</div>
-            <div class="stat-value" id="wk-target-today">-</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Saldo da Semana</div>
-            <div class="stat-value" id="wk-balance">-</div>
-          </div>
+      <nav class="editorial-chapter-bar" aria-label="Capítulos da Visão Semanal">
+        <button type="button" class="chapter-pill is-active" onclick="scrollToSection('sec-wk-kpis', this)"><span class="chapter-num">01</span> Indicadores da Semana</button>
+        <button type="button" class="chapter-pill" onclick="scrollToSection('sec-wk-table', this)"><span class="chapter-num">02</span> Grade Segunda a Domingo</button>
+      </nav>
+
+      <div class="bento-kpi-strip scroll-reveal" id="sec-wk-kpis">
+        <div class="bento-kpi-item" data-idx="01">
+          <div class="bento-kpi-head"><span class="bento-kpi-label">Semana Selecionada</span></div>
+          <div class="bento-kpi-main" id="wk-range-label" style="font-size:16px;">-</div>
+          <div class="stat-sub" id="wk-days-logged-sub">Dias úteis lançados: 0 / 5</div>
         </div>
+        <div class="bento-kpi-item" data-idx="02">
+          <div class="bento-kpi-head"><span class="bento-kpi-label">Total Trabalhado na Semana</span></div>
+          <div class="bento-kpi-main" id="wk-total-worked">-</div>
+          <div class="stat-sub" id="wk-full-target-sub">Meta semanal (5 dias): -</div>
+        </div>
+        <div class="bento-kpi-item" data-idx="03">
+          <div class="bento-kpi-head"><span class="bento-kpi-label">Meta Esperada até Hoje</span></div>
+          <div class="bento-kpi-main" id="wk-target-today">-</div>
+          <div class="stat-sub">Dias úteis decorridos</div>
+        </div>
+        <div class="bento-kpi-item" data-idx="04">
+          <div class="bento-kpi-head"><span class="bento-kpi-label">Saldo da Semana</span></div>
+          <div class="bento-kpi-main" id="wk-balance">-</div>
+          <div class="stat-sub">Diferença líquida semanal</div>
+        </div>
+      </div>
 
+      <div class="card scroll-reveal" id="sec-wk-table">
         <div class="table-responsive">
           <table>
             <thead>
@@ -1260,43 +1455,25 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     <!-- ==================== TAB 3: LANCAMENTOS DO JIRA (WORKLOGS) ==================== -->
     <section id="tab-worklogs" class="tab-pane">
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Gerenciador de Todos os Lançamentos do Jira (Worklogs)</div>
-          <div class="btn-group">
-            <button class="btn btn-outline" onclick="switchTab('tab-batch')">Lançamento Multi-Dias / Semanas em Lote</button>
-            <button class="btn btn-primary" onclick="openWorklogModal()">+ Lançar Novo Worklog no Jira</button>
-          </div>
+      <div class="editorial-page-hero scroll-reveal is-visible">
+        <div class="editorial-hero-left">
+          <div class="editorial-kicker">05 / Auditoria &amp; Histórico Oficial</div>
+          <h1 class="editorial-headline">Lançamentos no Jira &amp; <span class="editorial-serif">Edição em Massa</span></h1>
+          <p class="editorial-sub">Consulte, filtre, migre de chamado ou recalcule horários de lançamentos já enviados ao Jira (<span id="wl-count-label">0</span> encontrados).</p>
         </div>
-
-        <div class="form-grid" style="align-items: end;">
-          <div class="form-group" style="margin-bottom:0">
-            <label>Período Retroativo (Dias)</label>
-            <select id="wl-filter-days" class="form-control" onchange="loadJiraWorklogs()">
-              <option value="7">Últimos 7 dias (Semanal)</option>
-              <option value="14" selected>Últimos 14 dias (Quinzena)</option>
-              <option value="30">Últimos 30 dias (Mensal)</option>
-              <option value="60">Últimos 60 dias</option>
-              <option value="90">Últimos 90 dias</option>
-            </select>
-          </div>
-          <div class="form-group" style="margin-bottom:0">
-            <label>Filtrar por Ticket Específico no Jira (Opcional)</label>
-            <input type="text" id="wl-filter-issue" class="form-control" placeholder="Ex: CONSISABI-427 (vazio = todos meus lançamentos)">
-          </div>
-          <div class="form-group" style="margin-bottom:0">
-            <label>Busca Rápida na Tabela (Ticket, Data ou Descrição)</label>
-            <input type="text" id="wl-search-text" class="form-control" placeholder="Filtrar resultados exibidos..." oninput="renderWorklogsTable()">
-          </div>
-          <div class="btn-group">
-            <button class="btn btn-primary" onclick="loadJiraWorklogs()">Consultar no Jira</button>
-            <button class="btn btn-outline" onclick="document.getElementById('wl-filter-issue').value=''; loadJiraWorklogs();">Limpar Filtro</button>
-          </div>
+        <div class="btn-group">
+          <button class="btn btn-outline btn-sm" onclick="switchTab('tab-batch')">Lançamento em Lote</button>
+          <button class="btn btn-primary btn-sm" onclick="openWorklogModal()">+ Lançar Novo Worklog no Jira</button>
         </div>
       </div>
 
+      <nav class="editorial-chapter-bar" aria-label="Capítulos de Lançamentos do Jira">
+        <button type="button" class="chapter-pill is-active" onclick="scrollToSection('sec-wl-filters', this)"><span class="chapter-num">01</span> Busca &amp; Filtros</button>
+        <button type="button" class="chapter-pill" onclick="scrollToSection('sec-wl-table', this)"><span class="chapter-num">02</span> Registros Sincronizados</button>
+      </nav>
+
       <!-- Fila Offline Pendente (se houver) -->
-      <div class="card" id="offline-queue-card" style="display:none;">
+      <div class="card scroll-reveal" id="offline-queue-card" style="display:none;">
         <div class="card-header">
           <div class="card-title">Fila Offline Pendente de Sincronização com o Jira</div>
           <button class="btn btn-success btn-sm" onclick="serviceAction('flush_queue')">Sincronizar Fila Agora</button>
@@ -1330,13 +1507,36 @@ HTML_PAGE = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- Tabela Principal de Lancamentos do Jira -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Lançamentos Encontrados no Jira (<span id="wl-count-label">0</span>)</div>
-          <span style="font-size:12px; color:var(--text-muted);">Marque vários lançamentos para editar/excluir em lote, ou clique em Editar na linha desejada</span>
+      <!-- Card Unificado de Filtro + Tabela Principal de Lancamentos do Jira -->
+      <div class="card scroll-reveal" id="sec-wl-filters">
+        <div class="schedule-box" style="padding:14px 16px; margin-bottom:16px;">
+          <div style="display:grid; grid-template-columns:190px 230px 1fr auto; gap:10px; align-items:end;">
+            <div class="form-group" style="margin-bottom:0">
+              <label>Período Retroativo</label>
+              <select id="wl-filter-days" class="form-control" onchange="loadJiraWorklogs()">
+                <option value="7">Últimos 7 dias (Semanal)</option>
+                <option value="14" selected>Últimos 14 dias (Quinzena)</option>
+                <option value="30">Últimos 30 dias (Mensal)</option>
+                <option value="60">Últimos 60 dias</option>
+                <option value="90">Últimos 90 dias</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label>Ticket Específico (Opcional)</label>
+              <input type="text" id="wl-filter-issue" class="form-control" placeholder="Ex: CONSISABI-427">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label>Busca Rápida na Tabela</label>
+              <input type="text" id="wl-search-text" class="form-control" placeholder="Filtrar por ticket, data ou descrição..." oninput="renderWorklogsTable()">
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-primary" onclick="loadJiraWorklogs()">Consultar no Jira</button>
+              <button class="btn btn-outline" onclick="document.getElementById('wl-filter-issue').value=''; loadJiraWorklogs();">Limpar</button>
+            </div>
+          </div>
         </div>
-        <div class="table-responsive">
+
+        <div class="table-responsive" id="sec-wl-table">
           <table>
             <thead>
               <tr>
@@ -1362,73 +1562,169 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     <!-- ==================== TAB 4: LANCAMENTOS EM LOTE (MULTI-DIAS / SEMANAS / MULTI-TICKETS) ==================== -->
     <section id="tab-batch" class="tab-pane">
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Gerador de Lançamentos em Lote (Múltiplos Dias, Semanas e Múltiplos Tickets)</div>
-          <div class="btn-group" style="align-items:center;">
-            <span style="font-size:11.5px; color:var(--text-muted); margin-right:4px;">Atalhos Opcionais:</span>
-            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('this_week')">Esta Semana</button>
-            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('last_week')">Semana Passada</button>
-            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('2_weeks')">Últimas 2 Semanas</button>
-            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('3_weeks')">Últimas 3 Semanas</button>
-            <button class="btn btn-outline btn-sm" onclick="setBatchPreset('month')">Últimos 30 Dias</button>
-          </div>
+      <div class="editorial-page-hero scroll-reveal is-visible">
+        <div class="editorial-hero-left">
+          <div class="editorial-kicker">06 / Automação Multi-Dias</div>
+          <h1 class="editorial-headline">Gerador de Lotes &amp; <span class="editorial-serif">Distribuição</span></h1>
+          <p class="editorial-sub">Configure múltiplos dias ou múltiplos tickets por dia e revise a grade completa antes de publicar no Jira.</p>
         </div>
-
-        <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-          Escolha livremente a <strong>Data Inicial</strong> e a <strong>Data Final</strong> do período que deseja lançar, marque os dias da semana desejados (por padrão Segunda a Sexta, pulando Sábado e Domingo) e selecione abaixo como os tickets devem ser distribuídos.
-        </p>
-
-        <div class="form-grid">
-          <div class="form-group">
-            <label>Data Inicial do Período (Escolha Livre)</label>
-            <input type="date" id="batch-start-date" class="form-control" oninput="onBatchPeriodOrWeekdayChange()" onchange="onBatchPeriodOrWeekdayChange()">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <div class="ui-dropdown" id="dd-batch-presets">
+            <button type="button" class="btn btn-outline btn-sm ui-dropdown-btn" onclick="toggleUiDropdown('dd-batch-presets', event)">
+              Atalhos de Período <span class="ui-dropdown-caret"></span>
+            </button>
+            <div class="ui-dropdown-menu">
+              <div class="ui-dropdown-header">Preencher Datas Rápido</div>
+              <button type="button" class="ui-dropdown-item" onclick="closeAllUiDropdowns(); setBatchPreset('this_week')">Esta Semana</button>
+              <button type="button" class="ui-dropdown-item" onclick="closeAllUiDropdowns(); setBatchPreset('last_week')">Semana Passada</button>
+              <button type="button" class="ui-dropdown-item" onclick="closeAllUiDropdowns(); setBatchPreset('2_weeks')">Últimas 2 Semanas</button>
+              <button type="button" class="ui-dropdown-item" onclick="closeAllUiDropdowns(); setBatchPreset('3_weeks')">Últimas 3 Semanas</button>
+              <button type="button" class="ui-dropdown-item" onclick="closeAllUiDropdowns(); setBatchPreset('month')">Últimos 30 Dias</button>
+            </div>
           </div>
-          <div class="form-group">
-            <label>Data Final do Período (Escolha Livre)</label>
-            <input type="date" id="batch-end-date" class="form-control" oninput="onBatchPeriodOrWeekdayChange()" onchange="onBatchPeriodOrWeekdayChange()">
-          </div>
-          <div class="form-group" style="grid-column: span 2;">
-            <label>Como Deseja Lançar os Tickets neste Período?</label>
-            <select id="batch-multi-mode" class="form-control" onchange="onBatchMultiModeChange()">
-              <option value="one_per_day">1 Ticket por Dia (Em Ordem Cronológica: 1 linha para cada dia habilitado do período, limitado ao total de dias)</option>
-              <option value="split_day">Dividir o Mesmo Dia entre Vários Tickets (Lançar 2 ou mais tickets dentro do mesmo dia e repetir esse padrão em todos os dias)</option>
-            </select>
-          </div>
+          <button class="btn btn-primary btn-sm" onclick="generateBatchPreview()">1. Validar e Gerar Pré-Visualização</button>
         </div>
+      </div>
 
-        <!-- Quadro Explicativo Detalhado do Modo Selecionado -->
-        <div id="batch-mode-explanation-box" class="schedule-box" style="margin-bottom:14px; border-left: 4px solid var(--primary); padding: 12px 16px;">
-        </div>
+      <nav class="editorial-chapter-bar" aria-label="Sub-vistas de Lançamentos em Lote">
+        <button type="button" class="chapter-pill is-active" id="btn-subview-batch-setup" onclick="switchSubView('tab-batch', 'batch-pane-setup', this)"><span class="chapter-num">01</span> Período &amp; Tickets</button>
+        <button type="button" class="chapter-pill" id="btn-subview-batch-base" onclick="switchSubView('tab-batch', 'batch-pane-base', this)"><span class="chapter-num">02</span> Expediente Base &amp; Dias</button>
+        <button type="button" class="chapter-pill" id="btn-subview-batch-preview" onclick="switchSubView('tab-batch', 'batch-pane-preview', this)"><span class="chapter-num">03</span> Grade de Revisão</button>
+      </nav>
 
-        <div class="schedule-box">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-            <div style="font-weight:700; font-size:13px;">Expediente Base de Referência do Dia</div>
+      <!-- SUB-VISTA 1: PERIODO E TICKETS DO LOTE -->
+      <div class="subview-pane active" id="batch-pane-setup">
+        <div class="card scroll-reveal is-visible" id="sec-batch-period" style="margin-bottom:0;">
+          <div class="form-grid" style="margin-bottom:12px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Data Inicial do Período</label>
+              <input type="date" id="batch-start-date" class="form-control" oninput="onBatchPeriodOrWeekdayChange()" onchange="onBatchPeriodOrWeekdayChange()">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Data Final do Período</label>
+              <input type="date" id="batch-end-date" class="form-control" oninput="onBatchPeriodOrWeekdayChange()" onchange="onBatchPeriodOrWeekdayChange()">
+            </div>
+            <div class="form-group" style="grid-column: span 2; margin-bottom:0;">
+              <label>Modo de Distribuição dos Tickets</label>
+              <select id="batch-multi-mode" class="form-control" onchange="onBatchMultiModeChange()">
+                <option value="one_per_day">1 Ticket por Dia (Em Ordem Cronológica: 1 linha para cada dia habilitado do período)</option>
+                <option value="split_day">Dividir o Mesmo Dia entre Vários Tickets (Repetir divisão em todos os dias habilitados)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Quadro Explicativo Recolhido por Padrao para Despoluir a Tela -->
+          <details class="ui-drawer" style="margin-bottom:12px;">
+            <summary class="ui-drawer-header" style="padding:8px 12px;">
+              <div class="ui-drawer-title">
+                <span style="font-size:12px;">Como funciona o modo de distribuição selecionado</span>
+              </div>
+              <div class="ui-drawer-right">
+                <span>Ver regras</span>
+                <span class="ui-drawer-caret"></span>
+              </div>
+            </summary>
+            <div class="ui-drawer-body" id="batch-mode-explanation-box" style="padding:10px 14px;">
+            </div>
+          </details>
+
+          <!-- Lista Dinamica de Tickets do Lote -->
+          <div class="schedule-box" id="sec-batch-tickets">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+              <div>
+                <div style="font-weight:700; font-size:13.5px;" id="batch-tickets-section-title">Tickets Configurados para o Lote (<span id="batch-tickets-count-lbl">1</span>)</div>
+                <div style="font-size:12px; color:var(--text-muted);" id="batch-tickets-section-subtitle"></div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button class="btn btn-primary btn-sm" id="batch-add-ticket-btn" onclick="addBatchTemplateTicket()">+ Adicionar Ticket</button>
+                <div class="ui-dropdown" id="dd-batch-ticket-tools">
+                  <button type="button" class="btn btn-outline btn-sm ui-dropdown-btn" onclick="toggleUiDropdown('dd-batch-ticket-tools', event)">
+                    Ferramentas de Divisão &amp; Cópia <span class="ui-dropdown-caret"></span>
+                  </button>
+                  <div class="ui-dropdown-menu">
+                    <div class="ui-dropdown-header">Automação das Linhas do Lote</div>
+                    <button type="button" class="ui-dropdown-item" id="batch-copy-first-btn" onclick="closeAllUiDropdowns(); copyFirstTicketToAllBatchTemplates();">Repetir Ticket #1 em Todos</button>
+                    <button type="button" class="ui-dropdown-item" id="batch-split-eq-btn" onclick="closeAllUiDropdowns(); autoSplitBatchTicketsEqual();">Dividir Horas Iguais no Dia</button>
+                    <button type="button" class="ui-dropdown-item" id="batch-split-ma-btn" onclick="closeAllUiDropdowns(); autoSplitBatchTicketsMorningAfternoon();">Dividir Manhã / Tarde</button>
+                    <div class="ui-dropdown-divider"></div>
+                    <button type="button" class="ui-dropdown-item" onclick="closeAllUiDropdowns(); syncBatchTicketsWithBaseSchedule();">Aplicar Horário Base em Todos</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="min-width:155px;" id="batch-tpl-col-order-hdr">Ordem / Dia Correspondente</th>
+                    <th>Ticket (Ex: CONSISABI-427)</th>
+                    <th>Início</th>
+                    <th>Pausa Almoço</th>
+                    <th>Retorno</th>
+                    <th>Encerramento</th>
+                    <th>Líquido</th>
+                    <th>Descrição / Comentário deste Ticket</th>
+                    <th style="text-align:right;">Ação</th>
+                  </tr>
+                </thead>
+                <tbody id="batch-template-tickets-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-top:14px;">
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <label style="font-size:13px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="batch-skip-existing-chk" checked>
+                Consultar o Jira e desmarcar automaticamente os dias que já possuem lançamento registrado
+              </label>
+              <label style="font-size:13px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="batch-no-comment-chk">
+                Enviar lançamentos deste lote SEM nenhuma descrição
+              </label>
+            </div>
             <div class="btn-group">
-              <button class="btn btn-outline btn-sm" onclick="setBatchBaseProfile('6h')">Padrão 6h (07:45 - 15:15)</button>
-              <button class="btn btn-outline btn-sm" onclick="setBatchBaseProfile('8h')">Padrão 8h (07:42 - 17:42)</button>
+              <button class="btn btn-primary" onclick="generateBatchPreview()">1. Validar no Jira e Gerar Pré-Visualização de Envio</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SUB-VISTA 2: EXPEDIENTE BASE E DIAS DA SEMANA -->
+      <div class="subview-pane" id="batch-pane-base">
+        <div class="card scroll-reveal is-visible" id="drawer-batch-base-schedule" style="margin-bottom:0;">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Expediente Base de Referência &amp; Dias da Semana</div>
+              <div class="card-subtitle" id="batch-base-calc-text">Tempo Líquido Base calculado pelo seu perfil ativo</div>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-primary btn-sm" onclick="setBatchBaseProfile('active')">Usar Meu Perfil Ativo</button>
+              <button class="btn btn-outline btn-sm" onclick="setBatchBaseProfile('6h')">Turno 6h</button>
+              <button class="btn btn-outline btn-sm" onclick="setBatchBaseProfile('8h')">Turno 8h</button>
             </div>
           </div>
           <div class="schedule-grid">
             <div class="form-group" style="margin-bottom:0">
               <label>Horário de Início</label>
-              <input type="time" id="batch-start-hm" class="form-control" value="07:45" oninput="previewBatchBaseSchedule()">
+              <input type="time" id="batch-start-hm" class="form-control" oninput="previewBatchBaseSchedule()">
             </div>
             <div class="form-group" style="margin-bottom:0">
               <label>Pausa de Almoço</label>
-              <input type="time" id="batch-ls-hm" class="form-control" value="12:00" oninput="previewBatchBaseSchedule()">
+              <input type="time" id="batch-ls-hm" class="form-control" oninput="previewBatchBaseSchedule()">
             </div>
             <div class="form-group" style="margin-bottom:0">
               <label>Retorno do Almoço</label>
-              <input type="time" id="batch-le-hm" class="form-control" value="13:30" oninput="previewBatchBaseSchedule()">
+              <input type="time" id="batch-le-hm" class="form-control" oninput="previewBatchBaseSchedule()">
             </div>
             <div class="form-group" style="margin-bottom:0">
               <label>Horário de Encerramento</label>
-              <input type="time" id="batch-end-hm" class="form-control" value="15:15" oninput="previewBatchBaseSchedule()">
+              <input type="time" id="batch-end-hm" class="form-control" oninput="previewBatchBaseSchedule()">
             </div>
           </div>
 
-          <div class="schedule-summary-bar">
+          <div class="schedule-summary-bar" style="margin-top:14px;">
             <div style="display:flex; flex-direction:column; gap:6px;">
               <div>
                 <strong>Dias da Semana Habilitados para Lançamento:</strong>
@@ -1444,23 +1740,33 @@ HTML_PAGE = r"""<!DOCTYPE html>
               </div>
               <div id="batch-period-days-info" style="font-size:12.5px; color:var(--primary-text); font-weight:600;"></div>
             </div>
-            <div id="batch-base-calc-text" style="font-weight:600;">Tempo Líquido Base: 06:00</div>
           </div>
         </div>
+      </div>
 
-        <!-- Lista Dinamica de Tickets do Lote -->
-        <div class="schedule-box" style="margin-top:14px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
-            <div>
-              <div style="font-weight:700; font-size:13.5px;" id="batch-tickets-section-title">Tickets Configurados para o Lote (<span id="batch-tickets-count-lbl">1</span>)</div>
-              <div style="font-size:12px; color:var(--text-muted);" id="batch-tickets-section-subtitle"></div>
-            </div>
+      <!-- SUB-VISTA 3: GRADE EDITAVEL DE PRE-VISUALIZACAO DO LOTE -->
+      <div class="subview-pane" id="batch-pane-preview">
+        <div class="card scroll-reveal is-visible" id="batch-preview-card" style="margin-bottom:0;">
+          <div class="card-header">
+            <div class="card-title">Revisão Dia a Dia do Lote (<span id="batch-selected-summary">0 selecionados</span>)</div>
             <div class="btn-group">
-              <button class="btn btn-primary btn-sm" id="batch-add-ticket-btn" onclick="addBatchTemplateTicket()">+ Adicionar Ticket</button>
-              <button class="btn btn-outline btn-sm" id="batch-copy-first-btn" onclick="copyFirstTicketToAllBatchTemplates()" title="Copia o código e a descrição do Ticket #1 para todas as linhas abaixo">Repetir Ticket #1 em Todos</button>
-              <button class="btn btn-outline btn-sm" id="batch-split-eq-btn" onclick="autoSplitBatchTicketsEqual()" title="Divide o tempo líquido do dia igualmente entre todos os tickets listados">Dividir Horas Iguais no Dia</button>
-              <button class="btn btn-outline btn-sm" id="batch-split-ma-btn" onclick="autoSplitBatchTicketsMorningAfternoon()" title="1º ticket de manhã (até o almoço) e demais tickets à tarde">Dividir Manhã / Tarde</button>
-              <button class="btn btn-outline btn-sm" onclick="syncBatchTicketsWithBaseSchedule()" title="Copia o expediente base completo para todos os tickets">Aplicar Horário Base em Todos</button>
+              <button class="btn btn-outline btn-sm" onclick="toggleAllBatchRows(true)">Marcar Todos</button>
+              <button class="btn btn-outline btn-sm" onclick="toggleAllBatchRows(false)">Desmarcar Todos</button>
+              <button class="btn btn-success" id="batch-submit-btn" onclick="submitBatchWorklogs()">2. Lançar Todos os Selecionados no Jira Agora</button>
+            </div>
+          </div>
+
+          <!-- Barra de Aplicacao Rapida de Ticket / Descricao nas Linhas Marcadas -->
+          <div class="schedule-box" style="margin-bottom:14px; padding:10px 14px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+              <div style="font-size:12.5px; font-weight:600; color:var(--text-muted);">
+                Alterar Rápido nas Linhas Marcadas Abaixo:
+              </div>
+              <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; flex:1; justify-content:flex-end;">
+                <input type="text" id="batch-quick-issue" class="form-control" style="width:160px; padding:6px 10px;" placeholder="Novo Ticket (ex: PROJ-10)">
+                <input type="text" id="batch-quick-comment" class="form-control" style="width:240px; padding:6px 10px;" placeholder="Nova Descrição (opcional)">
+                <button class="btn btn-outline btn-sm" onclick="applyQuickFillToBatchRows()">Aplicar nas Linhas Marcadas</button>
+              </div>
             </div>
           </div>
 
@@ -1468,202 +1774,170 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <table>
               <thead>
                 <tr>
-                  <th style="min-width:155px;" id="batch-tpl-col-order-hdr">Ordem / Dia Correspondente</th>
-                  <th>Ticket (Ex: CONSISABI-427)</th>
+                  <th style="width:36px;">Incluir</th>
+                  <th>Data</th>
+                  <th>Dia</th>
+                  <th>Status Atual no Jira</th>
+                  <th>Ticket</th>
                   <th>Início</th>
-                  <th>Pausa Almoço</th>
+                  <th>Almoço</th>
                   <th>Retorno</th>
                   <th>Encerramento</th>
                   <th>Líquido</th>
-                  <th>Descrição / Comentário deste Ticket</th>
-                  <th style="text-align:right;">Ação</th>
+                  <th>Descrição</th>
+                  <th style="text-align:right;">Ações no Dia</th>
                 </tr>
               </thead>
-              <tbody id="batch-template-tickets-tbody"></tbody>
+              <tbody id="batch-preview-tbody">
+                <tr><td colspan="12" style="text-align:center; padding:24px; color:var(--text-muted);">Clique em "1. Validar e Gerar Pré-Visualização" na aba Período &amp; Tickets para montar a grade.</td></tr>
+              </tbody>
             </table>
           </div>
-        </div>
-
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-top:14px;">
-          <div style="display:flex; flex-direction:column; gap:6px;">
-            <label style="font-size:13px; display:flex; align-items:center; gap:8px; cursor:pointer;">
-              <input type="checkbox" id="batch-skip-existing-chk" checked>
-              Consultar o Jira e desmarcar automaticamente os dias que já possuem lançamento registrado
-            </label>
-            <label style="font-size:13px; display:flex; align-items:center; gap:8px; cursor:pointer;">
-              <input type="checkbox" id="batch-no-comment-chk">
-              Enviar lançamentos deste lote SEM nenhuma descrição
-            </label>
-          </div>
-          <div class="btn-group">
-            <button class="btn btn-primary" onclick="generateBatchPreview()">1. Validar no Jira e Gerar Pré-Visualização de Envio</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Grade Editavel de Pre-Visualizacao do Lote -->
-      <div class="card" id="batch-preview-card" style="display:none;">
-        <div class="card-header">
-          <div class="card-title">Revisão Dia a Dia do Lote (<span id="batch-selected-summary">0 selecionados</span>)</div>
-          <div class="btn-group">
-            <button class="btn btn-outline btn-sm" onclick="toggleAllBatchRows(true)">Marcar Todos</button>
-            <button class="btn btn-outline btn-sm" onclick="toggleAllBatchRows(false)">Desmarcar Todos</button>
-            <button class="btn btn-success" id="batch-submit-btn" onclick="submitBatchWorklogs()">2. Lançar Todos os Selecionados no Jira Agora</button>
-          </div>
-        </div>
-
-        <!-- Barra de Aplicacao Rapida de Ticket / Descricao nas Linhas Marcadas -->
-        <div class="schedule-box" style="margin-bottom:14px; padding:10px 14px;">
-          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
-            <div style="font-size:12.5px; font-weight:600; color:var(--text-muted);">
-              Alterar Rápido nas Linhas Marcadas Abaixo:
-            </div>
-            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; flex:1; justify-content:flex-end;">
-              <input type="text" id="batch-quick-issue" class="form-control" style="width:160px; padding:6px 10px;" placeholder="Novo Ticket (ex: PROJ-10)">
-              <input type="text" id="batch-quick-comment" class="form-control" style="width:240px; padding:6px 10px;" placeholder="Nova Descrição (opcional)">
-              <button class="btn btn-outline btn-sm" onclick="applyQuickFillToBatchRows()">Aplicar nas Linhas Marcadas</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="table-responsive">
-          <table>
-            <thead>
-              <tr>
-                <th style="width:36px;">Incluir</th>
-                <th>Data</th>
-                <th>Dia</th>
-                <th>Status Atual no Jira</th>
-                <th>Ticket</th>
-                <th>Início</th>
-                <th>Almoço</th>
-                <th>Retorno</th>
-                <th>Encerramento</th>
-                <th>Líquido</th>
-                <th>Descrição</th>
-                <th style="text-align:right;">Ações no Dia</th>
-              </tr>
-            </thead>
-            <tbody id="batch-preview-tbody"></tbody>
-          </table>
         </div>
       </div>
     </section>
 
     <!-- ==================== TAB 5: PERFIS DE TURNO E JANELAS ==================== -->
     <section id="tab-profiles" class="tab-pane">
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Seleção e Configuração Visual de Perfis de Turno</div>
-          <button class="btn btn-primary" onclick="saveProfileSettings()">Salvar Perfil e Janelas</button>
+      <div class="editorial-page-hero scroll-reveal is-visible">
+        <div class="editorial-hero-left">
+          <div class="editorial-kicker">07 / Arquitetura de Jornada</div>
+          <h1 class="editorial-headline">Perfis de Turno &amp; <span class="editorial-serif">Horários</span></h1>
+          <p class="editorial-sub">Configure os horários exatos do seu expediente (Entrada, Almoço, Retorno e Saída) para qualquer carga horária.</p>
         </div>
+        <button class="btn btn-primary" onclick="saveProfileSettings()">Salvar Perfil e Horários</button>
+      </div>
 
-        <div class="form-grid" style="margin-bottom: 18px;">
-          <div class="form-group">
-            <label>Perfil de Turno Ativo</label>
-            <select id="prof-active-select" class="form-control" onchange="onProfileSelectChange()">
-              <option value="8h">Turno de 8h (8h)</option>
-              <option value="6h_0745">Turno de 6h Cedo - 07:45 (6h_0745)</option>
-              <option value="6h_0800">Turno de 6h Padrão - 08:00 (6h_0800)</option>
-              <option value="custom">Turno Personalizado (custom)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Meta Diária de Horas do Perfil</label>
-            <input type="number" step="0.5" min="1" max="24" id="prof-target-hours" class="form-control">
-          </div>
-          <div class="form-group" style="grid-column: span 2;">
-            <label>Descrição do Perfil</label>
-            <input type="text" id="prof-description" class="form-control">
-          </div>
-        </div>
+      <nav class="editorial-chapter-bar" aria-label="Sub-vistas de Perfis de Turno">
+        <button type="button" class="chapter-pill is-active" onclick="switchSubView('tab-profiles', 'prof-pane-main', this)"><span class="chapter-num">01</span> Meu Turno &amp; Horários</button>
+        <button type="button" class="chapter-pill" onclick="switchSubView('tab-profiles', 'prof-pane-windows', this)"><span class="chapter-num">02</span> Janelas Avançadas &amp; Folgas</button>
+      </nav>
 
-        <div class="grid-2">
-          <div class="schedule-box" style="margin-bottom:0">
-            <div style="font-weight:700; font-size:13px; margin-bottom:12px;">Janelas de Detecção Automática (Início e Fim de cada Janela)</div>
-            <div class="form-grid">
-              <div class="form-group">
-                <label>Janela de Entrada (Início)</label>
-                <input type="time" id="win-entry-start" class="form-control">
-              </div>
-              <div class="form-group">
-                <label>Janela de Entrada (Fim)</label>
-                <input type="time" id="win-entry-end" class="form-control">
-              </div>
-
-              <div class="form-group">
-                <label>Janela Saída Almoço (Início)</label>
-                <input type="time" id="win-ls-start" class="form-control">
-              </div>
-              <div class="form-group">
-                <label>Janela Saída Almoço (Fim)</label>
-                <input type="time" id="win-ls-end" class="form-control">
-              </div>
-
-              <div class="form-group">
-                <label>Janela Retorno Almoço (Início)</label>
-                <input type="time" id="win-le-start" class="form-control">
-              </div>
-              <div class="form-group">
-                <label>Janela Retorno Almoço (Fim)</label>
-                <input type="time" id="win-le-end" class="form-control">
-              </div>
-
-              <div class="form-group">
-                <label>Janela de Encerramento (Início)</label>
-                <input type="time" id="win-exit-start" class="form-control">
-              </div>
-              <div class="form-group">
-                <label>Janela de Encerramento (Fim)</label>
-                <input type="time" id="win-exit-end" class="form-control">
-              </div>
+      <!-- SUB-VISTA 1: MEU TURNO E 4 HORARIOS NOMINAIS (QUALQUER COMBINACAO DE HORARIOS) -->
+      <div class="subview-pane active" id="prof-pane-main">
+        <div class="card scroll-reveal is-visible" id="sec-prof-main" style="margin-bottom:0;">
+          <div class="form-grid" style="margin-bottom: 16px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Perfil de Turno Ativo</label>
+              <select id="prof-active-select" class="form-control" onchange="onProfileSelectChange()">
+                <option value="8h">Turno de 8h (8h)</option>
+                <option value="6h_0745">Turno de 6h Cedo - 07:45 (6h_0745)</option>
+                <option value="6h_0800">Turno de 6h Padrão - 08:00 (6h_0800)</option>
+                <option value="custom">Turno Personalizado / Livre (custom)</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Meta Diária de Horas do Perfil</label>
+              <input type="number" step="0.25" min="1" max="24" id="prof-target-hours" class="form-control">
+            </div>
+            <div class="form-group" style="grid-column: span 2; margin-bottom:0;">
+              <label>Descrição do Perfil</label>
+              <input type="text" id="prof-description" class="form-control">
             </div>
           </div>
 
-          <div class="schedule-box" style="margin-bottom:0">
-            <div style="font-weight:700; font-size:13px; margin-bottom:12px;">Calculadora de Janelas por Horário Base + Folgas (Minutos)</div>
-            <div class="form-grid">
-              <div class="form-group">
-                <label>Entrada Alvo</label>
-                <input type="time" id="calc-entry-hm" class="form-control" value="07:45" oninput="applyToleranceCalculator(true)">
+          <div class="schedule-box" style="margin-bottom:0;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <div>
+                <div style="font-weight:700; font-size:13.5px;">Horários Nominais do Seu Expediente (Totalmente Variáveis)</div>
+                <div style="font-size:12px; color:var(--text-muted);">Defina livremente qualquer turno (ex: 07:42 - 12:00 - 13:00 - 17:30 ou 08:00 - 11:45 - 13:20 - 16:45). As janelas de detecção se ajustam automaticamente.</div>
               </div>
-              <div class="form-group">
+              <div id="prof-nominal-net-summary" style="font-size:12.5px; font-weight:700; color:var(--primary-text);"></div>
+            </div>
+            <div class="schedule-grid">
+              <div class="koalendar-step">
+                <span class="koalendar-step-num">1. Entrada</span>
+                <input type="time" id="calc-entry-hm" class="form-control" oninput="applyToleranceCalculator(true)">
+              </div>
+              <div class="koalendar-step">
+                <span class="koalendar-step-num">2. Saída Almoço</span>
+                <input type="time" id="calc-ls-hm" class="form-control" oninput="applyToleranceCalculator(true)">
+              </div>
+              <div class="koalendar-step">
+                <span class="koalendar-step-num">3. Retorno Almoço</span>
+                <input type="time" id="calc-le-hm" class="form-control" oninput="applyToleranceCalculator(true)">
+              </div>
+              <div class="koalendar-step">
+                <span class="koalendar-step-num">4. Encerramento</span>
+                <input type="time" id="calc-exit-hm" class="form-control" oninput="applyToleranceCalculator(true)">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SUB-VISTA 2: JANELAS AVANCADAS DE DETECCAO E FOLGAS EM MINUTOS -->
+      <div class="subview-pane" id="prof-pane-windows">
+        <div class="card scroll-reveal is-visible" id="sec-prof-windows" style="margin-bottom:0;">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Janelas de Detecção Automática &amp; Folgas (Minutos)</div>
+              <div class="card-subtitle">Intervalos de tolerância usados pelo monitor de bloqueio/desbloqueio do Windows</div>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="applyToleranceCalculator(false)">Recalcular Janelas pelos Horários Nominais</button>
+          </div>
+
+          <div class="grid-4" style="margin-bottom:14px;">
+            <div class="koalendar-step">
+              <div class="form-group" style="margin-bottom:8px;">
+                <label>1. Entrada (Início / Fim)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="time" id="win-entry-start" class="form-control" oninput="onManualWindowEdit()">
+                  <input type="time" id="win-entry-end" class="form-control" oninput="onManualWindowEdit()">
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
                 <label>Folga Antes / Depois (min)</label>
                 <div style="display:flex; gap:6px;">
                   <input type="number" id="calc-entry-bef" class="form-control" value="20" style="width:50%" oninput="applyToleranceCalculator(true)">
                   <input type="number" id="calc-entry-aft" class="form-control" value="20" style="width:50%" oninput="applyToleranceCalculator(true)">
                 </div>
               </div>
+            </div>
 
-              <div class="form-group">
-                <label>Saída Almoço Alvo</label>
-                <input type="time" id="calc-ls-hm" class="form-control" value="12:00" oninput="applyToleranceCalculator(true)">
+            <div class="koalendar-step">
+              <div class="form-group" style="margin-bottom:8px;">
+                <label>2. Saída Almoço (Início / Fim)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="time" id="win-ls-start" class="form-control" oninput="onManualWindowEdit()">
+                  <input type="time" id="win-ls-end" class="form-control" oninput="onManualWindowEdit()">
+                </div>
               </div>
-              <div class="form-group">
+              <div class="form-group" style="margin-bottom:0;">
                 <label>Folga Antes / Depois (min)</label>
                 <div style="display:flex; gap:6px;">
                   <input type="number" id="calc-ls-bef" class="form-control" value="20" style="width:50%" oninput="applyToleranceCalculator(true)">
                   <input type="number" id="calc-ls-aft" class="form-control" value="20" style="width:50%" oninput="applyToleranceCalculator(true)">
                 </div>
               </div>
+            </div>
 
-              <div class="form-group">
-                <label>Retorno Almoço Alvo</label>
-                <input type="time" id="calc-le-hm" class="form-control" value="13:30" oninput="applyToleranceCalculator(true)">
+            <div class="koalendar-step">
+              <div class="form-group" style="margin-bottom:8px;">
+                <label>3. Retorno Almoço (Início / Fim)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="time" id="win-le-start" class="form-control" oninput="onManualWindowEdit()">
+                  <input type="time" id="win-le-end" class="form-control" oninput="onManualWindowEdit()">
+                </div>
               </div>
-              <div class="form-group">
+              <div class="form-group" style="margin-bottom:0;">
                 <label>Folga Antes / Depois (min)</label>
                 <div style="display:flex; gap:6px;">
                   <input type="number" id="calc-le-bef" class="form-control" value="10" style="width:50%" oninput="applyToleranceCalculator(true)">
                   <input type="number" id="calc-le-aft" class="form-control" value="10" style="width:50%" oninput="applyToleranceCalculator(true)">
                 </div>
               </div>
+            </div>
 
-              <div class="form-group">
-                <label>Encerramento Alvo</label>
-                <input type="time" id="calc-exit-hm" class="form-control" value="15:30" oninput="applyToleranceCalculator(true)">
+            <div class="koalendar-step">
+              <div class="form-group" style="margin-bottom:8px;">
+                <label>4. Encerramento (Início / Fim)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="time" id="win-exit-start" class="form-control" oninput="onManualWindowEdit()">
+                  <input type="time" id="win-exit-end" class="form-control" oninput="onManualWindowEdit()">
+                </div>
               </div>
-              <div class="form-group">
+              <div class="form-group" style="margin-bottom:0;">
                 <label>Folga Antes / Depois (min)</label>
                 <div style="display:flex; gap:6px;">
                   <input type="number" id="calc-exit-bef" class="form-control" value="15" style="width:50%" oninput="applyToleranceCalculator(true)">
@@ -1671,7 +1945,6 @@ HTML_PAGE = r"""<!DOCTYPE html>
                 </div>
               </div>
             </div>
-            <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="applyToleranceCalculator(false)">Calcular e Preencher Janelas ao Lado</button>
           </div>
         </div>
       </div>
@@ -1679,94 +1952,122 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     <!-- ==================== TAB 6: RELATORIOS E BANCO DE HORAS ==================== -->
     <section id="tab-reports" class="tab-pane">
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Relatório Consolidado e Saldo de Horas</div>
-          <div class="btn-group">
-            <button class="btn btn-outline btn-sm" onclick="loadReport(7)">Últimos 7 Dias</button>
-            <button class="btn btn-outline btn-sm" onclick="loadReport(14)">Últimos 14 Dias</button>
-            <button class="btn btn-outline btn-sm" onclick="loadReport(30)">Últimos 30 Dias</button>
-            <button class="btn btn-outline btn-sm" onclick="loadReport(60)">Últimos 60 Dias</button>
+      <div class="editorial-page-hero scroll-reveal is-visible">
+        <div class="editorial-hero-left">
+          <div class="editorial-kicker">08 / Consolidação Contábil</div>
+          <h1 class="editorial-headline">Banco de Horas &amp; <span class="editorial-serif">Relatórios</span></h1>
+          <p class="editorial-sub">Compare o total trabalhado frente à meta esperada nos dias úteis do período.</p>
+        </div>
+        <div class="seg" role="group" aria-label="Período do relatório">
+          <button type="button" class="seg-btn active" onclick="loadReport(7)">7 Dias</button>
+          <button type="button" class="seg-btn" onclick="loadReport(14)">14 Dias</button>
+          <button type="button" class="seg-btn" onclick="loadReport(30)">30 Dias</button>
+          <button type="button" class="seg-btn" onclick="loadReport(60)">60 Dias</button>
+        </div>
+      </div>
+
+      <nav class="editorial-chapter-bar" aria-label="Sub-vistas de Relatórios">
+        <button type="button" class="chapter-pill is-active" onclick="switchSubView('tab-reports', 'rep-pane-table', this)"><span class="chapter-num">01</span> Saldo &amp; Histórico Diário</button>
+        <button type="button" class="chapter-pill" onclick="switchSubView('tab-reports', 'rep-pane-raw', this)"><span class="chapter-num">02</span> Exportação Terminal</button>
+      </nav>
+
+      <!-- SUB-VISTA 1: SALDO E HISTORICO DIARIO -->
+      <div class="subview-pane active" id="rep-pane-table">
+        <div class="bento-kpi-strip scroll-reveal is-visible" id="sec-rep-kpis">
+          <div class="bento-kpi-item" data-idx="01">
+            <div class="bento-kpi-head"><span class="bento-kpi-label">Total Trabalhado no Período</span></div>
+            <div class="bento-kpi-main" id="rep-total-worked">-</div>
+          </div>
+          <div class="bento-kpi-item" data-idx="02">
+            <div class="bento-kpi-head"><span class="bento-kpi-label">Meta Esperada (Dias Úteis)</span></div>
+            <div class="bento-kpi-main" id="rep-total-target">-</div>
+          </div>
+          <div class="bento-kpi-item" data-idx="03">
+            <div class="bento-kpi-head"><span class="bento-kpi-label">Saldo do Banco de Horas</span></div>
+            <div class="bento-kpi-main" id="rep-balance">-</div>
+          </div>
+          <div class="bento-kpi-item" data-idx="04">
+            <div class="bento-kpi-head"><span class="bento-kpi-label">Período Analisado</span></div>
+            <div class="bento-kpi-main" id="rep-days-count">7 dias</div>
           </div>
         </div>
 
-        <div class="grid-4" style="margin-bottom: 16px;">
-          <div class="stat-card">
-            <div class="stat-label">Total Trabalhado no Período</div>
-            <div class="stat-value" id="rep-total-worked">-</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Meta Esperada (Dias Úteis)</div>
-            <div class="stat-value" id="rep-total-target">-</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Saldo do Banco de Horas</div>
-            <div class="stat-value" id="rep-balance">-</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Período Analisado</div>
-            <div class="stat-value" id="rep-days-count">7 dias</div>
+        <div class="card scroll-reveal is-visible" id="sec-rep-table" style="margin-bottom:0;">
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Dia</th>
+                  <th>Tickets e Horas Contabilizadas</th>
+                  <th>Total do Dia</th>
+                  <th>Meta</th>
+                  <th>Status Jira</th>
+                </tr>
+              </thead>
+              <tbody id="rep-table-tbody"></tbody>
+            </table>
           </div>
         </div>
+      </div>
 
-        <div class="table-responsive" style="margin-bottom: 20px;">
-          <table>
-            <thead>
-              <tr>
-                <th>Data</th>
-                <th>Dia</th>
-                <th>Tickets e Horas Contabilizadas</th>
-                <th>Total do Dia</th>
-                <th>Meta</th>
-                <th>Status Jira</th>
-              </tr>
-            </thead>
-            <tbody id="rep-table-tbody"></tbody>
-          </table>
+      <!-- SUB-VISTA 2: EXPORTACAO TERMINAL -->
+      <div class="subview-pane" id="rep-pane-raw">
+        <div class="card scroll-reveal is-visible" id="drawer-report-raw" style="margin-bottom:0;">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Exportação em Texto / Formato Terminal</div>
+              <div class="card-subtitle">Visualize o relatório bruto em texto monoespaçado</div>
+            </div>
+          </div>
+          <pre class="terminal-box" id="rep-raw-pre"></pre>
         </div>
-
-        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">VISUALIZAÇÃO EM FORMATO TERMINAL</div>
-        <pre class="terminal-box" id="rep-raw-pre"></pre>
       </div>
     </section>
 
     <!-- ==================== TAB: AVISOS E NOTIFICACOES DE EXPEDIENTE ==================== -->
     <section id="tab-alerts" class="tab-pane">
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <div class="card-title">Avisos e Notificações de Encerramento de Turno</div>
-            <div class="section-hint">Configure a antecedência e o comportamento do alerta automático de fim de expediente.</div>
-          </div>
-          <div class="btn-group">
-            <button class="btn btn-outline btn-sm" onclick="testExitAlert()">Testar Alerta Agora</button>
-            <button class="btn btn-primary btn-sm" onclick="saveAlertConfig()">Salvar Configurações</button>
-          </div>
+      <div class="editorial-page-hero scroll-reveal is-visible">
+        <div class="editorial-hero-left">
+          <div class="editorial-kicker">09 / Prevenção de Esquecimento</div>
+          <h1 class="editorial-headline">Avisos de Saída &amp; <span class="editorial-serif">Revisão</span></h1>
+          <p class="editorial-sub">Configure a antecedência e o comportamento do alerta automático antes do encerramento do expediente.</p>
         </div>
-
-        <div class="grid-4" style="margin-bottom: 20px;">
-          <div class="stat-card">
-            <div class="stat-label">Perfil Ativo</div>
-            <div class="stat-value" style="font-size: 18px;" id="alert-profile-name">-</div>
-            <div class="stat-sub" id="alert-profile-desc">Turno configurado</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Horário Planejado de Saída</div>
-            <div class="stat-value" id="alert-planned-exit">-</div>
-            <div class="stat-sub" id="alert-planned-exit-sub">Base calculada do turno</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Disparo do Alerta Programado</div>
-            <div class="stat-value" id="alert-trigger-time">-</div>
-            <div class="stat-sub" id="alert-trigger-time-sub">Antecedência configurada</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Status do Alerta Hoje</div>
-            <div class="stat-value" style="font-size: 16px;" id="alert-today-status">-</div>
-            <div class="stat-sub" id="alert-today-status-sub">Disparo no expediente atual</div>
-          </div>
+        <div class="btn-group">
+          <button class="btn btn-outline btn-sm" onclick="testExitAlert()">Testar Alerta Agora</button>
+          <button class="btn btn-primary btn-sm" onclick="saveAlertConfig()">Salvar Configurações</button>
         </div>
+      </div>
 
+      <nav class="editorial-chapter-bar" aria-label="Capítulos de Avisos de Expediente">
+        <button type="button" class="chapter-pill is-active" onclick="scrollToSection('sec-alert-kpis', this)"><span class="chapter-num">01</span> Status Programado</button>
+        <button type="button" class="chapter-pill" onclick="scrollToSection('sec-alert-rules', this)"><span class="chapter-num">02</span> Antecedência &amp; Modos</button>
+      </nav>
+
+      <div class="bento-kpi-strip scroll-reveal" id="sec-alert-kpis">
+        <div class="bento-kpi-item" data-idx="01">
+          <div class="bento-kpi-head"><span class="bento-kpi-label">Perfil Ativo</span></div>
+          <div class="bento-kpi-main" style="font-size: 17px;" id="alert-profile-name">-</div>
+          <div class="stat-sub" id="alert-profile-desc">Turno configurado</div>
+        </div>
+        <div class="bento-kpi-item" data-idx="02">
+          <div class="bento-kpi-head"><span class="bento-kpi-label">Horário Planejado de Saída</span></div>
+          <div class="bento-kpi-main" id="alert-planned-exit">-</div>
+          <div class="stat-sub" id="alert-planned-exit-sub">Base calculada do turno</div>
+        </div>
+        <div class="bento-kpi-item" data-idx="03">
+          <div class="bento-kpi-head"><span class="bento-kpi-label">Disparo do Alerta Programado</span></div>
+          <div class="bento-kpi-main" id="alert-trigger-time">-</div>
+          <div class="stat-sub" id="alert-trigger-time-sub">Antecedência configurada</div>
+        </div>
+        <div class="bento-kpi-item" data-idx="04">
+          <div class="bento-kpi-head"><span class="bento-kpi-label">Status do Alerta Hoje</span></div>
+          <div class="bento-kpi-main" style="font-size: 16px;" id="alert-today-status">-</div>
+          <div class="stat-sub" id="alert-today-status-sub">Disparo no expediente atual</div>
+        </div>
+      </div>
+
+      <div class="card scroll-reveal" id="sec-alert-rules">
         <div class="schedule-box" style="margin-bottom: 20px;">
           <div class="card-title" style="margin-bottom: 14px;">Configuração do Tempo de Antecedência</div>
 
@@ -1825,74 +2126,37 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     <!-- ==================== TAB 7: CONFIGURACOES, ISOLAMENTO MULTI-USUARIO E ATUALIZACAO ==================== -->
     <section id="tab-settings" class="tab-pane">
-      <!-- Card de Atualizacao em 1 Clique e Isolamento de Configuracoes Individuais -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Atualização do Aplicativo e Isolamento Multi-Usuário de Tokens</div>
-          <div class="btn-group">
-            <button class="btn btn-outline btn-sm" onclick="checkAppUpdate()">Verificar se há Atualização</button>
-            <button class="btn btn-primary btn-sm" onclick="runAppUpdate()">Atualizar Aplicativo Agora (1 Clique)</button>
-          </div>
+      <div class="editorial-page-hero scroll-reveal is-visible">
+        <div class="editorial-hero-left">
+          <div class="editorial-kicker">10 / Preferências &amp; Conectividade</div>
+          <h1 class="editorial-headline">Configurações &amp; <span class="editorial-serif">Ambiente</span></h1>
+          <p class="editorial-sub">Personalize o comportamento do JiraBot, tema sazonal, credenciais isoladas e atualização em 1 clique.</p>
         </div>
-
-        <div class="schedule-box">
-          <div class="form-grid">
-            <div>
-              <div style="font-size:12px; color:var(--text-muted);">VERSÃO INSTALADA</div>
-              <div style="font-size:15px; font-weight:700;" id="upd-version-text">v2.2.1</div>
-              <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;" id="upd-lastmod-text">-</div>
-            </div>
-            <div>
-              <div style="font-size:12px; color:var(--text-muted);">USUÁRIO WINDOWS ATUAL</div>
-              <div style="font-size:15px; font-weight:700;" id="upd-user-text">-</div>
-              <div style="font-size:11.5px; color:var(--success); margin-top:2px;">Token e dados 100% isolados por usuário</div>
-            </div>
-            <div style="grid-column: span 2;">
-              <div style="font-size:12px; color:var(--text-muted);">PASTA PRIVADA DE CONFIGURAÇÃO E TOKEN (NUNCA AFETADA POR ATUALIZAÇÕES)</div>
-              <div style="font-family:Consolas,monospace; font-size:12.5px; margin-top:4px;" id="upd-config-path-text">~/.jirabot/config.json</div>
-            </div>
-          </div>
+        <div class="btn-group">
+          <button class="btn btn-outline btn-sm" onclick="testJiraConnection()">Testar Conexão Jira</button>
+          <button class="btn btn-primary btn-sm" onclick="saveGeneralSettings()">Salvar Configurações</button>
         </div>
-
-        <div class="grid-2" style="margin-bottom:0">
-          <div>
-            <div class="form-group">
-              <label>Fonte de Atualização para os Usuários (Pasta Compartilhada na Rede, OneDrive, Git ou URL .zip)</label>
-              <input type="text" id="cfg-update-source" class="form-control" placeholder="Ex: \\servidor\compartilhamento\JiraBot ou URL .zip">
-              <small style="font-size:11.5px; color:var(--text-muted);">
-                Todos os usuários apontados para a mesma pasta de rede ou Git podem clicar em "Atualizar Aplicativo Agora" sem precisar receber arquivos manualmente e sem perder seus tokens individuais.
-              </small>
-            </div>
-            <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
-              <input type="checkbox" id="cfg-auto-update">
-              <label for="cfg-auto-update" style="margin:0; cursor:pointer;">Buscar e aplicar atualizações automaticamente ao iniciar o JiraBot</label>
-            </div>
-          </div>
-
-          <div>
-            <div class="form-group">
-              <label>Publicar Nova Versão Limpa na Pasta Compartilhada (Uso do Mantenedor)</label>
-              <div style="display:flex; gap:8px;">
-                <input type="text" id="publish-target-dir" class="form-control" placeholder="Ex: \\servidor\compartilhamento\JiraBot" style="flex:1">
-                <button class="btn btn-outline" onclick="publishCleanRelease()">Publicar Código Limpo</button>
-              </div>
-              <small style="font-size:11.5px; color:var(--text-muted);">
-                Copia apenas os arquivos .py, .bat e assets atualizados para a pasta compartilhada da equipe (sem incluir jamais .env, tokens, config.json ou relatórios).
-              </small>
-            </div>
-          </div>
-        </div>
-        <div id="update-status-box" style="margin-top:12px; font-size:13px; display:none; padding:10px 14px; border-radius:7px;"></div>
       </div>
 
-      <!-- Card de Aparencia Visual e Temas Sazonais -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Aparência Visual e Temas Sazonais Automáticos</div>
-        </div>
-        <div class="schedule-box">
-          <div class="form-grid">
-            <div class="form-group" style="margin-bottom:0">
+      <nav class="editorial-chapter-bar" aria-label="Sub-vistas de Configurações">
+        <button type="button" class="chapter-pill is-active" onclick="switchSubView('tab-settings', 'cfg-pane-behavior', this)"><span class="chapter-num">01</span> Comportamento &amp; Tema</button>
+        <button type="button" class="chapter-pill" onclick="switchSubView('tab-settings', 'cfg-pane-jira', this)"><span class="chapter-num">02</span> Credenciais Jira API</button>
+        <button type="button" class="chapter-pill" onclick="switchSubView('tab-settings', 'cfg-pane-update', this)"><span class="chapter-num">03</span> Atualização &amp; Rede</button>
+      </nav>
+
+      <!-- SUB-VISTA 1: COMPORTAMENTO DO BOT E APARENCIA -->
+      <div class="subview-pane active" id="cfg-pane-behavior">
+        <div class="card scroll-reveal is-visible" id="sec-cfg-behavior" style="margin-bottom:0;">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Comportamento do Bot e Aparência</div>
+              <div class="section-hint">Preferências de bloqueio de tela, notificações, ticket padrão e tema visual.</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveGeneralSettings()">Salvar Alterações</button>
+          </div>
+
+          <div class="cfg-form-grid">
+            <div class="form-group">
               <label>Tema Preferido</label>
               <select id="cfg-theme-selector" class="form-control" onchange="setThemePreference(this.value)">
                 <option value="auto">Automático (Sazonal) - Ativa temas especiais nas épocas comemorativas</option>
@@ -1903,76 +2167,171 @@ HTML_PAGE = r"""<!DOCTYPE html>
                 <option value="ano_novo">Ano Novo (Sazonal) - Ouro champanhe e estrelas cintilantes</option>
                 <option value="pascoa">Páscoa (Sazonal) - Menta suave, lavanda e primavera</option>
               </select>
+              <small style="font-size:11px; color:var(--text-muted); margin-top:4px;" id="cfg-seasonal-status">Outubro: Halloween | Dezembro: Natal | Virada: Ano Novo | Março-Abril: Páscoa</small>
             </div>
-            <div>
-              <div style="font-size:12px; color:var(--text-muted);">CALENDÁRIO SAZONAL AUTOMÁTICO</div>
-              <div style="font-size:13px; font-weight:600; margin-top:4px;" id="cfg-seasonal-status">Outubro: Halloween | Dezembro: Natal | Virada: Ano Novo | Março-Abril: Páscoa</div>
-              <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">No modo Automático, o tema troca sozinho sem exigir nenhuma configuração manual.</div>
+            <div class="form-group">
+              <label>Comportamento para Bloqueios Rápidos (fora das janelas)</label>
+              <select id="cfg-lock-mode" class="form-control">
+                <option value="pause">Pausar contagem durante o bloqueio e retomar ao desbloquear (pause)</option>
+                <option value="ignore">Ignorar bloqueios rápidos e manter contagem contínua (ignore)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Ticket Padrão (Default Issue no Jira)</label>
+              <input type="text" id="cfg-default-issue" class="form-control" placeholder="Ex: ATIVDIV-32">
+            </div>
+            <div class="form-group">
+              <label>Tempo Mínimo para Lançamento (minutos)</label>
+              <input type="number" id="cfg-min-log" class="form-control" min="1" max="120">
+            </div>
+            <div class="form-group span-full">
+              <label>Descrição Padrão de Fallback</label>
+              <input type="text" id="cfg-default-comment" class="form-control" placeholder="Descrição utilizada quando nenhum comentário for digitado">
+            </div>
+          </div>
+
+          <div class="schedule-box" style="margin-top:16px; margin-bottom:0;">
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <div class="form-group" style="flex-direction:row; align-items:center; gap:8px; margin-bottom:0;">
+                <input type="checkbox" id="cfg-notifications">
+                <label for="cfg-notifications" style="margin:0; cursor:pointer;">Exibir notificações do Windows (Toast Notifications)</label>
+              </div>
+              <div class="form-group" style="flex-direction:row; align-items:center; gap:8px; margin-bottom:0;">
+                <input type="checkbox" id="cfg-auto-log">
+                <label for="cfg-auto-log" style="margin:0; cursor:pointer;">Lançar worklog automaticamente ao bloquear na janela de fim de expediente</label>
+              </div>
+              <div class="form-group" style="flex-direction:row; align-items:center; gap:8px; margin-bottom:0;">
+                <input type="checkbox" id="cfg-autostart">
+                <label for="cfg-autostart" style="margin:0; cursor:pointer;">Iniciar JiraBot automaticamente junto com o Windows (Registro HKCU)</label>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="grid-2">
-        <div class="card">
+      <!-- SUB-VISTA 2: CREDENCIAIS DA API DO JIRA -->
+      <div class="subview-pane" id="cfg-pane-jira">
+        <div class="card scroll-reveal is-visible" id="drawer-jira-credentials" style="margin-bottom:0;">
           <div class="card-header">
-            <div class="card-title">Credenciais Individuais e Acesso ao Jira REST API</div>
+            <div>
+              <div class="card-title">Credenciais Individuais &amp; Conexão Jira REST API</div>
+              <div class="section-hint">URL base corporativa, e-mail e API Token pessoal (<span id="cfg-token-status">Verificando...</span>)</div>
+            </div>
+          </div>
+          <div class="cfg-form-grid">
+            <div class="form-group">
+              <label>URL Base do Jira</label>
+              <input type="text" id="cfg-base-url" class="form-control" placeholder="https://sua-empresa.atlassian.net">
+            </div>
+            <div class="form-group">
+              <label>E-mail Corporativo do Jira</label>
+              <input type="email" id="cfg-email" class="form-control" placeholder="usuario@empresa.com.br">
+            </div>
+            <div class="form-group span-full">
+              <label>API Token Pessoal do Jira</label>
+              <input type="password" id="cfg-api-token" class="form-control" placeholder="Deixe em branco para manter o token salvo atual">
+            </div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:16px;">
             <button class="btn btn-outline btn-sm" onclick="testJiraConnection()">Testar Conexão com o Jira</button>
-          </div>
-          <div class="form-group">
-            <label>URL Base do Jira</label>
-            <input type="text" id="cfg-base-url" class="form-control" placeholder="https://sua-empresa.atlassian.net">
-          </div>
-          <div class="form-group">
-            <label>E-mail Corporativo do Jira</label>
-            <input type="email" id="cfg-email" class="form-control" placeholder="usuario@empresa.com.br">
-          </div>
-          <div class="form-group">
-            <label>API Token Pessoal do Jira (<span id="cfg-token-status">Verificando...</span>)</label>
-            <input type="password" id="cfg-api-token" class="form-control" placeholder="Deixe em branco para manter o token salvo atual">
-          </div>
-          <div class="form-group">
-            <label>Ticket Padrão (Default Issue)</label>
-            <input type="text" id="cfg-default-issue" class="form-control" placeholder="Ex: ATIVDIV-32">
-          </div>
-          <div class="form-group">
-            <label>Descrição Padrão de Fallback</label>
-            <input type="text" id="cfg-default-comment" class="form-control">
+            <button class="btn btn-primary btn-sm" onclick="saveGeneralSettings()">Salvar Credenciais</button>
           </div>
           <div id="test-jira-result" style="margin-top: 10px; font-size: 13px; display:none; padding: 10px; border-radius: 6px;"></div>
         </div>
+      </div>
 
-        <div class="card">
+      <!-- SUB-VISTA 3: ATUALIZACAO EM 1 CLIQUE E ISOLAMENTO MULTI-USUARIO -->
+      <div class="subview-pane" id="cfg-pane-update">
+        <div class="card scroll-reveal is-visible" id="drawer-app-update" style="margin-bottom:0;">
           <div class="card-header">
-            <div class="card-title">Comportamento do Bot e Sistema Windows</div>
+            <div>
+              <div class="card-title">Atualização do Aplicativo em 1 Clique &amp; Isolamento Multi-Usuário</div>
+              <div class="section-hint">Versão instalada, diretório de atualização na rede e publicação de release limpa</div>
+            </div>
           </div>
-          <div class="form-group">
-            <label>Comportamento para Bloqueios Rápidos fora das Janelas (ex: café / banheiro)</label>
-            <select id="cfg-lock-mode" class="form-control">
-              <option value="pause">Pausar contagem durante o bloqueio e retomar ao desbloquear (pause)</option>
-              <option value="ignore">Ignorar bloqueios rápidos e manter contagem contínua (ignore)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Tempo Mínimo para Lançamento (minutos)</label>
-            <input type="number" id="cfg-min-log" class="form-control" min="1" max="120">
-          </div>
-          <div class="form-group" style="flex-direction:row; align-items:center; gap:8px; margin-top: 10px;">
-            <input type="checkbox" id="cfg-notifications">
-            <label for="cfg-notifications" style="margin:0; cursor:pointer;">Exibir notificações do Windows (Toast Notifications)</label>
-          </div>
-          <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
-            <input type="checkbox" id="cfg-auto-log">
-            <label for="cfg-auto-log" style="margin:0; cursor:pointer;">Lançar worklog automaticamente ao bloquear na janela de fim de expediente</label>
-          </div>
-          <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
-            <input type="checkbox" id="cfg-autostart">
-            <label for="cfg-autostart" style="margin:0; cursor:pointer;">Iniciar JiraBot automaticamente junto com o Windows (Registro HKCU)</label>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+            <div class="metric-pill-bar">
+              <div class="metric-pill-card">
+                <span class="metric-pill-label">Versão</span>
+                <span class="metric-pill-val" id="upd-version-text" style="font-size:13px;">v2.2.1</span>
+                <span style="font-size:11px; color:var(--text-muted);" id="upd-lastmod-text">-</span>
+              </div>
+              <div class="metric-pill-card">
+                <span class="metric-pill-label">Usuário Windows</span>
+                <span class="metric-pill-val" id="upd-user-text" style="font-size:13px;">-</span>
+              </div>
+              <div class="metric-pill-card">
+                <span class="metric-pill-label">Configuração Isolada</span>
+                <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--text);" id="upd-config-path-text">~/.jirabot/config.json</span>
+              </div>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-outline btn-sm" onclick="checkAppUpdate()">Verificar Atualização</button>
+              <button class="btn btn-primary btn-sm" onclick="runAppUpdate()">Atualizar Aplicativo Agora (1 Clique)</button>
+            </div>
           </div>
 
-          <div style="margin-top: 20px;">
-            <button class="btn btn-primary" onclick="saveGeneralSettings()">Salvar Todas as Configurações</button>
+          <!-- Card Institucional de Acesso Direto ao GitHub Oficial e Codigo-Fonte -->
+          <div class="github-official-card">
+            <div class="github-official-info">
+              <div class="github-official-badge">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                  <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+                </svg>
+                <span>Repositório Oficial do JiraBot no GitHub</span>
+              </div>
+              <div class="github-official-sub">
+                Acesse o repositório público do JiraBot para auditar o código, acompanhar releases, clonar ou reportar sugestões.
+              </div>
+              <a href="https://github.com/Themobizila/JiraBot" target="_blank" rel="noopener noreferrer" class="github-official-link">
+                <span>https://github.com/Themobizila/JiraBot</span>
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            </div>
+            <div class="github-official-actions">
+              <a href="https://github.com/Themobizila/JiraBot" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm">
+                Abrir Repositório no GitHub
+              </a>
+              <button type="button" class="btn btn-primary btn-sm" onclick="setOfficialGithubUpdateSource()">
+                Usar GitHub Oficial para Atualizar
+              </button>
+            </div>
           </div>
+
+          <div class="grid-2" style="margin-bottom:0">
+            <div>
+              <div class="form-group">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <label style="margin-bottom:0;">Fonte de Atualização para os Usuários (Git, Rede ou ZIP)</label>
+                  <button type="button" class="btn btn-ghost btn-sm" onclick="setOfficialGithubUpdateSource()" style="font-size:11px; padding:2px 8px; color:var(--accent);" title="Preencher com o repositório GitHub padrão">
+                    Restaurar URL do GitHub
+                  </button>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <input type="text" id="cfg-update-source" class="form-control" placeholder="https://github.com/Themobizila/JiraBot.git" style="flex:1;">
+                  <button type="button" class="btn btn-outline btn-sm" onclick="setOfficialGithubUpdateSource()">Usar GitHub</button>
+                </div>
+              </div>
+              <div class="form-group" style="flex-direction:row; align-items:center; gap:8px; margin-bottom:0;">
+                <input type="checkbox" id="cfg-auto-update">
+                <label for="cfg-auto-update" style="margin:0; cursor:pointer;">Buscar e aplicar atualizações automaticamente ao iniciar o JiraBot</label>
+              </div>
+            </div>
+
+            <div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Publicar Nova Versão Limpa na Pasta Compartilhada (Uso do Mantenedor)</label>
+                <div style="display:flex; gap:8px;">
+                  <input type="text" id="publish-target-dir" class="form-control" placeholder="Ex: \\servidor\compartilhamento\JiraBot" style="flex:1">
+                  <button class="btn btn-outline" onclick="publishCleanRelease()">Publicar Código Limpo</button>
+                </div>
+                <small style="font-size:11px; color:var(--text-muted);">
+                  Copia apenas os arquivos .py, .bat e assets atualizados sem incluir jamais .env, tokens ou config.json.
+                </small>
+              </div>
+            </div>
+          </div>
+          <div id="update-status-box" style="margin-top:12px; font-size:13px; display:none; padding:10px 14px; border-radius:7px;"></div>
         </div>
       </div>
     </section>
@@ -2090,19 +2449,19 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <div class="schedule-grid">
           <div class="form-group" style="margin-bottom:0">
             <label>Início</label>
-            <input type="time" id="bulk-edit-start-hm" class="form-control" value="07:45" oninput="recalcBulkEditModal()">
+            <input type="time" id="bulk-edit-start-hm" class="form-control" oninput="recalcBulkEditModal()">
           </div>
           <div class="form-group" style="margin-bottom:0">
             <label>Pausa Almoço</label>
-            <input type="time" id="bulk-edit-ls-hm" class="form-control" value="12:00" oninput="recalcBulkEditModal()">
+            <input type="time" id="bulk-edit-ls-hm" class="form-control" oninput="recalcBulkEditModal()">
           </div>
           <div class="form-group" style="margin-bottom:0">
             <label>Retorno</label>
-            <input type="time" id="bulk-edit-le-hm" class="form-control" value="13:30" oninput="recalcBulkEditModal()">
+            <input type="time" id="bulk-edit-le-hm" class="form-control" oninput="recalcBulkEditModal()">
           </div>
           <div class="form-group" style="margin-bottom:0">
             <label>Encerramento</label>
-            <input type="time" id="bulk-edit-end-hm" class="form-control" value="15:15" oninput="recalcBulkEditModal()">
+            <input type="time" id="bulk-edit-end-hm" class="form-control" oninput="recalcBulkEditModal()">
           </div>
         </div>
         <div id="bulk-edit-calc-lbl" style="font-size:12px; color:var(--text-muted); margin-top:8px;">
@@ -2179,7 +2538,37 @@ HTML_PAGE = r"""<!DOCTYPE html>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeLogNowModal()">Cancelar</button>
-      <button class="btn btn-success" onclick="confirmLogNow()">Confirmar e Lançar no Jira</button>
+      <button class="btn btn-success" id="lognow-confirm-btn" onclick="confirmLogNow()">Confirmar e Lançar no Jira</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: HISTORICO DE RECUPERACAO E SECOES SALVAS ==================== -->
+<div class="modal-backdrop" id="snapshots-modal">
+  <div class="modal-dialog" style="max-width: 920px; width: 95vw;">
+    <div class="modal-header">
+      <div>
+        <h3 style="margin:0 0 4px 0;">Histórico de Recuperação e Seções Salvas</h3>
+        <div style="font-size:12px; color:var(--text-muted);">
+          Visualize os chamados e tempos gravados em cada seção salva pelo JiraBot. Restaure todos os tickets de uma vez ou restaure apenas um ticket específico unitariamente.
+        </div>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="closeSnapshotsModal()">Fechar</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px; max-height: calc(85vh - 160px); overflow-y: auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <label style="font-size:12px; font-weight:600; margin:0;">Filtrar Data:</label>
+          <input type="date" id="snap-filter-date" class="form-control" style="width:160px; padding:4px 8px; font-size:12px;" onchange="loadSnapshotsList()">
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('snap-filter-date').value=''; loadSnapshotsList();">Todas as Datas</button>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="createManualSnapshotUI()">+ Criar Nova Seção / Ponto Agora</button>
+      </div>
+      <div id="snapshots-loading" style="display:none; text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">Carregando seções salvas...</div>
+      <div id="snapshots-container"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeSnapshotsModal()">Fechar</button>
     </div>
   </div>
 </div>
@@ -3015,7 +3404,10 @@ function switchTab(tabId, btnEl) {
     }
   }
   if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
+  const mainContentEl = document.querySelector('.content');
+  if (mainContentEl) mainContentEl.scrollTo({ top: 0, behavior: 'auto' });
   window.scrollTo({ top: 0, behavior: 'auto' });
+  if (typeof refreshScrollReveal === 'function') setTimeout(refreshScrollReveal, 40);
 
   const titles = {
     'tab-dashboard': 'Painel do Dia e Controle de Expediente',
@@ -3050,6 +3442,56 @@ function switchTab(tabId, btnEl) {
   } else if (tabId === 'tab-profiles' || tabId === 'tab-settings') {
     loadConfigData();
   }
+}
+
+function switchSubView(tabId, paneId, btnEl) {
+  const tabEl = document.getElementById(tabId);
+  if (!tabEl) return;
+  tabEl.querySelectorAll('.subview-pane').forEach(p => p.classList.remove('active'));
+  const targetPane = document.getElementById(paneId);
+  if (targetPane) targetPane.classList.add('active');
+  if (btnEl && btnEl.parentElement) {
+    btnEl.parentElement.querySelectorAll('.chapter-pill').forEach(b => b.classList.remove('is-active'));
+    btnEl.classList.add('is-active');
+  }
+  if (tabId === 'tab-analytics' && paneId === 'an-pane-overview' && typeof renderEvolutionChart === 'function') {
+    setTimeout(renderEvolutionChart, 20);
+  }
+}
+
+function getProfileDefaultSchedule() {
+  if (appState && appState.profile && appState.profile.entry_hm) {
+    return {
+      start_hm: appState.profile.entry_hm,
+      lunch_start_hm: appState.profile.lunch_start_hm || '12:00',
+      lunch_end_hm: appState.profile.lunch_end_hm || '13:00',
+      end_hm: appState.profile.exit_hm || '17:00'
+    };
+  }
+  if (configData && configData.profiles && configData.active_profile) {
+    const p = configData.profiles[configData.active_profile];
+    if (p) {
+      const calc = p.calculator || {};
+      const winMid = w => {
+        if (!w || !w.start || !w.end) return null;
+        const s = hmToMinutes(w.start);
+        const e = hmToMinutes(w.end);
+        return (s !== null && e !== null) ? minutesToHM(Math.round((s + e) / 2)) : null;
+      };
+      return {
+        start_hm: calc.entry_hm || winMid(p.entry_window) || '08:00',
+        lunch_start_hm: calc.lunch_start_hm || winMid(p.lunch_start_window) || '12:00',
+        lunch_end_hm: calc.lunch_end_hm || winMid(p.lunch_end_window) || '13:00',
+        end_hm: calc.exit_hm || winMid(p.exit_window) || '17:00'
+      };
+    }
+  }
+  return {
+    start_hm: '08:00',
+    lunch_start_hm: '12:00',
+    lunch_end_hm: '13:00',
+    end_hm: '17:00'
+  };
 }
 
 function hmToMinutes(hm) {
@@ -3271,11 +3713,11 @@ function previewTodaySchedule(markTouched = true) {
 }
 
 function fillTodayDefaultSchedule() {
-  const is8h = appState && appState.profile && appState.profile.name === '8h';
-  document.getElementById('today-start-hm').value = is8h ? '07:42' : '07:45';
-  document.getElementById('today-lunch-start-hm').value = '12:00';
-  document.getElementById('today-lunch-end-hm').value = is8h ? '13:00' : '13:30';
-  document.getElementById('today-end-hm').value = is8h ? '17:42' : '15:15';
+  const defSch = getProfileDefaultSchedule();
+  document.getElementById('today-start-hm').value = defSch.start_hm;
+  document.getElementById('today-lunch-start-hm').value = defSch.lunch_start_hm;
+  document.getElementById('today-lunch-end-hm').value = defSch.lunch_end_hm;
+  document.getElementById('today-end-hm').value = defSch.end_hm;
   previewTodaySchedule(true);
 }
 
@@ -3555,6 +3997,12 @@ function closeLogNowModal() {
 }
 
 async function confirmLogNow() {
+  const btn = document.getElementById('lognow-confirm-btn');
+  if (btn && btn.disabled) return;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Enviando ao Jira...';
+  }
   const no_comment = document.getElementById('lognow-no-comment').checked;
   try {
     const res = await apiCall('/api/today/ticket', 'POST', {
@@ -3566,6 +4014,156 @@ async function confirmLogNow() {
     await loadDashboard(true);
   } catch (err) {
     showToast(err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Confirmar e Lançar no Jira';
+    }
+  }
+}
+
+/* ==================== SNAPSHOTS MODAL & RECUPERAÇÃO ==================== */
+function openSnapshotsModal() {
+  const modal = document.getElementById('snapshots-modal');
+  if (modal) {
+    modal.classList.add('open');
+    loadSnapshotsList();
+  }
+}
+
+function closeSnapshotsModal() {
+  const modal = document.getElementById('snapshots-modal');
+  if (modal) {
+    modal.classList.remove('open');
+  }
+}
+
+async function loadSnapshotsList() {
+  const filterInput = document.getElementById('snap-filter-date');
+  const date_str = filterInput ? filterInput.value.trim() : '';
+  const container = document.getElementById('snapshots-container');
+  const loader = document.getElementById('snapshots-loading');
+  if (loader) loader.style.display = 'block';
+
+  try {
+    const res = await apiCall('/api/snapshots', 'POST', { date_str: date_str || undefined });
+    if (loader) loader.style.display = 'none';
+    if (!res || !res.snapshots || res.snapshots.length === 0) {
+      container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:30px; border:1px dashed var(--border-color); border-radius:8px;">Nenhuma seção salva encontrada para este filtro de data.</div>';
+      return;
+    }
+
+    container.innerHTML = res.snapshots.map(s => {
+      const isPreRestore = s.reason === 'pre_restore' || s.reason === 'pre_restore_ticket';
+      const badgeStyle = isPreRestore
+        ? 'background:rgba(239, 68, 68, 0.15); color:var(--danger); border:1px solid rgba(239, 68, 68, 0.3); font-size:11px;'
+        : 'background:rgba(59, 130, 246, 0.12); color:var(--primary); font-size:11px;';
+      const borderCard = isPreRestore ? 'border:1px solid rgba(239, 68, 68, 0.35);' : 'border:1px solid var(--border-color);';
+      const bgCard = isPreRestore ? 'background:rgba(239, 68, 68, 0.03);' : 'background:var(--card-bg, #1e222d);';
+
+      const ticketsList = s.tickets_detail || [];
+      const hasTickets = ticketsList.length > 0;
+
+      return `
+        <div class="snapshot-card" style="margin-bottom:16px; ${borderCard} ${bgCard} border-radius:8px; padding:14px 16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:12px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <span style="font-size:15px; font-weight:700; color:var(--text-color);">${escapeHtml(s.time_hm || '--:--')}</span>
+              <span style="font-size:12px; color:var(--text-muted);">${escapeHtml(s.date_str || '')}</span>
+              <span class="badge" style="${badgeStyle}">${escapeHtml(s.reason_label || s.reason)}</span>
+              ${s.reason === 'pre_restore' ? '<span class="badge" style="background:rgba(239, 68, 68, 0.15); color:var(--danger); font-weight:600; font-size:11px;">Ponto antes da última restauração</span>' : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+              <span style="font-size:13px; font-weight:700; color:var(--text-color);">
+                Total: <span style="color:var(--primary);">${escapeHtml(s.total_formatted || '0m')}</span>
+                <span style="font-size:12px; font-weight:normal; color:var(--text-muted); margin-left:4px;">(${s.tickets_count || 0} tickets)</span>
+              </span>
+              <button class="btn btn-primary btn-sm" onclick="restoreSnapshotFromUI('${escapeHtml(s.id)}', '${escapeHtml(s.time_hm)}', '${escapeHtml(s.reason_label)}', null)">
+                Restaurar Todos os Tickets
+              </button>
+            </div>
+          </div>
+
+          <div style="font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+            CHAMADOS GRAVADOS NESTA SEÇÃO:
+          </div>
+
+          ${hasTickets ? `
+            <div class="table-responsive">
+              <table style="width:100%; font-size:12px; border-collapse:collapse;">
+                <thead>
+                  <tr style="border-bottom:1px solid var(--border-color); color:var(--text-muted); text-align:left;">
+                    <th style="padding:6px 8px;">Ticket</th>
+                    <th style="padding:6px 8px;">Tempo no Chamado</th>
+                    <th style="padding:6px 8px;">Intervalos</th>
+                    <th style="padding:6px 8px;">Descrição do Trabalho</th>
+                    <th style="padding:6px 8px; text-align:right;">Restauração Individual</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${ticketsList.map(td => `
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                      <td style="padding:6px 8px;">
+                        <span class="badge" style="background:var(--primary-light, rgba(59,130,246,0.15)); color:var(--primary); font-weight:700;">${escapeHtml(td.issue_key)}</span>
+                      </td>
+                      <td style="padding:6px 8px; font-weight:600; color:var(--text-color);">${escapeHtml(td.formatted)}</td>
+                      <td style="padding:6px 8px; color:var(--text-muted);">${td.intervals_count} intervalo(s)</td>
+                      <td style="padding:6px 8px; color:var(--text-muted); max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(td.comment || '')}">
+                        ${escapeHtml(td.comment || '-')}
+                      </td>
+                      <td style="padding:6px 8px; text-align:right;">
+                        <button class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px;" onclick="restoreSnapshotFromUI('${escapeHtml(s.id)}', '${escapeHtml(s.time_hm)}', '${escapeHtml(s.reason_label)}', '${escapeHtml(td.issue_key)}')">
+                          Restaurar Apenas Este Ticket
+                        </button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : `
+            <div style="font-size:12px; color:var(--text-muted); padding:8px 0;">
+              Nenhum ticket com tempo cronometrado nesta seção (início de turno ou estado pré-ajuste).
+            </div>
+          `}
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    if (loader) loader.style.display = 'none';
+    container.innerHTML = `<div style="text-align:center; color:var(--danger); padding:20px;">Erro ao carregar seções: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function restoreSnapshotFromUI(id, time_hm, reason_label, ticket_key) {
+  let msg = '';
+  if (ticket_key) {
+    msg = `Deseja restaurar apenas os intervalos e o tempo do chamado [${ticket_key}] gravados às ${time_hm} (${reason_label})?\\n\\nOs outros tickets e intervalos atualmente registrados hoje serão mantidos intactos.`;
+  } else {
+    msg = `Deseja restaurar TODOS os tickets do dia para o ponto de ${time_hm} (${reason_label})?\\n\\nO estado completo de hoje será restaurado para esta seção (um ponto de segurança do estado atual será criado antes da substituição).`;
+  }
+  if (!confirm(msg)) return;
+
+  try {
+    const res = await apiCall('/api/snapshots/restore', 'POST', { id, ticket_key: ticket_key || undefined });
+    showToast(res.message || 'Restauração aplicada com sucesso!', 'success');
+    closeSnapshotsModal();
+    await loadDashboard(true);
+  } catch (err) {
+    showToast(err.message || 'Falha ao restaurar ponto.', 'error');
+  }
+}
+
+async function createManualSnapshotUI() {
+  const reason = prompt('Informe um motivo ou identificação para este ponto de segurança:', 'Ponto manual');
+  if (reason === null) return;
+
+  try {
+    const res = await apiCall('/api/snapshots/create', 'POST', { reason: reason.trim() || 'manual' });
+    showToast(res.message || 'Ponto de segurança criado com sucesso!', 'success');
+    await loadSnapshotsList();
+  } catch (err) {
+    showToast(err.message || 'Falha ao criar snapshot manual.', 'error');
   }
 }
 
@@ -5426,10 +6024,15 @@ function updateBulkBarUI() {
 function openBulkEditModal() {
   const count = selectedWorklogIds.size;
   if (count === 0) return;
+  const defSch = getProfileDefaultSchedule();
   document.getElementById('bulk-edit-count-lbl').textContent = count;
   document.getElementById('bulk-apply-ticket-chk').checked = false;
   document.getElementById('bulk-new-ticket').value = '';
   document.getElementById('bulk-apply-schedule-chk').checked = false;
+  document.getElementById('bulk-edit-start-hm').value = defSch.start_hm;
+  document.getElementById('bulk-edit-ls-hm').value = defSch.lunch_start_hm;
+  document.getElementById('bulk-edit-le-hm').value = defSch.lunch_end_hm;
+  document.getElementById('bulk-edit-end-hm').value = defSch.end_hm;
   document.getElementById('bulk-apply-comment-chk').checked = false;
   document.getElementById('bulk-new-comment').value = '';
   recalcBulkEditModal();
@@ -5575,6 +6178,15 @@ function getBatchActiveDaysInfo() {
 }
 
 function initBatchTabDefaults() {
+  const defSch = getProfileDefaultSchedule();
+  const sEl = document.getElementById('batch-start-hm');
+  const lsEl = document.getElementById('batch-ls-hm');
+  const leEl = document.getElementById('batch-le-hm');
+  const eEl = document.getElementById('batch-end-hm');
+  if (sEl && !sEl.value) sEl.value = defSch.start_hm;
+  if (lsEl && !lsEl.value) lsEl.value = defSch.lunch_start_hm;
+  if (leEl && !leEl.value) leEl.value = defSch.lunch_end_hm;
+  if (eEl && !eEl.value) eEl.value = defSch.end_hm;
   previewBatchBaseSchedule();
   onBatchPeriodOrWeekdayChange();
 }
@@ -5583,6 +6195,7 @@ function onBatchPeriodOrWeekdayChange() {
   const mode = document.getElementById('batch-multi-mode').value || 'one_per_day';
   const info = getBatchActiveDaysInfo();
   const infoEl = document.getElementById('batch-period-days-info');
+  const defSch = getProfileDefaultSchedule();
 
   if (!info.valid) {
     if (infoEl) {
@@ -5600,10 +6213,10 @@ function onBatchPeriodOrWeekdayChange() {
     const defaultIssue = (appState && appState.today && appState.today.target_issue) ? appState.today.target_issue : 'ATIVDIV-32';
     batchTemplateTickets.push({
       issue_key: defaultIssue,
-      start_hm: document.getElementById('batch-start-hm').value || '07:45',
-      lunch_start_hm: document.getElementById('batch-ls-hm').value || '12:00',
-      lunch_end_hm: document.getElementById('batch-le-hm').value || '13:30',
-      end_hm: document.getElementById('batch-end-hm').value || '15:15',
+      start_hm: document.getElementById('batch-start-hm').value || defSch.start_hm,
+      lunch_start_hm: document.getElementById('batch-ls-hm').value || defSch.lunch_start_hm,
+      lunch_end_hm: document.getElementById('batch-le-hm').value || defSch.lunch_end_hm,
+      end_hm: document.getElementById('batch-end-hm').value || defSch.end_hm,
       comment: ''
     });
   }
@@ -5615,10 +6228,11 @@ function onBatchPeriodOrWeekdayChange() {
 function syncTicketsToActiveDays(infoObj = null) {
   const info = infoObj || getBatchActiveDaysInfo();
   const defaultIssue = (appState && appState.today && appState.today.target_issue) ? appState.today.target_issue : 'ATIVDIV-32';
-  const baseStart = document.getElementById('batch-start-hm').value || '07:45';
-  const baseLs = document.getElementById('batch-ls-hm').value || '12:00';
-  const baseLe = document.getElementById('batch-le-hm').value || '13:30';
-  const baseEnd = document.getElementById('batch-end-hm').value || '15:15';
+  const defSch = getProfileDefaultSchedule();
+  const baseStart = document.getElementById('batch-start-hm').value || defSch.start_hm;
+  const baseLs = document.getElementById('batch-ls-hm').value || defSch.lunch_start_hm;
+  const baseLe = document.getElementById('batch-le-hm').value || defSch.lunch_end_hm;
+  const baseEnd = document.getElementById('batch-end-hm').value || defSch.end_hm;
 
   if (!info.valid || info.activeDays.length === 0) {
     if (batchTemplateTickets.length === 0) {
@@ -5750,7 +6364,13 @@ function copyFirstTicketToAllBatchTemplates() {
 }
 
 function setBatchBaseProfile(mode) {
-  if (mode === '8h') {
+  if (mode === 'active') {
+    const defSch = getProfileDefaultSchedule();
+    document.getElementById('batch-start-hm').value = defSch.start_hm;
+    document.getElementById('batch-ls-hm').value = defSch.lunch_start_hm;
+    document.getElementById('batch-le-hm').value = defSch.lunch_end_hm;
+    document.getElementById('batch-end-hm').value = defSch.end_hm;
+  } else if (mode === '8h') {
     document.getElementById('batch-start-hm').value = '07:42';
     document.getElementById('batch-ls-hm').value = '12:00';
     document.getElementById('batch-le-hm').value = '13:00';
@@ -5851,12 +6471,13 @@ function addBatchTemplateTicket() {
   }
 
   const defaultIssue = (appState && appState.today && appState.today.target_issue) ? appState.today.target_issue : 'ATIVDIV-32';
+  const defSch = getProfileDefaultSchedule();
   batchTemplateTickets.push({
     issue_key: defaultIssue,
-    start_hm: document.getElementById('batch-start-hm').value || '07:45',
-    lunch_start_hm: document.getElementById('batch-ls-hm').value || '12:00',
-    lunch_end_hm: document.getElementById('batch-le-hm').value || '13:30',
-    end_hm: document.getElementById('batch-end-hm').value || '15:15',
+    start_hm: document.getElementById('batch-start-hm').value || defSch.start_hm,
+    lunch_start_hm: document.getElementById('batch-ls-hm').value || defSch.lunch_start_hm,
+    lunch_end_hm: document.getElementById('batch-le-hm').value || defSch.lunch_end_hm,
+    end_hm: document.getElementById('batch-end-hm').value || defSch.end_hm,
     comment: ''
   });
   if (mode === 'split_day') {
@@ -5897,10 +6518,11 @@ function onBatchMultiModeChange() {
 }
 
 function syncBatchTicketsWithBaseSchedule() {
-  const s = document.getElementById('batch-start-hm').value || '07:45';
-  const ls = document.getElementById('batch-ls-hm').value || '12:00';
-  const le = document.getElementById('batch-le-hm').value || '13:30';
-  const e = document.getElementById('batch-end-hm').value || '15:15';
+  const defSch = getProfileDefaultSchedule();
+  const s = document.getElementById('batch-start-hm').value || defSch.start_hm;
+  const ls = document.getElementById('batch-ls-hm').value || defSch.lunch_start_hm;
+  const le = document.getElementById('batch-le-hm').value || defSch.lunch_end_hm;
+  const e = document.getElementById('batch-end-hm').value || defSch.end_hm;
   batchTemplateTickets.forEach(t => {
     t.start_hm = s;
     t.lunch_start_hm = ls;
@@ -5911,10 +6533,11 @@ function syncBatchTicketsWithBaseSchedule() {
 }
 
 function autoSplitBatchTicketsEqual() {
-  const sHm = document.getElementById('batch-start-hm').value || '07:45';
-  const lsHm = document.getElementById('batch-ls-hm').value || '12:00';
-  const leHm = document.getElementById('batch-le-hm').value || '13:30';
-  const eHm = document.getElementById('batch-end-hm').value || '15:15';
+  const defSch = getProfileDefaultSchedule();
+  const sHm = document.getElementById('batch-start-hm').value || defSch.start_hm;
+  const lsHm = document.getElementById('batch-ls-hm').value || defSch.lunch_start_hm;
+  const leHm = document.getElementById('batch-le-hm').value || defSch.lunch_end_hm;
+  const eHm = document.getElementById('batch-end-hm').value || defSch.end_hm;
 
   const s = hmToMinutes(sHm);
   const ls = hmToMinutes(lsHm);
@@ -5964,10 +6587,11 @@ function autoSplitBatchTicketsEqual() {
 }
 
 function autoSplitBatchTicketsMorningAfternoon() {
-  const sHm = document.getElementById('batch-start-hm').value || '07:45';
-  const lsHm = document.getElementById('batch-ls-hm').value || '12:00';
-  const leHm = document.getElementById('batch-le-hm').value || '13:30';
-  const eHm = document.getElementById('batch-end-hm').value || '15:15';
+  const defSch = getProfileDefaultSchedule();
+  const sHm = document.getElementById('batch-start-hm').value || defSch.start_hm;
+  const lsHm = document.getElementById('batch-ls-hm').value || defSch.lunch_start_hm;
+  const leHm = document.getElementById('batch-le-hm').value || defSch.lunch_end_hm;
+  const eHm = document.getElementById('batch-end-hm').value || defSch.end_hm;
   const n = batchTemplateTickets.length;
 
   if (n <= 1) {
@@ -5980,8 +6604,8 @@ function autoSplitBatchTicketsMorningAfternoon() {
   batchTemplateTickets[0].lunch_end_hm = '';
   batchTemplateTickets[0].end_hm = lsHm;
 
-  const le = hmToMinutes(leHm) || 810;
-  const e = hmToMinutes(eHm) || 915;
+  const le = hmToMinutes(leHm) || 780;
+  const e = hmToMinutes(eHm) || 1020;
   const aftTotal = Math.max(0, e - le);
   const rem = n - 1;
 
@@ -6057,7 +6681,9 @@ async function generateBatchPreview() {
 
   const card = document.getElementById('batch-preview-card');
   const tbody = document.getElementById('batch-preview-tbody');
-  card.style.display = 'block';
+  if (card) card.style.display = 'block';
+  const prevBtn = document.getElementById('btn-subview-batch-preview');
+  switchSubView('tab-batch', 'batch-pane-preview', prevBtn);
   tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; padding:20px; color:var(--text-muted);">Validando dias no Jira e montando a grade de envio...</td></tr>';
 
   let existingByDate = {};
@@ -6304,14 +6930,10 @@ function openWorklogModal(worklog = null) {
   const todayIso = new Date().toISOString().slice(0, 10);
   document.getElementById('wl-modal-date').value = isEdit ? worklog.date : todayIso;
 
-  const sch = (worklog && worklog.schedule) ? worklog.schedule : {
-    start_hm: '07:45',
-    lunch_start_hm: '12:00',
-    lunch_end_hm: '13:30',
-    end_hm: '15:15'
-  };
+  const defSch = getProfileDefaultSchedule();
+  const sch = (worklog && worklog.schedule) ? worklog.schedule : defSch;
 
-  document.getElementById('wl-modal-start-hm').value = sch.start_hm || '07:45';
+  document.getElementById('wl-modal-start-hm').value = sch.start_hm || defSch.start_hm;
   document.getElementById('wl-modal-ls-hm').value = sch.lunch_start_hm || '';
   document.getElementById('wl-modal-le-hm').value = sch.lunch_end_hm || '';
   document.getElementById('wl-modal-end-hm').value = sch.end_hm || '';
@@ -6474,7 +7096,8 @@ async function loadConfigData() {
     document.getElementById('cfg-auto-log').checked = Boolean(data.auto_log_on_exit);
     document.getElementById('cfg-autostart').checked = Boolean(data.autostart_enabled);
 
-    document.getElementById('cfg-update-source').value = data.update_source || '';
+    const defaultGhUrl = (data.version_info && data.version_info.default_github_repo_url) || 'https://github.com/Themobizila/JiraBot.git';
+    document.getElementById('cfg-update-source').value = data.update_source || defaultGhUrl;
     document.getElementById('cfg-auto-update').checked = Boolean(data.auto_update_on_start);
 
     if (data.version_info) {
@@ -6541,6 +7164,40 @@ function populateCalculatorFields(p) {
       document.getElementById(f.aft).value = (e - s) - half;
     }
   });
+  updateProfileNominalSummary();
+}
+
+function updateProfileNominalSummary() {
+  const sumEl = document.getElementById('prof-nominal-net-summary');
+  if (!sumEl) return;
+  const s = document.getElementById('calc-entry-hm').value;
+  const ls = document.getElementById('calc-ls-hm').value;
+  const le = document.getElementById('calc-le-hm').value;
+  const e = document.getElementById('calc-exit-hm').value;
+  const res = computeScheduleMinutes(s, ls, le, e);
+  if (!res || res.error) {
+    sumEl.innerHTML = res && res.error ? `<span style="color:var(--danger)">${res.error}</span>` : '';
+    return;
+  }
+  sumEl.innerHTML = `Manhã: ${minutesToHM(res.morning)} | Almoço: ${minutesToHM(res.lunch)} | Tarde: ${minutesToHM(res.afternoon)} | Líquido: ${minutesToHM(res.total)}`;
+}
+
+function onManualWindowEdit() {
+  const syncFromWin = (startId, endId, hmId, befId, aftId) => {
+    const s = hmToMinutes(document.getElementById(startId).value);
+    const e = hmToMinutes(document.getElementById(endId).value);
+    if (s !== null && e !== null && e >= s) {
+      const half = Math.floor((e - s) / 2);
+      document.getElementById(hmId).value = minutesToHM(s + half);
+      document.getElementById(befId).value = half;
+      document.getElementById(aftId).value = (e - s) - half;
+    }
+  };
+  syncFromWin('win-entry-start', 'win-entry-end', 'calc-entry-hm', 'calc-entry-bef', 'calc-entry-aft');
+  syncFromWin('win-ls-start', 'win-ls-end', 'calc-ls-hm', 'calc-ls-bef', 'calc-ls-aft');
+  syncFromWin('win-le-start', 'win-le-end', 'calc-le-hm', 'calc-le-bef', 'calc-le-aft');
+  syncFromWin('win-exit-start', 'win-exit-end', 'calc-exit-hm', 'calc-exit-bef', 'calc-exit-aft');
+  updateProfileNominalSummary();
 }
 
 function collectCalculatorFields() {
@@ -6568,8 +7225,9 @@ function applyToleranceCalculator(silent = false) {
   calcWin('calc-ls-hm', 'calc-ls-bef', 'calc-ls-aft', 'win-ls-start', 'win-ls-end');
   calcWin('calc-le-hm', 'calc-le-bef', 'calc-le-aft', 'win-le-start', 'win-le-end');
   calcWin('calc-exit-hm', 'calc-exit-bef', 'calc-exit-aft', 'win-exit-start', 'win-exit-end');
+  updateProfileNominalSummary();
   if (!silent) {
-    showToast('Janelas calculadas! Clique em "Salvar Perfil e Janelas" para gravar.', 'info');
+    showToast('Janelas calculadas! Clique em "Salvar Perfil e Horários" para gravar.', 'info');
   }
 }
 
@@ -6624,7 +7282,7 @@ async function saveGeneralSettings() {
     notifications_enabled: document.getElementById('cfg-notifications').checked,
     auto_log_on_exit: document.getElementById('cfg-auto-log').checked,
     autostart_enabled: document.getElementById('cfg-autostart').checked,
-    update_source: document.getElementById('cfg-update-source').value.trim(),
+    update_source: document.getElementById('cfg-update-source').value.trim() || ((configData && configData.version_info && configData.version_info.default_github_repo_url) || 'https://github.com/Themobizila/JiraBot.git'),
     auto_update_on_start: document.getElementById('cfg-auto-update').checked
   };
   try {
@@ -6634,6 +7292,15 @@ async function saveGeneralSettings() {
     await loadDashboard();
   } catch (err) {
     showToast(err.message, 'error');
+  }
+}
+
+function setOfficialGithubUpdateSource() {
+  const defaultGhUrl = (configData && configData.version_info && configData.version_info.default_github_repo_url) || 'https://github.com/Themobizila/JiraBot.git';
+  const input = document.getElementById('cfg-update-source');
+  if (input) {
+    input.value = defaultGhUrl;
+    showToast('URL oficial do GitHub configurada. Salve as alterações para persistir.', 'info');
   }
 }
 
@@ -6928,8 +7595,64 @@ async function refreshAll() {
   showToast('Dados atualizados!', 'info');
 }
 
+let mascotBusy = false;
+async function loadMascotState() {
+  try {
+    const res = await apiCall('/api/mascot', 'GET', null, 0);
+    const p = res.preferences;
+    const webTheme = document.documentElement.getAttribute('data-theme-preference') || 'auto';
+    if (!mascotBusy && document.documentElement.hasAttribute('data-theme-preference') && p.web_theme !== webTheme) {
+      await apiCall('/api/mascot', 'POST', {web_theme: webTheme}, 0);
+      p.web_theme = webTheme;
+    }
+    const button = document.getElementById('mascot-toggle');
+    button.textContent = p.enabled ? 'Desativar mascote' : 'Ativar mascote';
+    button.setAttribute('aria-pressed', String(p.enabled));
+    document.getElementById('mascot-state').textContent = res.phase === 'error' ? res.message :
+      (res.running ? (p.enabled ? 'ativo' : 'fechando') : (p.enabled ? (res.phase === 'starting' ? 'iniciando' : (res.phase === 'suspended' ? 'sessão bloqueada' : 'habilitado, janela fechada')) : 'desativado'));
+    if (!mascotBusy) {
+      document.getElementById('mascot-theme').value = p.theme;
+      const size = document.getElementById('mascot-size');
+      if (!Array.from(size.options).some(o => Number(o.value) === p.size)) size.add(new Option(String(p.size), String(p.size)));
+      size.value = String(p.size);
+      document.getElementById('mascot-reduced').checked = p.reduced_motion;
+    }
+    return res;
+  } catch (err) {
+    document.getElementById('mascot-state').textContent = 'Não foi possível consultar o mascote.';
+    return null;
+  }
+}
+async function changeMascot(options) {
+  if (mascotBusy) return;
+  mascotBusy = true;
+  const button = document.getElementById('mascot-toggle');
+  button.disabled = true;
+  try {
+    await apiCall('/api/mascot', 'POST', options, 0);
+  } catch (err) {
+    showToast(err.message || 'Não foi possível configurar o mascote.', 'error');
+  } finally {
+    mascotBusy = false;
+    button.disabled = false;
+    await loadMascotState();
+  }
+}
+async function toggleMascot() {
+  if (mascotBusy) return;
+  const state = await loadMascotState();
+  if (state) await changeMascot({enabled: !state.preferences.enabled});
+}
+async function saveMascotOptions() {
+  await changeMascot({theme: document.getElementById('mascot-theme').value,
+    size: Number(document.getElementById('mascot-size').value),
+    reduced_motion: document.getElementById('mascot-reduced').checked});
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   initNavGroups();
+  loadMascotState();
+  setInterval(() => { if (!mascotBusy) loadMascotState(); }, 5000);
   loadDashboard(true);
   setInterval(() => {
     loadDashboard(false);
@@ -7016,6 +7739,10 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
 
         try:
+            if path == "/api/mascot":
+                from mascote_runtime.control import status as mascot_status
+                self._send_json(mascot_status())
+                return
             if path in ["/", "/index.html"]:
                 self._send_html(HTML_PAGE)
                 return
@@ -7105,9 +7832,9 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 else:
                     worklogs = client.get_user_recent_worklogs(days=days)
 
-                is_8h = cfg.active_profile == "8h"
-                def_ls = "12:00"
-                def_le = "13:00" if is_8h else "13:30"
+                prof_act = cfg.get_active_profile()
+                def_ls = prof_act.get_lunch_start_hm()
+                def_le = prof_act.get_lunch_end_hm()
 
                 for w in worklogs:
                     sec = int(w.get("time_spent_seconds", 0) or 0)
@@ -7215,12 +7942,26 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json_body()
 
+            if path == "/api/mascot":
+                from mascote_runtime.control import configure as configure_mascot
+                try:
+                    result = configure_mascot(body)
+                    self._send_json(dict(result, success=True))
+                except (ValueError, TypeError) as exc:
+                    self._send_json({"error": str(exc)}, status_code=400)
+                return
+
             if path == "/api/theme":
                 theme = (body.get("theme") or "auto").strip().lower()
                 allowed = {"auto", "dark", "light", "halloween", "natal", "ano_novo", "pascoa"}
                 cfg = BotConfig.load()
                 cfg.theme = theme if theme in allowed else "auto"
                 cfg.save()
+                try:
+                    from mascote_runtime.control import update_preferences as update_mascot_preferences
+                    update_mascot_preferences({"web_theme": cfg.theme})
+                except OSError:
+                    logger.warning("Nao foi possivel sincronizar o tema do mascote.")
                 self._send_json({"success": True, "theme": cfg.theme})
                 return
 
@@ -7366,8 +8107,8 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     show_pre_exit_popup(state_mgr, force=True)
                     self._send_json({"success": True, "message": "Janela gráfica de revisão pré-saída disparada."})
                 elif action == "open_mini_widget":
-                    from mini_window import toggle_mini_window
-                    toggle_mini_window()
+                    from mini_window import launch_mini_window
+                    launch_mini_window(detached=True)
                     self._send_json({"success": True, "message": "Mini janela flutuante acionada."})
                 elif action == "flush_queue":
                     client = JiraClient(cfg.jira, state_mgr)
@@ -7382,8 +8123,8 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/mini-widget/open":
-                from mini_window import toggle_mini_window
-                toggle_mini_window()
+                from mini_window import launch_mini_window
+                launch_mini_window(detached=True)
                 self._send_json({"success": True, "message": "Mini janela flutuante acionada com sucesso."})
                 return
 
@@ -7396,11 +8137,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
             if path == "/api/snapshots/restore":
                 snap_id = (body.get("id") or "").strip()
+                ticket_key = (body.get("ticket_key") or "").strip() or None
                 if not snap_id:
                     self._send_json({"error": "ID do ponto de restauração não fornecido."}, status_code=400)
                     return
                 state_mgr = StateManager()
-                res = state_mgr.restore_snapshot(snap_id)
+                res = state_mgr.restore_snapshot(snap_id, ticket_key=ticket_key)
                 if res.get("success"):
                     self._send_json(res)
                 else:
@@ -7463,6 +8205,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 active_issue = clean_jira_issue_key(body.get("issue_key") or state.target_issue or cfg.jira.default_issue)
 
                 if action in ["add", "update"]:
+                    state_mgr.create_snapshot(state, reason="pre_interval_edit")
                     st_dt = _parse_hm(state.date_str, body.get("start_hm", ""))
                     en_dt = _parse_hm(state.date_str, body.get("end_hm", ""))
                     if not st_dt:
@@ -7500,6 +8243,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 if action == "delete":
                     idx = int(body.get("index", -1))
                     if 0 <= idx < len(state.intervals):
+                        state_mgr.create_snapshot(state, reason="pre_interval_delete")
                         state.intervals.pop(idx)
                         state_mgr.save_state(state)
                         self._send_json({"success": True, "message": f"Intervalo #{idx + 1} excluído."})
@@ -7559,10 +8303,8 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 if action == "log_now":
                     no_comment = bool(body.get("no_comment", False))
                     created_ids: List[str] = []
-                    state_before = state_mgr.load_state()
-                    shift_summary = state_before.get_shift_times_summary()
 
-                    def _on_trigger(issue: str, sec: int, start_iso: str, comm: Optional[str] = None) -> bool:
+                    def _on_trigger(issue: str, sec: int, start_iso: str, comm: Optional[str] = None) -> Any:
                         res = client.submit_worklog(
                             issue_key=issue,
                             time_spent_seconds=sec,
@@ -7574,12 +8316,14 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                             wid = str(res.get("worklog_id", ""))
                             if wid:
                                 created_ids.append(wid)
-                                state_mgr.save_worklog_schedule(wid, shift_summary)
-                            return True
+                            return res
                         return False
 
                     engine = BotEngine(config=cfg, state_manager=state_mgr, on_worklog_trigger=_on_trigger)
                     total_sec = engine.manual_log(no_comment=no_comment)
+                    for wid in engine.state.jira_worklog_ids:
+                        if wid and wid not in created_ids:
+                            created_ids.append(wid)
                     self._send_json({
                         "success": True,
                         "message": f"Lançamento concluído! Total processado: {format_duration(total_sec)}.",
@@ -7635,13 +8379,17 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 errors: List[str] = []
                 fallback_cache: Dict[str, str] = {}
 
+                prof_act = cfg.get_active_profile()
+                def_s = prof_act.get_entry_hm()
+                def_e = prof_act.get_planned_exit_hm()
+
                 for item in entries:
                     d_str = (item.get("date") or "")[:10]
                     issue_key = (item.get("issue_key") or cfg.jira.default_issue or "ATIVDIV-32").strip().upper()
-                    start_hm = (item.get("start_hm") or "07:45").strip()
+                    start_hm = (item.get("start_hm") or def_s).strip()
                     ls_hm = (item.get("lunch_start_hm") or "").strip()
                     le_hm = (item.get("lunch_end_hm") or "").strip()
-                    end_hm = (item.get("end_hm") or "15:15").strip()
+                    end_hm = (item.get("end_hm") or def_e).strip()
                     raw_comment = (item.get("comment") or "").strip()
 
                     # Se o intervalo [start_hm, end_hm] ocorre inteiramente antes ou depois do almoco, ignora o almoco
@@ -7729,14 +8477,15 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 state_mgr = StateManager()
                 client = JiraClient(cfg.jira, state_mgr)
 
+                prof_act = cfg.get_active_profile()
                 items = body.get("items", [])
                 apply_ticket = bool(body.get("apply_ticket", False))
                 target_issue = clean_jira_issue_key(body.get("target_issue") or "")
                 apply_schedule = bool(body.get("apply_schedule", False))
-                start_hm = (body.get("start_hm") or "07:45").strip()
+                start_hm = (body.get("start_hm") or prof_act.get_entry_hm()).strip()
                 ls_hm = (body.get("lunch_start_hm") or "").strip()
                 le_hm = (body.get("lunch_end_hm") or "").strip()
-                end_hm = (body.get("end_hm") or "15:15").strip()
+                end_hm = (body.get("end_hm") or prof_act.get_planned_exit_hm()).strip()
                 apply_comment = bool(body.get("apply_comment", False))
                 new_comment = (body.get("comment") or "").strip()
 
@@ -7847,11 +8596,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 state_mgr = StateManager()
                 client = JiraClient(cfg.jira, state_mgr)
 
+                prof_act = cfg.get_active_profile()
                 worklog_id = (body.get("worklog_id") or "").strip()
                 source_issue = clean_jira_issue_key(body.get("source_issue") or "")
                 target_issue = clean_jira_issue_key(body.get("target_issue") or "")
                 date_str = (body.get("date_str") or date.today().isoformat())[:10]
-                start_hm = (body.get("start_hm") or "08:00").strip()
+                start_hm = (body.get("start_hm") or prof_act.get_entry_hm()).strip()
                 lunch_start_hm = (body.get("lunch_start_hm") or "").strip()
                 lunch_end_hm = (body.get("lunch_end_hm") or "").strip()
                 end_hm = (body.get("end_hm") or "").strip()

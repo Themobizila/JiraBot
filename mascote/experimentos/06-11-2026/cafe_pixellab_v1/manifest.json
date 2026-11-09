@@ -1,0 +1,208 @@
+{
+  "date": "06/11/2026 - 11:17:58",
+  "source": "C:\\Users\\joao.moura\\Downloads\\pixellab-Animate-this-capybara-gently-l-1793973598461.png",
+  "source_sha256": "a8d5bdf5d23d7669a526031d448645adf5ab67450bdb1825d16f1e3617f63be8",
+  "sheet_size": [
+    768,
+    768
+  ],
+  "grid": [
+    3,
+    3
+  ],
+  "frame_size": [
+    256,
+    256
+  ],
+  "source_frame_count": 9,
+  "cycle_order": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    7,
+    6,
+    5,
+    4,
+    3,
+    2,
+    1
+  ],
+  "duration_ms": [
+    750,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    750,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125,
+    125
+  ],
+  "cycle_duration_ms": 3250,
+  "frames": [
+    {
+      "frame": 0,
+      "cell": [
+        0,
+        0,
+        256,
+        256
+      ],
+      "bbox": [
+        65,
+        39,
+        210,
+        244
+      ],
+      "rgba_sha256": "743831aa6988bb21d244580a192fa9048110922afd865eb48a5326acd56f1b6f"
+    },
+    {
+      "frame": 1,
+      "cell": [
+        256,
+        0,
+        512,
+        256
+      ],
+      "bbox": [
+        61,
+        39,
+        212,
+        244
+      ],
+      "rgba_sha256": "6a3fa6d470415108cdadc56cfe0b62d437b1da27031919044044880aa0036357"
+    },
+    {
+      "frame": 2,
+      "cell": [
+        512,
+        0,
+        768,
+        256
+      ],
+      "bbox": [
+        53,
+        39,
+        210,
+        244
+      ],
+      "rgba_sha256": "5f066f46e09c72e122774e574bf5a2cd3c57bc754246d1f1fe40fe5168efa840"
+    },
+    {
+      "frame": 3,
+      "cell": [
+        0,
+        256,
+        256,
+        512
+      ],
+      "bbox": [
+        53,
+        41,
+        208,
+        244
+      ],
+      "rgba_sha256": "f992ea23cce769c5f014c214553aff4c9f23f19c9ff62780f6574a2d978fb047"
+    },
+    {
+      "frame": 4,
+      "cell": [
+        256,
+        256,
+        512,
+        512
+      ],
+      "bbox": [
+        53,
+        42,
+        209,
+        244
+      ],
+      "rgba_sha256": "c96500acccf2e97631d9d80bc59ef675bc71527cf41396792427a10800aeca74"
+    },
+    {
+      "frame": 5,
+      "cell": [
+        512,
+        256,
+        768,
+        512
+      ],
+      "bbox": [
+        53,
+        43,
+        209,
+        244
+      ],
+      "rgba_sha256": "606fce011f868059c4b78da911a4f7f0960235f4528b49e8313c8e55821e11e7"
+    },
+    {
+      "frame": 6,
+      "cell": [
+        0,
+        512,
+        256,
+        768
+      ],
+      "bbox": [
+        53,
+        41,
+        211,
+        244
+      ],
+      "rgba_sha256": "492c208823e18dedb7b4ecfff460911d98fec7a3ed9a5ca9eaa3f0f9144cd16a"
+    },
+    {
+      "frame": 7,
+      "cell": [
+        256,
+        512,
+        512,
+        768
+      ],
+      "bbox": [
+        53,
+        40,
+        210,
+        244
+      ],
+      "rgba_sha256": "151337f41cd2a5bf57d6d43151764d898ae8486d7452fbe978aa00c9d8c737eb"
+    },
+    {
+      "frame": 8,
+      "cell": [
+        512,
+        512,
+        768,
+        768
+      ],
+      "bbox": [
+        52,
+        39,
+        210,
+        244
+      ],
+      "rgba_sha256": "d9c41f1946445f678b32a22435c299e7152c78ff8e3ec9d473ce483ad3ea5279"
+    }
+  ],
+  "checks": {
+    "extracted_rgba_exact": true,
+    "apng_decoded_rgba_exact": true,
+    "source_unchanged": true,
+    "no_resize_or_warp": true
+  },
+  "notes": "Movimento e pequenas varia\u00e7\u00f5es do corpo s\u00e3o do PixelLab; a descida \u00e9 a subida em ordem reversa. GIF quantiza cores; PNGs e APNG mant\u00eam RGBA exato."
+}

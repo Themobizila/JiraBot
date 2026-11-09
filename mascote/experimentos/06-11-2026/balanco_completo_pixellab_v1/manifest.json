@@ -1,0 +1,520 @@
+{
+  "date": "06/11/2026 - 14:30:23",
+  "sources": {
+    "ida": "C:\\Users\\joao.moura\\Downloads\\pixellab-Interpolate-from-the-starting--1793984635732.png",
+    "volta": "C:\\Users\\joao.moura\\Downloads\\pixellab-Create-the-RETURN-half-of-this-1793985773231.png"
+  },
+  "source_sha256": {
+    "ida": "2d93ea5cf98e097612ca2aaf658afc0fda5fa122717c73a7c1b4914caf51076f",
+    "volta": "9a094ac09c5aced4de60532f04796433080682748271bca03c682aa4a4d8254a"
+  },
+  "source_frames": {
+    "ida": [
+      {
+        "index": 0,
+        "bbox": [
+          64,
+          0,
+          229,
+          239
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 1,
+        "bbox": [
+          62,
+          0,
+          229,
+          240
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 2,
+        "bbox": [
+          56,
+          0,
+          227,
+          241
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 3,
+        "bbox": [
+          49,
+          0,
+          222,
+          242
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 4,
+        "bbox": [
+          41,
+          0,
+          214,
+          243
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          187,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 5,
+        "bbox": [
+          35,
+          0,
+          207,
+          242
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 6,
+        "bbox": [
+          28,
+          0,
+          199,
+          241
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 7,
+        "bbox": [
+          26,
+          0,
+          193,
+          239
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 8,
+        "bbox": [
+          28,
+          0,
+          193,
+          239
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      }
+    ],
+    "volta": [
+      {
+        "index": 0,
+        "bbox": [
+          28,
+          0,
+          193,
+          239
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 1,
+        "bbox": [
+          33,
+          0,
+          199,
+          240
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 2,
+        "bbox": [
+          40,
+          0,
+          205,
+          239
+        ],
+        "top_opaque_x": [
+          66,
+          67,
+          68,
+          69,
+          70,
+          187,
+          188,
+          189,
+          190,
+          191
+        ]
+      },
+      {
+        "index": 3,
+        "bbox": [
+          47,
+          0,
+          212,
+          237
+        ],
+        "top_opaque_x": [
+          66,
+          67,
+          68,
+          69,
+          70,
+          187,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 4,
+        "bbox": [
+          55,
+          0,
+          221,
+          237
+        ],
+        "top_opaque_x": [
+          66,
+          67,
+          68,
+          69,
+          70,
+          188,
+          189,
+          190,
+          191
+        ]
+      },
+      {
+        "index": 5,
+        "bbox": [
+          62,
+          0,
+          227,
+          236
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191
+        ]
+      },
+      {
+        "index": 6,
+        "bbox": [
+          66,
+          0,
+          232,
+          235
+        ],
+        "top_opaque_x": [
+          68,
+          69,
+          70,
+          71,
+          72,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      },
+      {
+        "index": 7,
+        "bbox": [
+          68,
+          0,
+          234,
+          236
+        ],
+        "top_opaque_x": [
+          68,
+          69,
+          70,
+          71,
+          72,
+          189,
+          190,
+          191,
+          192,
+          193
+        ]
+      },
+      {
+        "index": 8,
+        "bbox": [
+          64,
+          0,
+          229,
+          239
+        ],
+        "top_opaque_x": [
+          67,
+          68,
+          69,
+          70,
+          71,
+          188,
+          189,
+          190,
+          191,
+          192
+        ]
+      }
+    ]
+  },
+  "endpoint_differences": {
+    "ida_volta": {
+      "rgba_pixels": 0,
+      "alpha_pixels": 0
+    },
+    "volta_ida": {
+      "rgba_pixels": 4228,
+      "alpha_pixels": 11
+    }
+  },
+  "frame_size": [
+    256,
+    256
+  ],
+  "frame_count": 16,
+  "cycle_duration_ms": 3200,
+  "timeline": [
+    {
+      "index": 0,
+      "source": "ida",
+      "source_frame": 0,
+      "duration_ms": 200
+    },
+    {
+      "index": 1,
+      "source": "ida",
+      "source_frame": 1,
+      "duration_ms": 200
+    },
+    {
+      "index": 2,
+      "source": "ida",
+      "source_frame": 2,
+      "duration_ms": 200
+    },
+    {
+      "index": 3,
+      "source": "ida",
+      "source_frame": 3,
+      "duration_ms": 200
+    },
+    {
+      "index": 4,
+      "source": "ida",
+      "source_frame": 4,
+      "duration_ms": 200
+    },
+    {
+      "index": 5,
+      "source": "ida",
+      "source_frame": 5,
+      "duration_ms": 200
+    },
+    {
+      "index": 6,
+      "source": "ida",
+      "source_frame": 6,
+      "duration_ms": 200
+    },
+    {
+      "index": 7,
+      "source": "ida",
+      "source_frame": 7,
+      "duration_ms": 200
+    },
+    {
+      "index": 8,
+      "source": "ida",
+      "source_frame": 8,
+      "duration_ms": 200
+    },
+    {
+      "index": 9,
+      "source": "volta",
+      "source_frame": 1,
+      "duration_ms": 200
+    },
+    {
+      "index": 10,
+      "source": "volta",
+      "source_frame": 2,
+      "duration_ms": 200
+    },
+    {
+      "index": 11,
+      "source": "volta",
+      "source_frame": 3,
+      "duration_ms": 200
+    },
+    {
+      "index": 12,
+      "source": "volta",
+      "source_frame": 4,
+      "duration_ms": 200
+    },
+    {
+      "index": 13,
+      "source": "volta",
+      "source_frame": 5,
+      "duration_ms": 200
+    },
+    {
+      "index": 14,
+      "source": "volta",
+      "source_frame": 6,
+      "duration_ms": 200
+    },
+    {
+      "index": 15,
+      "source": "volta",
+      "source_frame": 7,
+      "duration_ms": 200
+    }
+  ],
+  "return_mode": "independent_generated_return_in_forward_order",
+  "checks": {
+    "png_rgba_exact": true,
+    "apng_decoded_rgba_exact": true,
+    "gif_duration_exact": true,
+    "no_clipping": true,
+    "binary_alpha": true,
+    "no_reverse_playback": true,
+    "no_resize_warp_or_recolor": true,
+    "sources_unchanged": true
+  }
+}

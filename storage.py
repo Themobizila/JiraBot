@@ -39,12 +39,12 @@ class TimeInterval:
     issue_key: Optional[str] = None  # Ticket associado a este intervalo
     comment: Optional[str] = None  # Descricao da atividade realizada
 
-    def get_duration_seconds(self) -> int:
+    def get_duration_seconds(self, reference_dt: Optional[datetime] = None) -> int:
         start_dt = datetime.fromisoformat(self.start)
         if self.end:
             end_dt = datetime.fromisoformat(self.end)
         else:
-            end_dt = datetime.now()
+            end_dt = reference_dt or datetime.now()
         return max(0, int((end_dt - start_dt).total_seconds()))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -70,6 +70,7 @@ class DailyState:
     no_comment: bool = False
     is_logged: bool = False
     jira_worklog_ids: List[str] = field(default_factory=list)
+    logged_worklogs_by_issue: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     last_event: str = "INITIALIZED"
     last_event_time: str = field(default_factory=lambda: datetime.now().isoformat())
     unlocked_during_lunch: bool = False
@@ -94,17 +95,17 @@ class DailyState:
                     inter.end = inter.start
         self.status = "COMPLETED"
 
-    def get_total_seconds(self) -> int:
+    def get_total_seconds(self, reference_dt: Optional[datetime] = None) -> int:
         """Calcula o total geral de segundos liquidos trabalhados no dia."""
-        return sum(i.get_duration_seconds() for i in self.intervals)
+        return sum(i.get_duration_seconds(reference_dt=reference_dt) for i in self.intervals)
 
-    def get_seconds_by_issue(self, default_issue: str = "") -> Dict[str, int]:
+    def get_seconds_by_issue(self, default_issue: str = "", reference_dt: Optional[datetime] = None) -> Dict[str, int]:
         """Calcula o total de segundos acumulados agrupados por cada ticket trabalhado."""
         totals: Dict[str, int] = {}
         for interval in self.intervals:
             raw_key = interval.issue_key or self.target_issue or default_issue or "SEM_TICKET"
             issue = clean_jira_issue_key(raw_key) or "SEM_TICKET"
-            totals[issue] = totals.get(issue, 0) + interval.get_duration_seconds()
+            totals[issue] = totals.get(issue, 0) + interval.get_duration_seconds(reference_dt=reference_dt)
         return totals
 
     def get_issue_comment(self, issue_key: str, default: str = "") -> str:
@@ -274,20 +275,24 @@ class DailyState:
                     except Exception:
                         pass
 
-            try:
-                if self.intervals[best_gap_idx].end:
-                    ls_dt = datetime.fromisoformat(self.intervals[best_gap_idx].end)
-                    lunch_start_hm = ls_dt.strftime("%H:%M")
-                le_dt = datetime.fromisoformat(self.intervals[best_gap_idx + 1].start)
-                lunch_end_hm = le_dt.strftime("%H:%M")
-            except Exception:
-                pass
+            if best_gap_sec >= 600:
+                try:
+                    if self.intervals[best_gap_idx].end:
+                        ls_dt = datetime.fromisoformat(self.intervals[best_gap_idx].end)
+                        lunch_start_hm = ls_dt.strftime("%H:%M")
+                    le_dt = datetime.fromisoformat(self.intervals[best_gap_idx + 1].start)
+                    lunch_end_hm = le_dt.strftime("%H:%M")
+                except Exception:
+                    pass
 
             last_inter = self.intervals[-1]
             if last_inter.end:
                 try:
                     end_dt = datetime.fromisoformat(last_inter.end)
-                    end_hm = end_dt.strftime("%H:%M")
+                    if self.status == "PAUSED_LUNCH" and not lunch_start_hm:
+                        lunch_start_hm = end_dt.strftime("%H:%M")
+                    else:
+                        end_hm = end_dt.strftime("%H:%M")
                 except Exception:
                     pass
 
@@ -479,6 +484,7 @@ class DailyState:
             "no_comment": self.no_comment,
             "is_logged": self.is_logged,
             "jira_worklog_ids": self.jira_worklog_ids,
+            "logged_worklogs_by_issue": self.logged_worklogs_by_issue,
             "last_event": self.last_event,
             "last_event_time": self.last_event_time,
             "unlocked_during_lunch": self.unlocked_during_lunch,
@@ -495,6 +501,14 @@ class DailyState:
         if not worklog_ids and data.get("jira_worklog_id"):
             worklog_ids = [str(data["jira_worklog_id"])]
 
+        raw_logged_by_issue = data.get("logged_worklogs_by_issue") or {}
+        logged_by_issue: Dict[str, Dict[str, Any]] = {}
+        if isinstance(raw_logged_by_issue, dict):
+            for k, v in raw_logged_by_issue.items():
+                clean_k = clean_jira_issue_key(k)
+                if clean_k and isinstance(v, dict):
+                    logged_by_issue[clean_k] = dict(v)
+
         return cls(
             date_str=data.get("date_str", date.today().isoformat()),
             status=data.get("status", "IDLE"),
@@ -505,6 +519,7 @@ class DailyState:
             no_comment=data.get("no_comment", False),
             is_logged=data.get("is_logged", False),
             jira_worklog_ids=worklog_ids,
+            logged_worklogs_by_issue=logged_by_issue,
             last_event=data.get("last_event", "INITIALIZED"),
             last_event_time=data.get("last_event_time", datetime.now().isoformat()),
             unlocked_during_lunch=bool(data.get("unlocked_during_lunch", False)),
@@ -755,6 +770,10 @@ class StateManager:
                             started_iso = first_start.isoformat() if first_start else (state.intervals[0].start if state.intervals else datetime.now().isoformat())
                             for issue_key, sec in state.get_seconds_by_issue().items():
                                 if sec > 0 and issue_key and issue_key != "SEM_TICKET":
+                                    clean_k = clean_jira_issue_key(issue_key)
+                                    prev_logged = state.logged_worklogs_by_issue.get(clean_k)
+                                    if prev_logged and prev_logged.get("worklog_id"):
+                                        continue
                                     comment_to_use = "" if state.no_comment else state.get_issue_comment(issue_key, default="Lancamento automatico de expediente via JiraBot")
                                     self.enqueue_worklog(
                                         issue_key=issue_key,
@@ -959,14 +978,14 @@ class StateManager:
     def get_or_infer_worklog_schedule(
         self,
         worklog: Dict[str, Any],
-        default_lunch_start: str = "12:00",
-        default_lunch_end: str = "13:30",
+        default_lunch_start: str = "",
+        default_lunch_end: str = "",
     ) -> Dict[str, str]:
         """
         Retorna os horarios de inicio, pausa de almoco, retorno e encerramento de um worklog.
         Caso nao exista registro explicito salvo em worklog_schedules.json para o worklog_id,
         verifica se ha metadados salvos para o dia (day:YYYY-MM-DD) ou no estado diario.
-        Caso contrario, calcula/infere com base na duracao e perfil de turno.
+        Caso contrario, calcula/infere com base na duracao e no perfil de turno ativo do usuario.
         """
         wid = str(worklog.get("id", ""))
         started_str = worklog.get("started", "")
@@ -974,19 +993,22 @@ class StateManager:
         total_sec = int(worklog.get("time_spent_seconds", 0) or 0)
 
         schedules = self.load_worklog_schedules()
+        day_key = f"day:{date_part}"
         if wid and wid in schedules:
             saved = schedules[wid]
             if saved.get("start_hm"):
+                end_hm_val = saved.get("end_hm", "")
+                if not end_hm_val and day_key in schedules:
+                    end_hm_val = schedules[day_key].get("end_hm", "")
                 return {
                     "start_hm": saved.get("start_hm", ""),
                     "lunch_start_hm": saved.get("lunch_start_hm", ""),
                     "lunch_end_hm": saved.get("lunch_end_hm", ""),
-                    "end_hm": saved.get("end_hm", ""),
+                    "end_hm": end_hm_val,
                     "is_saved": "true",
                 }
 
         # 2. Verifica se ha horario explicitamente salvo para o dia em worklog_schedules.json
-        day_key = f"day:{date_part}"
         if day_key in schedules:
             saved_day = schedules[day_key]
             if saved_day.get("start_hm"):
@@ -1015,19 +1037,28 @@ class StateManager:
             except Exception:
                 pass
 
-        start_hm = started_str[11:16] if len(started_str) >= 16 else "08:00"
+        # 4. Obtem dinamicamente do perfil ativo do usuario caso nao tenha sido informado
+        if not default_lunch_start or not default_lunch_end:
+            try:
+                from config import BotConfig
+                prof = BotConfig.load().get_active_profile()
+                if not default_lunch_start:
+                    default_lunch_start = prof.get_lunch_start_hm()
+                if not default_lunch_end:
+                    default_lunch_end = prof.get_lunch_end_hm()
+            except Exception:
+                pass
 
-        # Inferencia inteligente:
-        # Se a carga horaria do worklog for de 7.5 horas ou mais (>= 27000s),
-        # trata-se de turno integral (8h CLT), cujo retorno de almoco nominal e as 13:00 (1h de pausa),
-        # e nunca 13:30 (que e a pausa estendida de 1h30m exclusiva para estagio/6h).
-        effective_le_hm = default_lunch_end or "13:30"
-        if total_sec >= 27000 and effective_le_hm in ("13:30", "13:20"):
+        effective_ls_hm = default_lunch_start or "12:00"
+        effective_le_hm = default_lunch_end or "13:00"
+        if total_sec >= 27000 and effective_le_hm == "13:30":
             effective_le_hm = "13:00"
 
+        start_hm = started_str[11:16] if len(started_str) >= 16 else "08:00"
+
         start_dt = _parse_hm(date_part, start_hm) or datetime(2026, 1, 1, 8, 0)
-        ls_dt = _parse_hm(date_part, default_lunch_start) or datetime(start_dt.year, start_dt.month, start_dt.day, 12, 0)
-        le_dt = _parse_hm(date_part, effective_le_hm) or datetime(start_dt.year, start_dt.month, start_dt.day, 13, 0 if total_sec >= 27000 else 13, 30)
+        ls_dt = _parse_hm(date_part, effective_ls_hm) or datetime(start_dt.year, start_dt.month, start_dt.day, 12, 0)
+        le_dt = _parse_hm(date_part, effective_le_hm) or datetime(start_dt.year, start_dt.month, start_dt.day, 13, 0)
 
         # Se o inicio foi antes do almoco e o tempo total ultrapassa o periodo da manha + 30min
         morning_capacity = max(0, int((ls_dt - start_dt).total_seconds()))
@@ -1070,17 +1101,35 @@ class StateManager:
             clean_reason = "".join(c for c in reason if c.isalnum() or c in ("_", "-")).lower() or "auto"
             filename = f"snapshot_{date_tag}_{time_tag}_{clean_reason}.json"
             filepath = s_dir / filename
+            if filepath.exists():
+                micro = now_dt.strftime("%f")[:3]
+                filename = f"snapshot_{date_tag}_{time_tag}_{micro}_{clean_reason}.json"
+                filepath = s_dir / filename
 
-            # Evita criar snapshots "auto" repetitivos se nada mudou em menos de 10 min
-            if clean_reason == "auto":
-                existing = sorted(s_dir.glob(f"snapshot_{date_tag}_*.json"), reverse=True)
+            # Evita criar snapshots repetitivos em pausas e eventos automaticos para nao poluir o historico
+            non_critical_reasons = (
+                "auto", "pause_away", "pause_lunch", "resume_away", "resume_lunch",
+                "manual_pause", "manual_start", "shift_start", "shift_completed", "resume_work"
+            )
+            if clean_reason in non_critical_reasons:
+                existing = sorted(s_dir.glob(f"snapshot_{date_tag}_*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
                 if existing:
                     try:
                         latest_data = json.loads(existing[0].read_text(encoding="utf-8"))
+                        last_reason = latest_data.get("reason", "")
                         last_ts = latest_data.get("created_at_iso", "")
-                        if last_ts:
+                        last_sec = latest_data.get("total_seconds", 0)
+                        cur_sec = state.get_total_seconds()
+
+                        # 1. Se o motivo for identico ao da ultima gravacao e o tempo trabalhado nao mudou significativamente (< 60s)
+                        if last_reason == clean_reason and abs(cur_sec - last_sec) < 60:
+                            return existing[0]
+
+                        # 2. Se for snapshot automatico periodico ("auto") e houve qualquer gravacao recente ha menos de 90s
+                        if clean_reason == "auto" and last_ts:
                             last_dt = datetime.fromisoformat(last_ts)
-                            if (now_dt - last_dt).total_seconds() < 600:
+                            elapsed_sec = (now_dt - last_dt).total_seconds()
+                            if elapsed_sec < 90 and abs(cur_sec - last_sec) < 45:
                                 return existing[0]
                     except Exception:
                         pass
@@ -1111,8 +1160,8 @@ class StateManager:
                 json.dump(payload, f, indent=2, ensure_ascii=False)
             temp_p.replace(filepath)
 
-            # Politica de retencao: mantem os ultimos 50 snapshots
-            self._cleanup_old_snapshots(max_keep=50)
+            # Politica de retencao: mantem os ultimos 80 snapshots
+            self._cleanup_old_snapshots(max_keep=80)
             return filepath
         except Exception as e:
             logger.warning(f"Erro ao criar snapshot de seguranca: {e}")
@@ -1120,17 +1169,29 @@ class StateManager:
 
     def _format_snapshot_reason(self, reason: str) -> str:
         mapping = {
+            "shift_start": "Início de expediente (Desbloqueio)",
+            "pause_lunch": "Pausa para almoço (Bloqueio)",
+            "resume_lunch": "Retorno do almoço (Desbloqueio)",
+            "pause_away": "Pausa temporária (Bloqueio de tela)",
+            "resume_away": "Retorno ao trabalho (Desbloqueio)",
+            "shift_completed": "Encerramento de expediente (Bloqueio)",
+            "resume_work": "Retomada após expediente",
+            "manual_pause": "Pausa manual",
+            "manual_start": "Início / Retomada manual",
             "pre_schedule_edit": "Antes de alterar horários do expediente",
             "pre_transfer": "Antes de transferir horas entre chamados",
             "pre_interval_edit": "Antes de editar intervalos manuais",
+            "pre_interval_delete": "Antes de excluir intervalo manual",
             "pre_restore": "Ponto de segurança gerado antes de restaurar",
+            "pre_restore_ticket": "Antes de restaurar chamado específico",
+            "pre_log_now": "Antes de lançar horas no Jira",
             "manual": "Ponto de restauração manual",
             "auto": "Snapshot automático periódico",
             "pre_switch": "Antes de trocar de chamado",
         }
         return mapping.get(reason, reason.replace("_", " ").title())
 
-    def _cleanup_old_snapshots(self, max_keep: int = 50) -> None:
+    def _cleanup_old_snapshots(self, max_keep: int = 80) -> None:
         try:
             s_dir = self.snapshots_dir
             if not s_dir.exists():
@@ -1148,6 +1209,7 @@ class StateManager:
     def list_snapshots(self, date_str: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Retorna a lista de pontos de restauracao disponiveis, ordenados do mais recente para o mais antigo.
+        Inclui resumo por ticket (tickets_detail) para permitir restauracao unitaria de chamados.
         """
         s_dir = self.snapshots_dir
         if not s_dir.exists():
@@ -1160,6 +1222,38 @@ class StateManager:
         for fp in files:
             try:
                 data = json.loads(fp.read_text(encoding="utf-8"))
+                raw_state = data.get("state")
+                snap_ts_iso = data.get("created_at_iso", "")
+                snap_ref_dt = None
+                if snap_ts_iso:
+                    try:
+                        snap_ref_dt = datetime.fromisoformat(snap_ts_iso)
+                    except Exception:
+                        snap_ref_dt = None
+
+                tickets_detail = []
+                if isinstance(raw_state, dict):
+                    try:
+                        snap_st = DailyState.from_dict(raw_state)
+                        by_issue = snap_st.get_seconds_by_issue(reference_dt=snap_ref_dt)
+                        for issue_k, sec in by_issue.items():
+                            if not issue_k:
+                                continue
+                            h = sec // 3600
+                            m = (sec % 3600) // 60
+                            hm_str = f"{h}h {m:02d}m" if h > 0 else f"{m}m"
+                            inter_count = sum(1 for inter in snap_st.intervals if clean_jira_issue_key(inter.issue_key) == clean_jira_issue_key(issue_k))
+                            comm = snap_st.get_issue_comment(issue_k, default="")
+                            tickets_detail.append({
+                                "issue_key": issue_k,
+                                "seconds": sec,
+                                "formatted": hm_str,
+                                "intervals_count": inter_count,
+                                "comment": comm or "",
+                            })
+                    except Exception:
+                        pass
+
                 results.append({
                     "id": fp.stem,
                     "date_str": data.get("date_str", ""),
@@ -1171,16 +1265,20 @@ class StateManager:
                     "total_formatted": data.get("total_formatted", "0m"),
                     "tickets_count": data.get("tickets_count", 0),
                     "tickets_preview": data.get("tickets_preview", ""),
+                    "tickets_detail": tickets_detail,
                 })
             except Exception:
                 continue
         return results
 
-    def restore_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+    def restore_snapshot(self, snapshot_id: str, ticket_key: Optional[str] = None) -> Dict[str, Any]:
         """
         Restaura com seguranca um snapshot para o state.json atual.
+        Se ticket_key for informado, restaura unitariamente apenas os intervalos
+        e o tempo acumulado daquele chamado, preservando os demais chamados intactos.
+        Caso contrario, restaura o estado integral do snapshot.
         Antes de aplicar a restauracao, salva preventivamente o estado atual
-        com motivo 'pre_restore' para permitir reverter o proprio restauro.
+        com motivo 'pre_restore' ou 'pre_restore_ticket' para permitir reverter o proprio restauro.
         """
         s_dir = self.snapshots_dir
         clean_id = "".join(c for c in snapshot_id if c.isalnum() or c in ("_", "-"))
@@ -1194,21 +1292,98 @@ class StateManager:
             if not raw_state:
                 return {"success": False, "error": "Conteúdo do snapshot corrompido ou inválido."}
 
-            restored_state = DailyState.from_dict(raw_state)
+            snap_ts_iso = snap_data.get("created_at_iso", "")
+            snap_ref_dt = None
+            if snap_ts_iso:
+                try:
+                    snap_ref_dt = datetime.fromisoformat(snap_ts_iso)
+                except Exception:
+                    snap_ref_dt = None
 
-            # Salva ponto de seguranca do estado atual antes de sobrescrever
+            restored_snap_state = DailyState.from_dict(raw_state)
             cur_state = self.load_state()
+
+            # Caso 1: Restauracao Unitaria de um chamado especifico
+            if ticket_key:
+                clean_target_key = clean_jira_issue_key(ticket_key)
+                matching_intervals = [
+                    i.copy() for i in restored_snap_state.intervals
+                    if clean_jira_issue_key(i.issue_key) == clean_target_key
+                ]
+                if not matching_intervals:
+                    return {
+                        "success": False,
+                        "error": f"Nenhum intervalo do ticket {clean_target_key} foi encontrado no ponto selecionado ({snap_data.get('time_hm', '')})."
+                    }
+
+                # Se for de um dia anterior ou capturado no passado, fecha qualquer intervalo em aberto no timestamp do snapshot
+                if snap_ref_dt and snap_data.get("date_str") != date.today().isoformat():
+                    for mi in matching_intervals:
+                        if mi.end is None:
+                            mi.end = snap_ref_dt.isoformat()
+
+                # Salva ponto de seguranca do estado atual antes da restauracao unitaria
+                self.create_snapshot(cur_state, reason="pre_restore_ticket")
+
+                # Remove do estado atual apenas os intervalos do chamado alvo e injeta os do snapshot
+                cur_state.intervals = [
+                    i for i in cur_state.intervals
+                    if clean_jira_issue_key(i.issue_key) != clean_target_key
+                ]
+                cur_state.intervals.extend(matching_intervals)
+                cur_state.intervals.sort(key=lambda x: x.start)
+
+                # Restaura comentario/descricao do chamado se presente no snapshot
+                snap_comment = restored_snap_state.get_issue_comment(clean_target_key)
+                if snap_comment:
+                    cur_state.set_issue_comment(clean_target_key, snap_comment)
+
+                if any(i.end is None for i in cur_state.intervals):
+                    cur_state.status = "RUNNING"
+
+                cur_state.last_event = f"RESTORE_TICKET_{clean_target_key}"
+                cur_state.last_event_time = datetime.now().isoformat()
+
+                # Salva atomicamente o estado mesclado
+                self.save_state(cur_state)
+
+                tot_ticket_sec = sum(i.get_duration_seconds(reference_dt=snap_ref_dt) for i in matching_intervals)
+                h = tot_ticket_sec // 3600
+                m = (tot_ticket_sec % 3600) // 60
+                dur_str = f"{h}h {m:02d}m" if h > 0 else f"{m}m"
+
+                return {
+                    "success": True,
+                    "message": f"Ticket {clean_target_key} restaurado com sucesso para o ponto de {snap_data.get('time_hm', '')}! ({len(matching_intervals)} intervalos, {dur_str} recuperados).",
+                    "restored_id": clean_id,
+                    "restored_ticket": clean_target_key,
+                    "restored_intervals_count": len(matching_intervals),
+                    "restored_seconds": tot_ticket_sec,
+                    "total_seconds": cur_state.get_total_seconds(),
+                }
+
+            # Caso 2: Restauracao Completa de todos os tickets
+            # Salva ponto de seguranca do estado atual antes de sobrescrever
             self.create_snapshot(cur_state, reason="pre_restore")
 
+            # Preserva o rastreamento de worklogs ja enviados hoje para evitar duplicidade
+            if cur_state.date_str == restored_snap_state.date_str:
+                for wid in cur_state.jira_worklog_ids:
+                    if wid and wid not in restored_snap_state.jira_worklog_ids:
+                        restored_snap_state.jira_worklog_ids.append(wid)
+                for k, v in cur_state.logged_worklogs_by_issue.items():
+                    if k not in restored_snap_state.logged_worklogs_by_issue:
+                        restored_snap_state.logged_worklogs_by_issue[k] = dict(v)
+
             # Salva o estado restaurado atomicamente
-            self.save_state(restored_state)
+            self.save_state(restored_snap_state)
 
             return {
                 "success": True,
-                "message": f"Estado restaurado com sucesso para o ponto de {snap_data.get('time_hm', '')} ({snap_data.get('reason_label', '')})!",
+                "message": f"Estado completo restaurado com sucesso para o ponto de {snap_data.get('time_hm', '')} ({snap_data.get('reason_label', '')})!",
                 "restored_id": clean_id,
-                "restored_date": restored_state.date_str,
-                "total_seconds": restored_state.get_total_seconds(),
+                "restored_date": restored_snap_state.date_str,
+                "total_seconds": restored_snap_state.get_total_seconds(),
             }
         except Exception as e:
             return {"success": False, "error": f"Falha ao restaurar snapshot: {e}"}

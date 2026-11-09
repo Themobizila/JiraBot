@@ -1,0 +1,164 @@
+{
+  "sources": {
+    "patinhas": "C:\\Users\\joao.moura\\Downloads\\pixellab-Animate-this-capybara-briefly--1794224605790 (1).png",
+    "rolamento": "C:\\Users\\joao.moura\\Downloads\\pixellab-Animate-this-exact-capybara-re-1794224311872 (1).png",
+    "apoio": "C:\\Users\\joao.moura\\Downloads\\pixellab-Create-6-intermediate-frames-f-1794225505687.png",
+    "subida": "C:\\Users\\joao.moura\\Downloads\\pixellab-As-the-capybara-pushes-up--kee-1794226026604 (1).png",
+    "costas": "mascote\\experimentos\\09-11-2026\\recuperacao_referencias\\inicio_de_costas.png",
+    "baixo": "C:\\Users\\joao.moura\\Downloads\\pixellab-Edit-only-the-scarf-in-the-low-1794225823342.png",
+    "parada": "mascote\\experimentos\\09-11-2026\\parada_quatro_patas_v1\\pose_parada_quatro_patas.png"
+  },
+  "input_sha256": {
+    "patinhas": "d4978cd5ef6b2f631892b496ebc75f717bb21f5660801d61171c0a61bfb037e8",
+    "rolamento": "97875354a7bf06ca96c7037469975d6119cadb05df752c6f8e9772a125803a4c",
+    "apoio": "8f4aa58a7be88ad336a5da5f875fa1b94ed70e0f7cb85e4e6f1991cdfec8fe57",
+    "subida": "7968f8391f2d2085581799b7797227cafff0db53abe416c1eff5eca8e2c510ac",
+    "costas": "c1568f9f001b80cd3fe4a89e1343ec32af2740ef79f8e50e3902d00153bbed78",
+    "baixo": "9eeeb233d864e8a9d9ba5dd3e86db819db94d2138dc005816684175ef9bf4790",
+    "parada": "f9cc336459872310df75b07c1be44a2f117a4e886ce358228d608abe08ebb131"
+  },
+  "frame_size": [
+    256,
+    256
+  ],
+  "ground_y": 238,
+  "frames": [
+    {
+      "index": 0,
+      "source": "costas",
+      "cell": 0,
+      "dy": 0,
+      "duration_ms": 280
+    },
+    {
+      "index": 1,
+      "source": "patinhas",
+      "cell": 1,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 2,
+      "source": "patinhas",
+      "cell": 2,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 3,
+      "source": "patinhas",
+      "cell": 3,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 4,
+      "source": "patinhas",
+      "cell": 4,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 5,
+      "source": "patinhas",
+      "cell": 5,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 6,
+      "source": "patinhas",
+      "cell": 6,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 7,
+      "source": "patinhas",
+      "cell": 7,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 8,
+      "source": "patinhas",
+      "cell": 8,
+      "dy": 0,
+      "duration_ms": 130
+    },
+    {
+      "index": 9,
+      "source": "rolamento",
+      "cell": 1,
+      "dy": 1,
+      "duration_ms": 160
+    },
+    {
+      "index": 10,
+      "source": "apoio",
+      "cell": 0,
+      "dy": 0,
+      "duration_ms": 160
+    },
+    {
+      "index": 11,
+      "source": "apoio",
+      "cell": 1,
+      "dy": 0,
+      "duration_ms": 160
+    },
+    {
+      "index": 12,
+      "source": "apoio",
+      "cell": 2,
+      "dy": -1,
+      "duration_ms": 160
+    },
+    {
+      "index": 13,
+      "source": "apoio",
+      "cell": 3,
+      "dy": -1,
+      "duration_ms": 160
+    },
+    {
+      "index": 14,
+      "source": "baixo",
+      "cell": 0,
+      "dy": 0,
+      "duration_ms": 180
+    },
+    {
+      "index": 15,
+      "source": "subida",
+      "cell": 1,
+      "dy": 0,
+      "duration_ms": 150
+    },
+    {
+      "index": 16,
+      "source": "subida",
+      "cell": 2,
+      "dy": 0,
+      "duration_ms": 150
+    },
+    {
+      "index": 17,
+      "source": "subida",
+      "cell": 3,
+      "dy": 3,
+      "duration_ms": 150
+    },
+    {
+      "index": 18,
+      "source": "parada",
+      "cell": 0,
+      "dy": 0,
+      "duration_ms": 1000
+    }
+  ],
+  "duration_ms": 3750,
+  "final_hold_ms": 1000,
+  "starts_on_back": true,
+  "missing_segment": "impact_to_back"
+}

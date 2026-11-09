@@ -1401,7 +1401,14 @@ def estruturar_conteudo_dds(raw_text: str) -> Dict[str, Any]:
                 return ""
         return val
 
-    solicitacao_num = _extract_field(r"Solicita[çc][ãa]o\s*N[ºo°]?[:\s]*(?:\n+)?([^\n\r]+)")
+    sol_cand = _extract_field(r"Solicita[çc][ãa]o\s*N[ºo°]?[:\s]*(?:\n+)?([^\n\r]+?)(?=(?:Nome do solicitante|C[óo]digo|Setor|Sistema|Op[çc][ãa]o|Vers[ãa]o|Dados do|\n|$))")
+    if not sol_cand:
+        sol_cand = _extract_field(r"Solicita[çc][ãa]o\s*N[ºo°]?[:\s]*(?:\n+)?([^\n\r]+)")
+    clean_digits = re.sub(r"^(?:ticket|movidesk)[\s#:-]*", "", sol_cand.strip(), flags=re.I).strip()
+    if clean_digits and re.search(r"\d{3,}", clean_digits) and not any(k in sol_cand.lower() for k in ("dados do", "nome do", "setor", "cliente", "empresa")):
+        solicitacao_num = sol_cand.strip()
+    else:
+        solicitacao_num = ""
     solicitante_nome = _extract_field(r"Nome do solicitante\s*/\s*Setor:?[:\s]*(?:\n+)?([^\n\r]+)")
     empresa_cliente = _extract_field(r"C[óo]digo\s*/\s*Empresa Cliente:?[:\s]*(?:\n+)?([^\n\r]+)")
     contato_cliente = _extract_field(r"Nome do contato na Empresa Cliente:?[:\s]*(?:\n+)?([^\n\r]+)")
@@ -1644,6 +1651,9 @@ def estruturar_conteudo_dds(raw_text: str) -> Dict[str, Any]:
         "resultado_homologacao": resultado_homologacao,
         "checklist": checklist_items,
     }
+
+
+from mascote_runtime.control import worklog_activity
 
 
 class JiraClient:
@@ -2431,8 +2441,13 @@ class JiraClient:
         if m_match:
             movidesk_num = m_match.group(1)
 
+        cand_ticket = structured_dds.get("solicitacao") or ""
+        if len(cand_ticket) > 30 or any(k in cand_ticket.lower() for k in ("dados", "solicitante", "cliente", "empresa", "setor")):
+            digits_cand = re.search(r"\b(\d{5,7})\b", cand_ticket)
+            cand_ticket = digits_cand.group(1) if digits_cand else ""
+
         movidesk_info = {
-            "ticket": structured_dds.get("solicitacao") or movidesk_num,
+            "ticket": cand_ticket or movidesk_num,
             "solicitante": structured_dds.get("solicitante") or "",
             "empresa": structured_dds.get("empresa") or "",
             "aberto_por": reporter,
@@ -2532,6 +2547,7 @@ class JiraClient:
             "url": f"{base_url}/browse/{clean}",
         }
 
+    @worklog_activity
     def submit_worklog(
         self,
         issue_key: str,
@@ -2605,6 +2621,7 @@ class JiraClient:
             logger.error(err_msg)
             raise RuntimeError(err_msg)
 
+    @worklog_activity
     def delete_worklog(self, issue_key: str, worklog_id: str) -> bool:
         """Exclui um worklog especifico de uma tarefa no Jira."""
         base_url = self.config.get_clean_base_url()
@@ -2759,6 +2776,7 @@ class JiraClient:
         self.state_manager.save_queue(remaining)
         return success_count
 
+    @worklog_activity
     def update_worklog_full(
         self,
         issue_key: str,

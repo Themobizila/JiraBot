@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import urllib.request
 import zipfile
 
-from config import BotConfig, get_default_config_dir
+from config import BotConfig, get_default_config_dir, DEFAULT_GITHUB_REPO_URL, DEFAULT_GITHUB_WEB_URL
 
 logger = logging.getLogger("JiraBot.Updater")
 
@@ -46,6 +46,21 @@ FORBIDDEN_NAMES = {
 FORBIDDEN_DIRS = {"relatorios", "backupP", "backupCore", "__pycache__", ".git", ".venv", "venv", "dds_docx_cache"}
 
 
+def _resolve_zip_url(url: str) -> Optional[str]:
+    """Resolve uma URL HTTP/HTTPS para um pacote .zip direto ou arquivo zip da branch main do GitHub."""
+    u = url.strip()
+    if not u.startswith(("http://", "https://")):
+        return None
+    if u.lower().endswith(".zip"):
+        return u
+    if "github.com" in u.lower():
+        clean = u.rstrip("/")
+        if clean.endswith(".git"):
+            clean = clean[:-4]
+        return f"{clean}/archive/refs/heads/main.zip"
+    return None
+
+
 def _file_sha256(filepath: Path) -> str:
     """Calcula o hash SHA-256 de um arquivo para comparacao segura de versao."""
     h = hashlib.sha256()
@@ -62,6 +77,12 @@ def is_allowed_app_file(rel_path: Path) -> bool:
             return False
     if rel_path.name in FORBIDDEN_NAMES:
         return False
+    if rel_path.as_posix() == "assets/sprites/manifest.json":
+        return True
+    if rel_path.parts[:2] == ("assets", "raw_sheets") and len(rel_path.parts) == 3 and rel_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+        return rel_path.stem in {"normal", "halloween", "natal", "ano_novo", "anonovo", "pascoa"}
+    if rel_path.suffix.lower() == ".json" and rel_path.parts[:2] == ("mascote", "modelos") and len(rel_path.parts) == 3:
+        return True
     if rel_path.suffix.lower() in ALLOWED_CODE_EXTENSIONS or rel_path.name in ALLOWED_DOC_FILES:
         return True
     return False
@@ -102,7 +123,10 @@ def get_version_info() -> Dict[str, Any]:
         "user_config_file": str(user_cfg_dir / "config.json"),
         "current_windows_user": os.environ.get("USERNAME") or Path.home().name,
         "has_git": has_git,
-        "update_source": cfg.update_source,
+        "update_source": cfg.update_source or DEFAULT_GITHUB_REPO_URL,
+        "configured_update_source": cfg.update_source,
+        "default_github_repo_url": DEFAULT_GITHUB_REPO_URL,
+        "default_github_web_url": DEFAULT_GITHUB_WEB_URL,
         "auto_update_on_start": cfg.auto_update_on_start,
     }
 
@@ -113,6 +137,8 @@ def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
     """
     cfg = BotConfig.load()
     src = (update_source if update_source is not None else cfg.update_source).strip()
+    if not src:
+        src = DEFAULT_GITHUB_REPO_URL
 
     # 1. Caso haja um caminho de pasta compartilhada / diretorio informado
     if src and not src.startswith(("http://", "https://", "git@")):
@@ -181,13 +207,15 @@ def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
         except Exception as e:
             return {"success": False, "has_update": False, "message": f"Erro ao consultar Git: {e}"}
 
-    # 3. Caso seja uma URL HTTP/HTTPS de pacote .zip
-    if src.startswith(("http://", "https://")) and src.lower().endswith(".zip"):
+    # 3. Caso seja uma URL HTTP/HTTPS de pacote .zip ou repositorio GitHub
+    zip_url = _resolve_zip_url(src)
+    if zip_url:
         return {
             "success": True,
             "has_update": True,
             "mode": "zip_url",
-            "message": f"Pacote remoto configurado ({src}). Clique em 'Atualizar Aplicativo Agora' para baixar e aplicar.",
+            "zip_url": zip_url,
+            "message": f"Origem de atualização configurada ({zip_url}). Clique em 'Atualizar Aplicativo Agora' para sincronizar os arquivos.",
         }
 
     return {
@@ -288,10 +316,41 @@ def perform_update(update_source: Optional[str] = None, sync_deps: bool = True) 
             "message": f"Aplicativo atualizado com sucesso! {len(updated_files)} arquivo(s) atualizado(s) ({', '.join(updated_files)}).{pip_msg}\nSuas configurações pessoais e token foram preservados.",
         }
 
-    # Modo 2: URL HTTP/HTTPS apontando para um pacote .zip
-    if src.startswith(("http://", "https://")) and src.lower().endswith(".zip"):
+    # Modo 2: Repositorio Git (se existir pasta .git local e origem compativel)
+    if (APP_DIR / ".git").exists() and (not src or "github.com" in src.lower() or src.endswith(".git")):
         try:
-            req = urllib.request.Request(src, headers={"User-Agent": f"JiraBot-Updater/{APP_VERSION}"})
+            proc = subprocess.run(
+                ["git", "pull", "--ff-only"],
+                cwd=str(APP_DIR),
+                capture_output=True,
+                text=True,
+                timeout=25,
+            )
+            if proc.returncode == 0:
+                out = (proc.stdout or "").strip()
+                pip_msg = ""
+                if sync_deps:
+                    ok_pip, p_text = sync_pip_dependencies()
+                    pip_msg = f"\n{p_text}"
+
+                return {
+                    "success": True,
+                    "mode": "git",
+                    "requires_restart": True,
+                    "message": f"Atualização via Git concluída com sucesso!\n{out}{pip_msg}\nSuas configurações pessoais em ~/.jirabot foram preservadas.",
+                }
+            return {
+                "success": False,
+                "message": f"Não foi possível executar git pull automaticamente: {proc.stderr or proc.stdout}",
+            }
+        except Exception as e:
+            return {"success": False, "message": f"Erro ao executar git pull: {e}"}
+
+    # Modo 3: URL HTTP/HTTPS apontando para um pacote .zip ou repositorio GitHub
+    resolved_zip = _resolve_zip_url(src) if src.startswith(("http://", "https://")) else None
+    if resolved_zip:
+        try:
+            req = urllib.request.Request(resolved_zip, headers={"User-Agent": f"JiraBot-Updater/{APP_VERSION}"})
             with urllib.request.urlopen(req, timeout=25) as resp:
                 zip_bytes = resp.read()
 
@@ -332,36 +391,6 @@ def perform_update(update_source: Optional[str] = None, sync_deps: bool = True) 
             }
         except Exception as e:
             return {"success": False, "message": f"Falha ao baixar/extrair pacote de atualização: {e}"}
-
-    # Modo 3: Repositorio Git
-    if (APP_DIR / ".git").exists():
-        try:
-            proc = subprocess.run(
-                ["git", "pull", "--ff-only"],
-                cwd=str(APP_DIR),
-                capture_output=True,
-                text=True,
-                timeout=25,
-            )
-            if proc.returncode == 0:
-                out = (proc.stdout or "").strip()
-                pip_msg = ""
-                if sync_deps:
-                    ok_pip, p_text = sync_pip_dependencies()
-                    pip_msg = f"\n{p_text}"
-
-                return {
-                    "success": True,
-                    "mode": "git",
-                    "requires_restart": True,
-                    "message": f"Atualização via Git concluída com sucesso!\n{out}{pip_msg}\nSuas configurações pessoais em ~/.jirabot foram preservadas.",
-                }
-            return {
-                "success": False,
-                "message": f"Não foi possível executar git pull automaticamente: {proc.stderr or proc.stdout}",
-            }
-        except Exception as e:
-            return {"success": False, "message": f"Erro ao executar git pull: {e}"}
 
     return {
         "success": False,

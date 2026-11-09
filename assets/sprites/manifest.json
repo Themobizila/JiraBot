@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "size": 160,
+  "fps": 12,
+  "frame_count": 16,
+  "frame_digits": 2,
+  "layout": "stacked_2x8",
+  "models": {
+    "normal": {
+      "directory": "normal",
+      "source_sha256": "95b08111c36e602674e90ed391f05cb267a1b503d8e15da0f9cf5ba0947681cf"
+    },
+    "halloween": {
+      "directory": "halloween",
+      "source_sha256": "3133e7b1152adc49484620f67a7d5a36e17de900edb3611a5ff85b2406ce62d4"
+    },
+    "natal": {
+      "directory": "natal",
+      "source_sha256": "155c594462e8578823927bcaef603d4afb3a31e52278c0a5e3ea3cd5eb4ec854"
+    },
+    "ano_novo": {
+      "directory": "ano_novo",
+      "source_sha256": "97eecbae643dc3ae0fcca561ae49e8c436388e2202631a0da47b8215c9c37203"
+    },
+    "pascoa": {
+      "directory": "pascoa",
+      "source_sha256": "68e11184739f69eeb0a2a0f2ae56b429f781d3a58c5abff1a38074ac512a4c12"
+    }
+  }
+}

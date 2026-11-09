@@ -2548,6 +2548,76 @@ Não aplicável
         reasons = [s["reason"] for s in snaps_after]
         self.assertIn("pre_restore", reasons)
 
+    def test_snapshots_preventive_triggers_and_recuperar_tickets(self):
+        from storage import StateManager, DailyState, TimeInterval
+        import recuperar_tickets
+
+        today_str = date.today().isoformat()
+        mgr = StateManager(base_dir=self.test_dir)
+        state = DailyState(date_str=today_str, target_issue="CONSISABI-427")
+        state.intervals.append(TimeInterval(start=f"{today_str}T08:00:00", end=f"{today_str}T12:00:00", issue_key="CONSISABI-427"))
+        mgr.save_state(state)
+
+        # 1. Testa snapshots preventivos com novos motivos
+        snap_del = mgr.create_snapshot(state, reason="pre_interval_delete")
+        self.assertIsNotNone(snap_del)
+        snap_edit = mgr.create_snapshot(state, reason="pre_interval_edit")
+        self.assertIsNotNone(snap_edit)
+        snap_log = mgr.create_snapshot(state, reason="pre_log_now")
+        self.assertIsNotNone(snap_log)
+
+        snaps = mgr.list_snapshots(today_str)
+        motivos = [s["reason_label"] for s in snaps]
+        self.assertIn("Antes de excluir intervalo manual", motivos)
+        self.assertIn("Antes de editar intervalos manuais", motivos)
+        self.assertIn("Antes de lançar horas no Jira", motivos)
+
+        # 2. Testa formatacao da tabela do script de recuperacao
+        tabela = recuperar_tickets.formatar_tabela(snaps)
+        self.assertIn("CONSISABI-427", tabela)
+        self.assertIn("Antes de excluir intervalo manual", tabela)
+
+        # 3. Testa restauracao direta por id
+        state.intervals.clear()
+        mgr.save_state(state)
+        self.assertEqual(len(mgr.load_state().intervals), 0)
+
+        res = mgr.restore_snapshot(snaps[0]["id"])
+        self.assertTrue(res.get("success"))
+        self.assertEqual(len(mgr.load_state().intervals), 1)
+        self.assertEqual(mgr.load_state().intervals[0].issue_key, "CONSISABI-427")
+
+        # 4. Testa tickets_detail e restauracao unitaria de ticket
+        state_multi = DailyState(date_str=today_str, target_issue="ATIVDIV-32")
+        state_multi.intervals.append(TimeInterval(start=f"{today_str}T08:00:00", end=f"{today_str}T10:00:00", issue_key="ATIVDIV-32"))
+        state_multi.intervals.append(TimeInterval(start=f"{today_str}T10:00:00", end=f"{today_str}T12:00:00", issue_key="CONSISABI-427"))
+        state_multi.set_issue_comment("CONSISABI-427", "Ajuste na tela de login")
+        mgr.save_state(state_multi)
+        snap_multi = mgr.create_snapshot(state_multi, reason="pre_interval_edit")
+
+        snaps_multi = mgr.list_snapshots(today_str)
+        first_snap = snaps_multi[0]
+        self.assertIn("tickets_detail", first_snap)
+        keys = [td["issue_key"] for td in first_snap["tickets_detail"]]
+        self.assertIn("ATIVDIV-32", keys)
+        self.assertIn("CONSISABI-427", keys)
+
+        # Simula usuario trabalhando em outro chamado e perdendo apenas CONSISABI-427
+        cur_st = DailyState(date_str=today_str, target_issue="OUTRO-999")
+        cur_st.intervals.append(TimeInterval(start=f"{today_str}T14:00:00", end=f"{today_str}T16:00:00", issue_key="OUTRO-999"))
+        mgr.save_state(cur_st)
+
+        # Restaura apenas o ticket CONSISABI-427
+        res_unit = mgr.restore_snapshot(first_snap["id"], ticket_key="CONSISABI-427")
+        self.assertTrue(res_unit.get("success"))
+        restored_st = mgr.load_state()
+
+        # Verifica que OUTRO-999 foi preservado E CONSISABI-427 foi adicionado
+        r_keys = {i.issue_key for i in restored_st.intervals}
+        self.assertIn("OUTRO-999", r_keys)
+        self.assertIn("CONSISABI-427", r_keys)
+        self.assertEqual(restored_st.get_issue_comment("CONSISABI-427"), "Ajuste na tela de login")
+
     def test_mini_window_position_persistence_and_widget(self):
         import tkinter as tk
         from pathlib import Path
@@ -2874,9 +2944,405 @@ Não aplicável
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_engine_automatic_snapshots_on_transitions_and_deduplication(self):
+        """Valida que todas as mudancas de estado (pausas, retornos e desligamento) criam snapshots e deduplicam."""
+        from engine import BotEngine
+        from config import BotConfig
+        from storage import StateManager, DailyState, TimeInterval
+        import tempfile
+        import shutil
+        from datetime import datetime, date, time
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            today_str = date.today().isoformat()
+            cfg = BotConfig(active_profile="6h_0745", notifications_enabled=False, intermediate_lock_mode="pause")
+            mgr = StateManager(base_dir=Path(temp_dir))
+
+            engine = BotEngine(config=cfg, state_manager=mgr)
+
+            # 1. Inicio de expediente via handle_unlock (de IDLE para RUNNING) -> shift_start
+            now_0745 = datetime.combine(date.today(), time(7, 45, 0))
+            engine.handle_unlock(now=now_0745)
+            snaps = mgr.list_snapshots(today_str)
+            self.assertTrue(any(s["reason"] == "shift_start" for s in snaps))
+
+            # 2. Pausa para almoco via handle_lock (12:05) -> pause_lunch
+            now_1205 = datetime.combine(date.today(), time(12, 5, 0))
+            engine.handle_lock(now=now_1205)
+            snaps = mgr.list_snapshots(today_str)
+            self.assertTrue(any(s["reason"] == "pause_lunch" for s in snaps))
+
+            # 3. Retorno do almoco via handle_unlock (13:30) -> resume_lunch
+            now_1330 = datetime.combine(date.today(), time(13, 30, 0))
+            engine.handle_unlock(now=now_1330)
+            snaps = mgr.list_snapshots(today_str)
+            self.assertTrue(any(s["reason"] == "resume_lunch" for s in snaps))
+
+            # 4. Pausa intermediaria via handle_lock (15:00) -> pause_away
+            now_1500 = datetime.combine(date.today(), time(15, 0, 0))
+            engine.handle_lock(now=now_1500)
+            snaps = mgr.list_snapshots(today_str)
+            self.assertTrue(any(s["reason"] == "pause_away" for s in snaps))
+
+            # 5. Retorno de pausa intermediaria via handle_unlock (15:05) -> resume_away
+            now_1505 = datetime.combine(date.today(), time(15, 5, 0))
+            engine.handle_unlock(now=now_1505)
+            snaps = mgr.list_snapshots(today_str)
+            self.assertTrue(any(s["reason"] == "resume_away" for s in snaps))
+
+            # 6. Pausa manual (15:10) -> manual_pause
+            now_1510 = datetime.combine(date.today(), time(15, 10, 0))
+            engine.manual_pause(now=now_1510)
+            snaps = mgr.list_snapshots(today_str)
+            self.assertTrue(any(s["reason"] == "manual_pause" for s in snaps))
+
+            # 7. Inicio manual (15:12) -> manual_start
+            now_1512 = datetime.combine(date.today(), time(15, 12, 0))
+            engine.manual_start(now=now_1512)
+            snaps = mgr.list_snapshots(today_str)
+            self.assertTrue(any(s["reason"] == "manual_start" for s in snaps))
+
+            # 8. Teste de deduplicacao inteligente (anti-poluicao):
+            cur_state = mgr.load_state()
+            mgr.create_snapshot(cur_state, reason="pause_away")
+            snap_count_before = len(mgr.list_snapshots(today_str))
+            # Segunda chamada imediata com mesmo motivo e tempo identico DEVE ser suprimida
+            mgr.create_snapshot(cur_state, reason="pause_away")
+            snap_count_after = len(mgr.list_snapshots(today_str))
+            self.assertEqual(snap_count_after, snap_count_before)
+
+            # Mas uma acao de usuario (motivo critico como pre_interval_delete) NUNCA e suprimida
+            mgr.create_snapshot(cur_state, reason="pre_interval_delete")
+            mgr.create_snapshot(cur_state, reason="pre_interval_delete")
+            snap_count_crit = len(mgr.list_snapshots(today_str))
+            self.assertEqual(snap_count_crit, snap_count_after + 2)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_prevent_duplicate_worklogs_on_resume_and_double_log_now(self):
+        """
+        Reproduz e valida a correcao do caso de triplicacao/duplicacao de lancamentos (Caso Guilherme):
+        1. Expediente inicial com QE-6502 (4h00m: 07:56 as 11:56) e MDE-876 (2h20m: 13:00 as 15:20).
+        2. Primeiro envio automatico no encerramento (15:20) -> cria 1 worklog para QE-6502 (ID 1001) e 1 para MDE-876 (ID 1002).
+        3. Desbloqueio/retomada pos-expediente (15:30 as 15:46 = +16m em MDE-876, totalizando 2h36m = 9360s).
+        4. Acionamento duplo de manual_log() as 15:46:
+           - QE-6502 (4h00m inalterado) NAO deve sofrer novo POST nem PUT.
+           - MDE-876 (alterado de 2h20m para 2h36m) NAO deve sofrer novo POST, mas sim 1 unico PUT (atualizacao) no worklog 1002.
+           - O segundo acionamento consecutivo de manual_log() NAO deve gerar nenhum POST nem PUT adicional.
+           - O horario de saida (end_hm) salvo no schedule de ambos os worklogs deve ser "15:46" (nunca vazio/"-").
+        """
+        from engine import BotEngine
+        from config import BotConfig
+        from storage import StateManager, DailyState, TimeInterval
+        import tempfile
+        import shutil
+        from datetime import datetime, date, time
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            today_str = date.today().isoformat()
+            cfg = BotConfig(active_profile="6h_0800", notifications_enabled=False)
+            mgr = StateManager(base_dir=temp_dir)
+
+            created_calls = []
+            updated_calls = []
+
+            def fake_create(issue_key, seconds, started_iso, comment):
+                wid = "1001" if issue_key == "QE-6502" else f"1002_{len(created_calls)}"
+                if issue_key == "MDE-876" and not any(c[0] == "MDE-876" for c in created_calls):
+                    wid = "1002"
+                created_calls.append((issue_key, seconds, started_iso, comment, wid))
+                return {"status": "success", "worklog_id": wid}
+
+            def fake_update(issue_key, worklog_id, seconds, started_iso, comment):
+                updated_calls.append((issue_key, worklog_id, seconds, started_iso, comment))
+                return True
+
+            state = DailyState(date_str=today_str, status="RUNNING", target_issue="MDE-876")
+            state.intervals.append(TimeInterval(
+                start=f"{today_str}T07:56:00",
+                end=f"{today_str}T11:56:00",
+                issue_key="QE-6502",
+            ))
+            state.intervals.append(TimeInterval(
+                start=f"{today_str}T13:00:00",
+                end=None,
+                issue_key="MDE-876",
+            ))
+            mgr.save_state(state)
+
+            engine = BotEngine(
+                config=cfg,
+                state_manager=mgr,
+                on_worklog_trigger=fake_create,
+                on_worklog_update=fake_update,
+            )
+
+            # Passo 1: Bloqueio na janela de saida (15:20) -> 1o lancamento automatico
+            now_1520 = datetime.combine(date.today(), time(15, 20, 0))
+            st1 = engine.handle_lock(now=now_1520)
+            self.assertEqual(st1.status, "COMPLETED")
+            self.assertTrue(st1.is_logged)
+            self.assertEqual(len(created_calls), 2)
+            self.assertEqual(created_calls[0][0], "QE-6502")
+            self.assertEqual(created_calls[0][1], 14400)  # 4h00m
+            self.assertEqual(created_calls[1][0], "MDE-876")
+            self.assertEqual(created_calls[1][1], 8400)   # 2h20m
+            self.assertEqual(len(updated_calls), 0)
+
+            # Passo 2: Usuario desbloqueia o PC as 15:30 (RESUMED_AFTER_COMPLETION) e trabalha ate 15:46 (+16m em MDE-876)
+            now_1530 = datetime.combine(date.today(), time(15, 30, 0))
+            st2 = engine.handle_unlock(now=now_1530)
+            self.assertEqual(st2.status, "RUNNING")
+            self.assertFalse(st2.is_logged)
+
+            # Passo 3: Usuario clica 2 vezes em "Lancar Agora" (manual_log) as 15:46
+            now_1546 = datetime.combine(date.today(), time(15, 46, 0))
+            engine.manual_log(now=now_1546)
+            engine.manual_log(now=now_1546)
+
+            # Verificacao: NENHUM novo POST foi feito (continua 2 criacoes no total)
+            self.assertEqual(len(created_calls), 2)
+
+            # Verificacao: Apenas 1 PUT foi feito, exclusivamente para MDE-876 (worklog 1002) com 9360s (2h36m)
+            self.assertEqual(len(updated_calls), 1)
+            self.assertEqual(updated_calls[0][0], "MDE-876")
+            self.assertEqual(updated_calls[0][1], "1002")
+            self.assertEqual(updated_calls[0][2], 9360)  # 2h20m (8400s) + 16m (960s) = 2h36m (9360s)
+
+            # Verificacao: Os horarios de expediente salvos para ambos os worklogs possuem end_hm == "15:46" (sem "-")
+            sched_1001 = mgr.get_or_infer_worklog_schedule({"id": "1001", "started": f"{today_str}T07:56:00.000-0300", "time_spent_seconds": 14400})
+            sched_1002 = mgr.get_or_infer_worklog_schedule({"id": "1002", "started": f"{today_str}T13:00:00.000-0300", "time_spent_seconds": 9360})
+            self.assertEqual(sched_1001["start_hm"], "07:56")
+            self.assertEqual(sched_1001["lunch_start_hm"], "11:56")
+            self.assertEqual(sched_1001["lunch_end_hm"], "13:00")
+            self.assertEqual(sched_1001["end_hm"], "15:46")
+            self.assertEqual(sched_1002["end_hm"], "15:46")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_editorial_saas_visual_redesign_and_preserved_sidebar_themes(self):
+        """
+        Valida a reestruturacao visual profunda e editorial do JiraBot Web:
+        - Fontes de estudio editorial (Bricolage Grotesque, Instrument Serif, DM Sans, Space Mono) sem Cinzel/Inter.
+        - Barra lateral e sistema de temas sazonais 100% preservados.
+        - Dinamica de scroll editorial (#scroll-progress-bar, .editorial-page-hero, .editorial-chapter-bar, .scroll-reveal).
+        - Novos componentes de UX (Hero Timer estilo Toggl, Bento KPI Strip numerado, Dropdowns .ui-dropdown,
+          Gavetas retrateis details.ui-drawer fechadas por padrao e Timeline estilo Koalendar .koalendar-step).
+        - Correcao de largura total no campo #switch-comment-input (.single-line-input).
+        """
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS, UI_FX_JS
+
+        # Tipografia de estudio editorial (zero cara de IA)
+        self.assertIn("Bricolage Grotesque", THEME_CSS)
+        self.assertIn("Instrument Serif", THEME_CSS)
+        self.assertIn("DM Sans", THEME_CSS)
+        self.assertIn("Space Mono", THEME_CSS)
+        self.assertNotIn("Cinzel", THEME_CSS)
+
+        # Dinamica de scroll e componentes de UX no CSS e JS
+        self.assertIn("#scroll-progress-bar", THEME_CSS)
+        self.assertIn(".editorial-page-hero", THEME_CSS)
+        self.assertIn(".editorial-chapter-bar", THEME_CSS)
+        self.assertIn(".scroll-reveal", THEME_CSS)
+        self.assertIn(".toggl-hero-card", THEME_CSS)
+        self.assertIn(".bento-kpi-strip", THEME_CSS)
+        self.assertIn(".ui-dropdown", THEME_CSS)
+        self.assertIn("details.ui-drawer", THEME_CSS)
+        self.assertIn(".koalendar-step", THEME_CSS)
+        self.assertIn("textarea.form-control.single-line-input", THEME_CSS)
+        self.assertIn("function toggleUiDropdown", UI_FX_JS)
+        self.assertIn("function closeAllUiDropdowns", UI_FX_JS)
+        self.assertIn("function scrollToSection", UI_FX_JS)
+        self.assertIn("function initEditorialScrollDynamics", UI_FX_JS)
+
+        # Estrutura em todas as telas do HTML_PAGE
+        self.assertIn('id="scroll-progress-bar"', HTML_PAGE)
+        self.assertIn("editorial-page-hero", HTML_PAGE)
+        self.assertIn("editorial-chapter-bar", HTML_PAGE)
+        self.assertIn("toggl-hero-card", HTML_PAGE)
+        self.assertIn("bento-kpi-strip", HTML_PAGE)
+        self.assertIn("single-line-input", HTML_PAGE)
+        self.assertIn("dd-topbar-tools", HTML_PAGE)
+        self.assertIn("dd-hero-actions", HTML_PAGE)
+        self.assertIn("drawer-today-intervals", HTML_PAGE)
+        self.assertIn("drawer-transfer-today", HTML_PAGE)
+        self.assertIn("drawer-an-deepdive", HTML_PAGE)
+        self.assertIn("drawer-batch-base-schedule", HTML_PAGE)
+        self.assertIn("sec-prof-windows", HTML_PAGE)
+        self.assertIn("drawer-report-raw", HTML_PAGE)
+        self.assertIn("drawer-jira-credentials", HTML_PAGE)
+        self.assertIn("drawer-app-update", HTML_PAGE)
+
+        # Preservacao da barra lateral e temas
+        self.assertIn('<aside class="sidebar" id="app-sidebar">', HTML_PAGE)
+        self.assertIn('id="nav-group-tickets"', HTML_PAGE)
+        self.assertIn('id="nav-group-jornada"', HTML_PAGE)
+        self.assertIn('id="nav-group-perfil"', HTML_PAGE)
+        for theme_name in ("dark", "light", "halloween", "natal", "ano_novo", "pascoa"):
+            self.assertIn(f'data-theme="{theme_name}"', THEME_CSS)
+
+    def test_dynamic_variable_shift_schedules_and_minimal_subviews(self):
+        """
+        Valida que todos os turnos sao 100% variaveis e dinamicos (sem 13:30 hardcodado)
+        e que o painel Web utiliza sub-vistas (.subview-pane) para exibir apenas 1 bloco por vez:
+        - Turno A (Daniel / 8h): 07:42 - 12:00 - 13:00 - 17:30
+        - Turno B (Personalizado): 08:00 - 11:45 - 13:20 - 16:45
+        - Turno C (6h): 07:45 - 12:00 - 13:30 - 15:15
+        - Saneamento automatico de config.json legado com lunch_end_hm="13:30" em perfil de 8h.
+        """
+        from config import ShiftProfile, TimeWindow
+        from engine import BotEngine
+        from config import BotConfig
+        from storage import StateManager, DailyState, TimeInterval
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+        import tempfile
+        import shutil
+        from datetime import datetime, date, time
+
+        # 1. Turno A: 07:42 - 12:00 - 13:00 - 17:30
+        prof_a = ShiftProfile.from_dict({
+            "name": "custom",
+            "target_hours": 8.0,
+            "calculator": {
+                "entry_hm": "07:42", "entry_before": 15, "entry_after": 15,
+                "lunch_start_hm": "12:00", "lunch_start_before": 15, "lunch_start_after": 15,
+                "lunch_end_hm": "13:00", "lunch_end_before": 15, "lunch_end_after": 15,
+                "exit_hm": "17:30", "exit_before": 15, "exit_after": 15,
+            }
+        })
+        self.assertEqual(prof_a.get_entry_hm(), "07:42")
+        self.assertEqual(prof_a.get_lunch_start_hm(), "12:00")
+        self.assertEqual(prof_a.get_lunch_end_hm(), "13:00")
+        self.assertEqual(prof_a.get_planned_exit_hm(), "17:30")
+
+        # 2. Turno B: 08:00 - 11:45 - 13:20 - 16:45
+        prof_b = ShiftProfile.from_dict({
+            "name": "custom",
+            "target_hours": 7.0,
+            "calculator": {
+                "entry_hm": "08:00", "entry_before": 15, "entry_after": 15,
+                "lunch_start_hm": "11:45", "lunch_start_before": 15, "lunch_start_after": 15,
+                "lunch_end_hm": "13:20", "lunch_end_before": 10, "lunch_end_after": 10,
+                "exit_hm": "16:45", "exit_before": 15, "exit_after": 15,
+            }
+        })
+        self.assertEqual(prof_b.get_entry_hm(), "08:00")
+        self.assertEqual(prof_b.get_lunch_start_hm(), "11:45")
+        self.assertEqual(prof_b.get_lunch_end_hm(), "13:20")
+        self.assertEqual(prof_b.get_planned_exit_hm(), "16:45")
+
+        # 3. Turno C: 07:45 - 12:00 - 13:30 - 15:15
+        prof_c = ShiftProfile.from_dict({
+            "name": "6h_0745",
+            "target_hours": 6.0,
+            "calculator": {
+                "entry_hm": "07:45", "entry_before": 15, "entry_after": 15,
+                "lunch_start_hm": "12:00", "lunch_start_before": 15, "lunch_start_after": 15,
+                "lunch_end_hm": "13:30", "lunch_end_before": 10, "lunch_end_after": 10,
+                "exit_hm": "15:15", "exit_before": 15, "exit_after": 15,
+            }
+        })
+        self.assertEqual(prof_c.get_entry_hm(), "07:45")
+        self.assertEqual(prof_c.get_lunch_start_hm(), "12:00")
+        self.assertEqual(prof_c.get_lunch_end_hm(), "13:30")
+        self.assertEqual(prof_c.get_planned_exit_hm(), "15:15")
+
+        # 4. Saneamento do Caso Daniel: perfil 8h poluído pelo HTML legado com calculator.lunch_end_hm="13:30"
+        prof_daniel = ShiftProfile.from_dict({
+            "name": "8h",
+            "target_hours": 8.0,
+            "entry_window": {"start": "07:00", "end": "09:30"},
+            "lunch_start_window": {"start": "11:30", "end": "13:00"},
+            "lunch_end_window": {"start": "12:55", "end": "13:30"},
+            "exit_window": {"start": "17:00", "end": "19:30"},
+            "calculator": {
+                "entry_hm": "07:45",
+                "lunch_start_hm": "12:00",
+                "lunch_end_hm": "13:30",
+                "exit_hm": "15:30",
+            }
+        })
+        self.assertEqual(prof_daniel.get_lunch_end_hm(), "13:00")
+
+        # 5. Simulacao no BotEngine para o Daniel retornando do almoco as 13:00: deve registrar 13:00 e NAO 13:30
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            today_str = date.today().isoformat()
+            cfg = BotConfig(active_profile="custom", notifications_enabled=False, profiles={"custom": prof_a})
+            mgr = StateManager(base_dir=temp_dir)
+            engine = BotEngine(config=cfg, state_manager=mgr)
+
+            engine.handle_unlock(now=datetime.combine(date.today(), time(7, 42, 0)))
+            engine.handle_lock(now=datetime.combine(date.today(), time(12, 0, 0)))
+            # Daniel desbloqueia o PC as 12:30 (durante o almoco) -> aguarda ate o horario nominal do perfil (13:00, nao 13:30!)
+            st_unlock = engine.handle_unlock(now=datetime.combine(date.today(), time(12, 30, 0)))
+            self.assertEqual(st_unlock.status, "PAUSED_LUNCH")
+            # As 13:00 em ponto, a transicao agendada inicia a tarde exatamente as 13:00
+            st_1300 = engine.check_scheduled_transitions(
+                now=datetime.combine(date.today(), time(13, 0, 0))
+            )
+            self.assertEqual(st_1300.status, "RUNNING")
+            summary = st_1300.get_shift_times_summary()
+            self.assertEqual(summary["start_hm"], "07:42")
+            self.assertEqual(summary["lunch_start_hm"], "12:00")
+            self.assertEqual(summary["lunch_end_hm"], "13:00")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        # 6. Verificacao de sub-vistas e ausencia de value="13:30" fixo no HTML
+        self.assertIn(".subview-pane", THEME_CSS)
+        self.assertIn("function switchSubView", HTML_PAGE)
+        self.assertIn("function getProfileDefaultSchedule", HTML_PAGE)
+        self.assertNotIn('value="13:30"', HTML_PAGE)
+
+    def test_settings_grid_alignment_and_official_github_link(self):
+        """Valida alinhamento simetrico do formulario de configuracoes e link/restauracao do GitHub oficial."""
+        from config import DEFAULT_GITHUB_REPO_URL, DEFAULT_GITHUB_WEB_URL, BotConfig
+        from updater import get_version_info, _resolve_zip_url
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        # 1. Constantes institucionais do GitHub
+        self.assertEqual(DEFAULT_GITHUB_REPO_URL, "https://github.com/Themobizila/JiraBot.git")
+        self.assertEqual(DEFAULT_GITHUB_WEB_URL, "https://github.com/Themobizila/JiraBot")
+
+        # 2. Metadados do updater e fallback de update_source
+        v_info = get_version_info()
+        self.assertEqual(v_info["default_github_repo_url"], DEFAULT_GITHUB_REPO_URL)
+        self.assertEqual(v_info["default_github_web_url"], DEFAULT_GITHUB_WEB_URL)
+        self.assertTrue(bool(v_info["update_source"]))
+
+        # 3. Resolucao inteligente de pacote ZIP via GitHub
+        resolved_gh = _resolve_zip_url("https://github.com/Themobizila/JiraBot")
+        self.assertEqual(resolved_gh, "https://github.com/Themobizila/JiraBot/archive/refs/heads/main.zip")
+        resolved_git = _resolve_zip_url("https://github.com/Themobizila/JiraBot.git")
+        self.assertEqual(resolved_git, "https://github.com/Themobizila/JiraBot/archive/refs/heads/main.zip")
+        resolved_direct = _resolve_zip_url("https://meuservidor.com/pacote.zip")
+        self.assertEqual(resolved_direct, "https://meuservidor.com/pacote.zip")
+
+        # 4. Classes CSS estruturais de alinhamento e componentes
+        self.assertIn(".cfg-form-grid", THEME_CSS)
+        self.assertIn(".github-official-card", THEME_CSS)
+        self.assertIn(".ui-dropdown.drop-up > .ui-dropdown-menu", THEME_CSS)
+        self.assertIn(".toggl-inputs-row input.form-control", THEME_CSS)
+
+        # 5. Estrutura HTML e elementos de integracao
+        self.assertIn('class="cfg-form-grid"', HTML_PAGE)
+        self.assertIn('class="github-official-card"', HTML_PAGE)
+        self.assertIn('href="https://github.com/Themobizila/JiraBot"', HTML_PAGE)
+        self.assertIn('id="dd-hero-actions"', HTML_PAGE)
+        self.assertIn('class="ui-dropdown drop-up"', HTML_PAGE)
+        self.assertIn('id="switch-comment-input"', HTML_PAGE)
+        self.assertIn('function setOfficialGithubUpdateSource', HTML_PAGE)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

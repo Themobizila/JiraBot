@@ -1,0 +1,358 @@
+{
+  "date": "06/11/2026 - 14:51:27",
+  "source": "mascote\\experimentos\\06-11-2026\\balanco_completo_pixellab_v1\\frames",
+  "base": "mascote\\experimentos\\06-11-2026\\balanco_movimento_v1\\base_original.png",
+  "input_sha256": [
+    "7bea19c2e6e3ad21164f3e2dcc51b73e66a71d78155b0cd4eddc54ac283532d5",
+    "b41920c498e75246eb39d3dd00de85886e00fd6eafa2fd8b04662713616ad1ce",
+    "e608f41858753121eb1027741fc7a49f08bc40d45e64925241d1d1031139095f",
+    "65e24cac5d30ec4c015b56c0181a62eb25cfeea7a9b21c18485a6434046271a4",
+    "9c9a913ce1ff22d9fce7f18614f06facde1b49aa65e080793396d361132885da",
+    "47f9d1b0f8f1b4ab117bf6856503ed4f35efa1d355c9fa656bc3e221e23f76fe",
+    "6ccee2b7842a2989c803c6a50563e75639ae38f51cfe9550baa7d0d83d97da90",
+    "939a3c3420cf77d9b1c2811c04a4bdbc6545836ad148e28678c495c22ee3b2a8",
+    "4c888ed3267514bf2c775e02928231290c48fa7fa74ed162417936d3be639f88",
+    "413e2aee0028c11d917b4dfd5bcd2322f28b2ca84aa6ce9c06a73853b2927c56",
+    "57d1442391249f30d6a2a58cd1b4d3a6ad1ccfdd8c9fa27b6b3f867edfb94f33",
+    "e77f94752f659dc4889e9f9a2639a34ea753d49b0394d5efac60e8c246970333",
+    "85e1c4dd525eb1db426828ad3977e170a426ad02aedfa0ba960db197ed367076",
+    "ed4cb1a0e3597eefb240eab6d6214e7d5125135677a99095725c3d65ebe46f44",
+    "6b696ebec924734b576ecda443a41b613e2bc22bd0e17027db5f0c46cafc090f",
+    "74ed4641b69e7f6cd5d530ad1d959ffd96fc167fdbeaab20b4795dc04451eb18",
+    "0950465ab06f27ee0964957d86ef0afa8afeedb3bca30762969226d99552b1c3",
+    "a4101dd97b240d6b91d326753794bb965249bb418b9e89c7b4f3a9be57fd2ba9"
+  ],
+  "frames": [
+    {
+      "index": 0,
+      "registration": [
+        18,
+        -1
+      ],
+      "registration_score": 0.9999998807907104,
+      "scarf_shift": -1.7144890372772568,
+      "changed_pixels": 795
+    },
+    {
+      "index": 1,
+      "registration": [
+        17,
+        -2
+      ],
+      "registration_score": 0.7824187874794006,
+      "scarf_shift": 0.21343053985726612,
+      "changed_pixels": 1315
+    },
+    {
+      "index": 2,
+      "registration": [
+        13,
+        -2
+      ],
+      "registration_score": 0.8106308579444885,
+      "scarf_shift": 2.1088572520511817,
+      "changed_pixels": 1451
+    },
+    {
+      "index": 3,
+      "registration": [
+        6,
+        -1
+      ],
+      "registration_score": 0.7735047340393066,
+      "scarf_shift": 3.683229564458899,
+      "changed_pixels": 1567
+    },
+    {
+      "index": 4,
+      "registration": [
+        -4,
+        2
+      ],
+      "registration_score": 0.8508645296096802,
+      "scarf_shift": 4.696863564236894,
+      "changed_pixels": 1546
+    },
+    {
+      "index": 5,
+      "registration": [
+        -11,
+        1
+      ],
+      "registration_score": 0.8362133502960205,
+      "scarf_shift": 4.995442663534057,
+      "changed_pixels": 1172
+    },
+    {
+      "index": 6,
+      "registration": [
+        -18,
+        1
+      ],
+      "registration_score": 0.9505738615989685,
+      "scarf_shift": 4.533510901108669,
+      "changed_pixels": 1007
+    },
+    {
+      "index": 7,
+      "registration": [
+        -20,
+        -1
+      ],
+      "registration_score": 0.9633411765098572,
+      "scarf_shift": 3.381393200368143,
+      "changed_pixels": 882
+    },
+    {
+      "index": 8,
+      "registration": [
+        -18,
+        -1
+      ],
+      "registration_score": 0.9963415265083313,
+      "scarf_shift": 1.7144890372772579,
+      "changed_pixels": 833
+    },
+    {
+      "index": 9,
+      "registration": [
+        -13,
+        -1
+      ],
+      "registration_score": 0.854692280292511,
+      "scarf_shift": -0.21343053985726496,
+      "changed_pixels": 933
+    },
+    {
+      "index": 10,
+      "registration": [
+        -6,
+        -1
+      ],
+      "registration_score": 0.9697675704956055,
+      "scarf_shift": -2.108857252051181,
+      "changed_pixels": 902
+    },
+    {
+      "index": 11,
+      "registration": [
+        1,
+        -3
+      ],
+      "registration_score": 0.9545333385467529,
+      "scarf_shift": -3.683229564458897,
+      "changed_pixels": 754
+    },
+    {
+      "index": 12,
+      "registration": [
+        9,
+        -3
+      ],
+      "registration_score": 0.9666834473609924,
+      "scarf_shift": -4.696863564236895,
+      "changed_pixels": 877
+    },
+    {
+      "index": 13,
+      "registration": [
+        16,
+        -4
+      ],
+      "registration_score": 0.9636135697364807,
+      "scarf_shift": -4.995442663534057,
+      "changed_pixels": 1182
+    },
+    {
+      "index": 14,
+      "registration": [
+        20,
+        -6
+      ],
+      "registration_score": 0.9363566040992737,
+      "scarf_shift": -4.533510901108669,
+      "changed_pixels": 1400
+    },
+    {
+      "index": 15,
+      "registration": [
+        23,
+        -4
+      ],
+      "registration_score": 0.9648863673210144,
+      "scarf_shift": -3.3813932003681435,
+      "changed_pixels": 1156
+    }
+  ],
+  "frame_size": [
+    256,
+    256
+  ],
+  "frame_count": 16,
+  "duration_ms": 3200,
+  "technique": "canonical scarf; supplied fur donor pixels; no paw edits",
+  "fur_donors": [
+    {
+      "registration": [
+        14,
+        -3
+      ],
+      "score": 0.792234480381012,
+      "pixels_used": 1679
+    },
+    {
+      "registration": [
+        12,
+        -4
+      ],
+      "score": 0.7607596516609192,
+      "pixels_used": 75
+    },
+    {
+      "registration": [
+        8,
+        -2
+      ],
+      "score": 0.7491680979728699,
+      "pixels_used": 467
+    },
+    {
+      "registration": [
+        18,
+        -1
+      ],
+      "score": 0.9999998807907104,
+      "pixels_used": 255
+    },
+    {
+      "registration": [
+        17,
+        -2
+      ],
+      "score": 0.7824187874794006,
+      "pixels_used": 14
+    },
+    {
+      "registration": [
+        13,
+        -2
+      ],
+      "score": 0.8106308579444885,
+      "pixels_used": 6
+    },
+    {
+      "registration": [
+        6,
+        -1
+      ],
+      "score": 0.7735047340393066,
+      "pixels_used": 4
+    },
+    {
+      "registration": [
+        -4,
+        2
+      ],
+      "score": 0.8508645296096802,
+      "pixels_used": 1
+    },
+    {
+      "registration": [
+        -11,
+        1
+      ],
+      "score": 0.8362133502960205,
+      "pixels_used": 4
+    },
+    {
+      "registration": [
+        -18,
+        1
+      ],
+      "score": 0.9505738615989685,
+      "pixels_used": 10
+    },
+    {
+      "registration": [
+        -20,
+        -1
+      ],
+      "score": 0.9633411765098572,
+      "pixels_used": 1
+    },
+    {
+      "registration": [
+        -18,
+        -1
+      ],
+      "score": 0.9963415265083313,
+      "pixels_used": 98
+    },
+    {
+      "registration": [
+        -13,
+        -1
+      ],
+      "score": 0.854692280292511,
+      "pixels_used": 23
+    },
+    {
+      "registration": [
+        -6,
+        -1
+      ],
+      "score": 0.9697675704956055,
+      "pixels_used": 17
+    },
+    {
+      "registration": [
+        1,
+        -3
+      ],
+      "score": 0.9545333385467529,
+      "pixels_used": 16
+    },
+    {
+      "registration": [
+        9,
+        -3
+      ],
+      "score": 0.9666834473609924,
+      "pixels_used": 2
+    },
+    {
+      "registration": [
+        16,
+        -4
+      ],
+      "score": 0.9636135697364807,
+      "pixels_used": 0
+    },
+    {
+      "registration": [
+        20,
+        -6
+      ],
+      "score": 0.9363566040992737,
+      "pixels_used": 0
+    },
+    {
+      "registration": [
+        23,
+        -4
+      ],
+      "score": 0.9648863673210144,
+      "pixels_used": 0
+    }
+  ],
+  "unresolved_fur_plate_pixels": 592,
+  "checks": {
+    "outside_edit_masks_exact": true,
+    "top_ropes_unchanged": true,
+    "png_apng_rgba_exact": true,
+    "gif_duration_exact": true,
+    "no_global_resampling": true,
+    "no_clipping": true,
+    "sources_unchanged": true
+  }
+}

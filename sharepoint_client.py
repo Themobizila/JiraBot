@@ -175,7 +175,7 @@ class SharePointManager:
 
         with SharePointManager._lock:
             pending = None
-            if SharePointManager._pending_flow and SharePointManager._auth_in_progress:
+            if SharePointManager._pending_flow and SharePointManager._auth_in_progress and SharePointManager._pending_flow.get("client_id") == target_cid:
                 expires_at = SharePointManager._pending_flow.get("expires_at", 0)
                 if time.time() < expires_at:
                     pending = {
@@ -326,6 +326,7 @@ class SharePointManager:
             SharePointManager._last_auth_error = ""
             SharePointManager._auth_in_progress = True
             SharePointManager._pending_flow = {
+                "client_id": target_cid,
                 "user_code": user_code,
                 "verification_uri": verification_uri,
                 "expires_at": time.time() + expires_in,

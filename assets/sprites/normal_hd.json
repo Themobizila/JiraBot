@@ -1,0 +1,398 @@
+{
+  "version": 2,
+  "fps": 8,
+  "frame_count": 16,
+  "frame_digits": 2,
+  "models": {
+    "normal": {
+      "directory": "normal_hd",
+      "walk_faces_left": true,
+      "actions": {
+        "idle": {
+          "frame_count": 16,
+          "duration_ms": [
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125
+          ]
+        },
+        "walk": {
+          "frame_count": 12,
+          "duration_ms": [
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200
+          ]
+        },
+        "drink": {
+          "frame_count": 16,
+          "duration_ms": [
+            750,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            750,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125
+          ]
+        },
+        "sit": {
+          "frame_count": 9,
+          "duration_ms": [
+            875,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            250
+          ]
+        },
+        "sit_down": {
+          "frame_count": 9,
+          "duration_ms": [
+            250,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            875
+          ]
+        },
+        "stand_up": {
+          "frame_count": 9,
+          "duration_ms": [
+            250,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            125,
+            875
+          ]
+        },
+        "backpack": {
+          "frame_count": 23,
+          "duration_ms": [
+            650,
+            150,
+            150,
+            150,
+            250,
+            150,
+            150,
+            150,
+            300,
+            400,
+            250,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            250
+          ]
+        },
+        "swing": {
+          "frame_count": 16,
+          "duration_ms": [
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200
+          ]
+        },
+        "fall": {
+          "frame_count": 5,
+          "duration_ms": [
+            180,
+            140,
+            140,
+            150,
+            150
+          ]
+        },
+        "recover": {
+          "frame_count": 21,
+          "duration_ms": [
+            280,
+            130,
+            130,
+            130,
+            130,
+            130,
+            130,
+            130,
+            130,
+            150,
+            140,
+            150,
+            550,
+            140,
+            140,
+            160,
+            200,
+            150,
+            150,
+            150,
+            1000
+          ]
+        }
+      }
+    }
+  },
+  "integration_sources": {
+    "idle": {
+      "source": "mascote\\experimentos\\05-11-2026\\idle_256_v1",
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "vertical_offset": 12
+    },
+    "walk": {
+      "source": "mascote\\experimentos\\06-11-2026\\caminhada_pixellab_v2\\esquerda",
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "vertical_offset": 17
+    },
+    "drink": {
+      "source": "mascote\\experimentos\\06-11-2026\\cafe_pixellab_v1",
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        7,
+        6,
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "vertical_offset": 12
+    },
+    "sit": {
+      "source": "mascote\\experimentos\\06-11-2026\\idle_sentada_pixellab_v1\\limpos",
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "vertical_offset": 12
+    },
+    "sit_down": {
+      "source": "mascote\\experimentos\\06-11-2026\\posturas_pixellab_v2\\sentar\\alinhados",
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "vertical_offset": 12
+    },
+    "stand_up": {
+      "source": "mascote\\experimentos\\06-11-2026\\posturas_pixellab_v2\\levantar\\alinhados",
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "vertical_offset": 12
+    },
+    "backpack": {
+      "source": "mascote\\experimentos\\06-11-2026\\mochila_relogio_pixellab_v1\\sequencia",
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22
+      ],
+      "vertical_offset": 21
+    },
+    "swing": {
+      "source": "mascote\\experimentos\\06-11-2026\\balanco_cachecol_continuo_v1\\frames",
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "vertical_offset": 0
+    },
+    "fall": {
+      "source": "mascote/experimentos/09-11-2026/queda_giro_teste_v1/poses_no_ar",
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "vertical_offset": 18
+    },
+    "recover": {
+      "source": "mascote/experimentos/09-11-2026/pouso_de_costas_v1/frames",
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "vertical_offset": 18
+    }
+  }
+}

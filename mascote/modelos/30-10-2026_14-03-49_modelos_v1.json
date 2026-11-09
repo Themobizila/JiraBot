@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "models": {
+    "normal": {
+      "sheet": "preparados/30-10-2026/30-10-2026_13-56-01_normal_transparente_v1.png",
+      "actions": {
+        "idle": {"band": [0.05, 0.19], "count": 6, "fps": 4},
+        "walk": {"band": [0.215, 0.36], "count": 6, "fps": 8},
+        "drink": {"band": [0.38, 0.512], "count": 6, "fps": 5},
+        "sit": {"band": [0.535, 0.65], "count": 5, "fps": 3},
+        "backpack": {"band": [0.67, 0.805], "count": 5, "fps": 5},
+        "swing": {"band": [0.825, 0.985], "count": 6, "fps": 6}
+      }
+    },
+    "halloween": {
+      "sheet": "preparados/30-10-2026/30-10-2026_13-56-01_halloween_transparente_v1.png",
+      "actions": {
+        "idle": {"band": [0.065, 0.18], "count": 6, "fps": 4},
+        "walk": {"band": [0.195, 0.342], "count": 6, "fps": 8},
+        "drink": {"band": [0.36, 0.49], "count": 6, "fps": 5},
+        "sit": {"band": [0.505, 0.645], "count": 5, "fps": 3},
+        "backpack": {"band": [0.66, 0.79], "count": 5, "fps": 5},
+        "swing": {"band": [0.805, 0.975], "count": 6, "fps": 6}
+      }
+    },
+    "natal": {
+      "sheet": "preparados/30-10-2026/30-10-2026_13-56-01_natal_transparente_v1.png",
+      "actions": {
+        "idle": {"band": [0.065, 0.19], "count": 6, "fps": 4},
+        "walk": {"band": [0.2, 0.35], "count": 6, "fps": 8},
+        "drink": {"band": [0.36, 0.508], "count": 6, "fps": 5},
+        "sit": {"band": [0.515, 0.65], "count": 5, "fps": 3},
+        "backpack": {"band": [0.66, 0.81], "count": 5, "fps": 5},
+        "swing": {"band": [0.82, 0.98], "count": 6, "fps": 6}
+      }
+    },
+    "ano_novo": {
+      "sheet": "preparados/30-10-2026/30-10-2026_13-56-01_ano_novo_transparente_v1.png",
+      "actions": {
+        "idle": {"band": [0.06, 0.19], "count": 6, "fps": 4},
+        "walk": {"band": [0.2, 0.355], "count": 6, "fps": 8},
+        "drink": {"band": [0.365, 0.515], "count": 6, "fps": 5},
+        "sit": {"band": [0.52, 0.65], "count": 5, "fps": 3},
+        "backpack": {"band": [0.655, 0.805], "count": 5, "fps": 5},
+        "swing": {"band": [0.815, 0.98], "count": 6, "fps": 6}
+      }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "date": "06/11/2026 - 10:56:09",
+  "method": "local_piecewise_affine_pixel_sampling",
+  "frame_count": 32,
+  "fps": 8,
+  "duration_ms": 4000,
+  "size": [
+    256,
+    256
+  ],
+  "region": [
+    48,
+    99,
+    118,
+    180
+  ],
+  "source_sha256": [
+    "3f4b14f097895ac91fca1ea1dc2dada2ebdd2dacdb946fc4abb037f5f14f2c6e",
+    "49464ef1dd7bb059d16eceb4198af4aad0d0b86395c8e14a92b2e1b5e226f374"
+  ],
+  "positions": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.03806023374435663,
+    0.1464466094067262,
+    0.3086582838174551,
+    0.49999999999999994,
+    0.6913417161825448,
+    0.8535533905932737,
+    0.9619397662556434,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    0.9619397662556434,
+    0.8535533905932737,
+    0.6913417161825449,
+    0.5,
+    0.3086582838174552,
+    0.14644660940672627,
+    0.03806023374435663,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "checks": {
+    "feet_fixed": true,
+    "body_outside_arm_region_bit_exact": true,
+    "alpha_binary": true,
+    "canvas_not_clipped": true,
+    "originals_unchanged": true,
+    "gif_duration_ms": 4000,
+    "gif_transparent_corner_all_frames": true,
+    "no_inverted_mesh_triangles": true
+  }
+}

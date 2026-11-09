@@ -118,8 +118,8 @@ class JiraBotService:
         )
 
         self.watcher = SessionWatcher(
-            on_lock=self.engine.handle_lock,
-            on_unlock=self.engine.handle_unlock,
+            on_lock=self._on_session_lock,
+            on_unlock=self._on_session_unlock,
             on_shutdown=self.engine.handle_shutdown,
         )
 
@@ -129,6 +129,16 @@ class JiraBotService:
         self._mutex_handle = None
         self._web_server = None
         self._start_mtime = get_source_files_mtime()
+
+    def _on_session_lock(self):
+        from mascote_runtime.control import publish_event
+        publish_event("Windows_Lock", self.state_manager.base_dir)
+        self.engine.handle_lock()
+
+    def _on_session_unlock(self):
+        from mascote_runtime.control import publish_event
+        publish_event("Windows_Unlock", self.state_manager.base_dir)
+        self.engine.handle_unlock()
 
     def _handle_worklog_trigger(
         self,
@@ -232,6 +242,13 @@ class JiraBotService:
             logger.warning(f"Nao foi possivel iniciar servidor Web integrado na porta 8765: {e}")
 
         self.watcher.start()
+        try:
+            from mascote_runtime.control import configure as configure_mascot
+            from mascote_runtime.control import service_heartbeat
+            service_heartbeat(True)
+            configure_mascot({"web_theme": getattr(self.config, "theme", "auto")})
+        except Exception as exc:
+            logger.warning("Mascote indisponivel: %s", type(exc).__name__)
         if self.tray:
             self.tray.start()
 
@@ -255,6 +272,8 @@ class JiraBotService:
                         break
 
                     self.engine.check_scheduled_transitions()
+                    from mascote_runtime.control import service_heartbeat
+                    service_heartbeat(True)
                     self.jira_client.flush_queue()
                 except Exception:
                     pass
@@ -267,6 +286,11 @@ class JiraBotService:
         """Finaliza o servico graciosamente e libera o Mutex."""
         if not self._running:
             return
+        try:
+            from mascote_runtime.control import service_heartbeat
+            service_heartbeat(False)
+        except Exception:
+            pass
         self._running = False
         self.watcher.stop()
         if self.tray:

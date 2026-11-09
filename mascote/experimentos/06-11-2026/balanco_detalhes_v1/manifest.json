@@ -1,0 +1,290 @@
+{
+  "date": "06/11/2026 - 13:55:13",
+  "sources": [
+    "mascote\\experimentos\\06-11-2026\\balanco_movimento_v1\\base_original.png",
+    "C:\\Users\\joao.moura\\Downloads\\pixellab-Animate-this-exact-capybara-ge-1793982578061.png",
+    "C:\\Users\\joao.moura\\Downloads\\pixellab-Create-a-subtle-secondary-moti-1793983606780.png"
+  ],
+  "source_sha256": [
+    "0950465ab06f27ee0964957d86ef0afa8afeedb3bca30762969226d99552b1c3",
+    "8d7b96ee7b2b64c4685be57cd9eea8b8ddafbf9caf5b5a9d013de61073e2dc7a",
+    "fc3ffdbb6e45473585a129cf3e6d85cfe22daa27f3acd88a9c05b830095c4f20"
+  ],
+  "frame_size": [
+    256,
+    256
+  ],
+  "timeline_frames": 32,
+  "cycle_duration_ms": 3200,
+  "timeline": [
+    {
+      "index": 0,
+      "dx": 0,
+      "dy": 0,
+      "scarf_tip_shift": 0,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 1,
+      "dx": 4,
+      "dy": 0,
+      "scarf_tip_shift": 1,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 2,
+      "dx": 7,
+      "dy": 0,
+      "scarf_tip_shift": 2,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 3,
+      "dx": 10,
+      "dy": 0,
+      "scarf_tip_shift": 3,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 4,
+      "dx": 13,
+      "dy": 0,
+      "scarf_tip_shift": 4,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 5,
+      "dx": 15,
+      "dy": -1,
+      "scarf_tip_shift": 5,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 6,
+      "dx": 17,
+      "dy": -1,
+      "scarf_tip_shift": 6,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 7,
+      "dx": 18,
+      "dy": -1,
+      "scarf_tip_shift": 6,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 8,
+      "dx": 18,
+      "dy": -1,
+      "scarf_tip_shift": 6,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 9,
+      "dx": 18,
+      "dy": -1,
+      "scarf_tip_shift": 6,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 10,
+      "dx": 17,
+      "dy": -1,
+      "scarf_tip_shift": 6,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 11,
+      "dx": 15,
+      "dy": -1,
+      "scarf_tip_shift": 5,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 12,
+      "dx": 13,
+      "dy": 0,
+      "scarf_tip_shift": 4,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 13,
+      "dx": 10,
+      "dy": 0,
+      "scarf_tip_shift": 3,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 14,
+      "dx": 7,
+      "dy": 0,
+      "scarf_tip_shift": 2,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 15,
+      "dx": 4,
+      "dy": 0,
+      "scarf_tip_shift": 1,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 16,
+      "dx": 0,
+      "dy": 0,
+      "scarf_tip_shift": 0,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 17,
+      "dx": -4,
+      "dy": 0,
+      "scarf_tip_shift": -1,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 18,
+      "dx": -7,
+      "dy": 0,
+      "scarf_tip_shift": -2,
+      "blink": true,
+      "duration_ms": 100
+    },
+    {
+      "index": 19,
+      "dx": -10,
+      "dy": 0,
+      "scarf_tip_shift": -3,
+      "blink": true,
+      "duration_ms": 100
+    },
+    {
+      "index": 20,
+      "dx": -13,
+      "dy": 0,
+      "scarf_tip_shift": -4,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 21,
+      "dx": -15,
+      "dy": -1,
+      "scarf_tip_shift": -5,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 22,
+      "dx": -17,
+      "dy": -1,
+      "scarf_tip_shift": -6,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 23,
+      "dx": -18,
+      "dy": -1,
+      "scarf_tip_shift": -6,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 24,
+      "dx": -18,
+      "dy": -1,
+      "scarf_tip_shift": -6,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 25,
+      "dx": -18,
+      "dy": -1,
+      "scarf_tip_shift": -6,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 26,
+      "dx": -17,
+      "dy": -1,
+      "scarf_tip_shift": -6,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 27,
+      "dx": -15,
+      "dy": -1,
+      "scarf_tip_shift": -5,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 28,
+      "dx": -13,
+      "dy": 0,
+      "scarf_tip_shift": -4,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 29,
+      "dx": -10,
+      "dy": 0,
+      "scarf_tip_shift": -3,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 30,
+      "dx": -7,
+      "dy": 0,
+      "scarf_tip_shift": -2,
+      "blink": false,
+      "duration_ms": 100
+    },
+    {
+      "index": 31,
+      "dx": -4,
+      "dy": 0,
+      "scarf_tip_shift": -1,
+      "blink": false,
+      "duration_ms": 100
+    }
+  ],
+  "technique": "base scarf row translation; eyelid from motion sheet frame 3; stable swing rig",
+  "scarf_background": "local fur samples from same row x=116..120",
+  "checks": {
+    "outside_local_edit_regions_exact": true,
+    "mouth_exact_before_swing": true,
+    "alpha_exact_before_swing": true,
+    "top_rope_pixels_fixed": true,
+    "png_apng_rgba_exact": true,
+    "gif_duration_exact": true,
+    "first_frame_equals_base": true,
+    "margins_not_clipped": true,
+    "source_files_unchanged": true
+  }
+}
