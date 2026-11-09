@@ -1,0 +1,23 @@
+{
+  "frame_size": [
+    256,
+    256
+  ],
+  "source_sha256": "52d1f8cbf682c1dd7ac8100337f7a42da42b07c7e038ca5f6c954698b9d51aab",
+  "intermediate_frames": 3,
+  "vertical_offsets": [
+    0,
+    0,
+    0,
+    1,
+    0
+  ],
+  "duration_ms": [
+    200,
+    170,
+    180,
+    180,
+    900
+  ],
+  "total_ms": 1630
+}

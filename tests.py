@@ -2507,6 +2507,47 @@ Não aplicável
             self.assertIn("Git", res.get("message"))
             self.assertIn("sincronizadas com sucesso", res.get("message"))
 
+    def test_updater_git_failure_zip_fallback(self):
+        from unittest.mock import MagicMock
+        from updater import perform_update
+        import zipfile
+        import io
+
+        mock_status_ok = MagicMock()
+        mock_status_ok.returncode = 0
+        mock_status_ok.stdout = ""
+
+        mock_git_fail = MagicMock()
+        mock_git_fail.returncode = 128
+        mock_git_fail.stderr = "fatal: no upstream configured for branch"
+        mock_git_fail.stdout = ""
+
+        # Cria um zip valido em memoria
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("JiraBot-main/config.py", "# dummy")
+        zip_bytes = buf.getvalue()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = zip_bytes
+        mock_resp.__enter__.return_value = mock_resp
+
+        mock_proc_ok = MagicMock()
+        mock_proc_ok.returncode = 0
+        mock_proc_ok.stdout = ""
+        mock_proc_ok.stderr = ""
+
+        with patch("subprocess.run", side_effect=[mock_status_ok, mock_git_fail, mock_proc_ok]), \
+             patch("urllib.request.urlopen", return_value=mock_resp), \
+             patch("shutil.copy2") as mock_copy, \
+             patch("updater._file_sha256", side_effect=["hash1", "hash2"]):
+            res = perform_update(update_source="", sync_deps=True)
+            self.assertTrue(res.get("success"))
+            self.assertEqual(res.get("mode"), "zip_fallback")
+            self.assertTrue(res.get("requires_restart"))
+            self.assertIn("GitHub", res.get("message"))
+            self.assertTrue(mock_copy.called)
+
     def test_state_manager_snapshots_create_list_and_restore(self):
         from storage import StateManager, DailyState, TimeInterval
 

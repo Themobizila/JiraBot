@@ -7329,18 +7329,47 @@ async function runAppUpdate() {
   box.style.display = 'block';
   box.style.background = 'var(--bg-subtle)';
   box.style.color = 'var(--text-main)';
-  box.textContent = 'Aplicando atualização de código (preservando suas configurações pessoais)...';
+  box.textContent = 'Baixando atualização e verificando arquivos (suas configurações pessoais serão 100% preservadas)...';
   try {
     const res = await apiCall('/api/update', 'POST', { action: 'update', update_source: src });
     box.style.background = 'var(--success-bg)';
     box.style.color = 'var(--success)';
-    box.textContent = res.message;
-    showToast('Atualização concluída!', 'success');
-    await loadConfigData();
+
+    if (res.restarting || res.requires_restart) {
+      box.textContent = (res.message ? res.message + '\n\n' : '') + 'Reiniciando o JiraBot automaticamente com a nova versão... Aguarde alguns instantes.';
+      showToast('Atualização concluída! Reiniciando JiraBot...', 'success');
+
+      let attempts = 0;
+      const maxAttempts = 20;
+      const reconnectInterval = setInterval(async () => {
+        attempts++;
+        try {
+          const check = await fetch('/api/status', { cache: 'no-store' });
+          if (check.ok) {
+            clearInterval(reconnectInterval);
+            box.textContent = 'JiraBot reiniciado com sucesso! Recarregando tela...';
+            showToast('JiraBot reiniciado e pronto para uso!', 'success');
+            setTimeout(() => {
+              window.location.reload();
+            }, 800);
+          }
+        } catch (e) {
+          if (attempts >= maxAttempts) {
+            clearInterval(reconnectInterval);
+            box.textContent = 'Atualização aplicada. Se a página não recarregar em instantes, por favor atualize manualmente (F5).';
+          }
+        }
+      }, 1500);
+    } else {
+      box.textContent = res.message;
+      showToast('JiraBot já está atualizado!', 'success');
+      await loadConfigData();
+    }
   } catch (err) {
     box.style.background = 'var(--danger-bg)';
     box.style.color = 'var(--danger)';
-    box.textContent = err.message;
+    box.textContent = 'Erro ao atualizar: ' + (err.message || err);
+    showToast('Falha na atualização: ' + (err.message || err), 'danger');
   }
 }
 
@@ -8066,7 +8095,18 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     if not res.get("success"):
                         self._send_json({"error": res.get("message", "Falha ao atualizar")}, status_code=400)
                         return
+                    res["restarting"] = True
                     self._send_json(res)
+
+                    def _delayed_restart():
+                        time.sleep(1.2)
+                        try:
+                            from daemon import restart_background
+                            restart_background()
+                        except Exception as e:
+                            logger.error(f"Erro ao reiniciar servico apos atualizacao: {e}")
+
+                    threading.Thread(target=_delayed_restart, daemon=True, name="AutoRestartThread").start()
                     return
                 if action == "publish":
                     res = publish_clean_release(body.get("target_dir", ""))

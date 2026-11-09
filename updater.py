@@ -77,7 +77,7 @@ def is_allowed_app_file(rel_path: Path) -> bool:
             return False
     if rel_path.name in FORBIDDEN_NAMES:
         return False
-    if rel_path.as_posix() == "assets/sprites/manifest.json":
+    if rel_path.suffix.lower() == ".json" and rel_path.parts[:2] == ("assets", "sprites"):
         return True
     if rel_path.parts[:2] == ("assets", "raw_sheets") and len(rel_path.parts) == 3 and rel_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
         return rel_path.stem in {"normal", "halloween", "natal", "ano_novo", "anonovo", "pascoa"}
@@ -180,13 +180,15 @@ def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
     # 2. Caso seja um repositorio Git local
     if (APP_DIR / ".git").exists():
         try:
-            subprocess.run(["git", "fetch"], cwd=str(APP_DIR), capture_output=True, text=True, timeout=15)
+            env = {"GIT_TERMINAL_PROMPT": "0", **os.environ}
+            subprocess.run(["git", "fetch"], cwd=str(APP_DIR), capture_output=True, text=True, timeout=10, env=env)
             proc = subprocess.run(
                 ["git", "rev-list", "HEAD...@{u}", "--count"],
                 cwd=str(APP_DIR),
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=8,
+                env=env,
             )
             if proc.returncode == 0:
                 behind = int(proc.stdout.strip() or "0")
@@ -205,17 +207,17 @@ def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
                     "message": "Seu aplicativo já está atualizado com a última versão do repositório Git.",
                 }
         except Exception as e:
-            return {"success": False, "has_update": False, "message": f"Erro ao consultar Git: {e}"}
+            logger.debug(f"Erro ao consultar Git em check_for_updates: {e}")
 
-    # 3. Caso seja uma URL HTTP/HTTPS de pacote .zip ou repositorio GitHub
-    zip_url = _resolve_zip_url(src)
+    # 3. Caso seja uma URL HTTP/HTTPS de pacote .zip ou repositorio GitHub (ou fallback padrao)
+    zip_url = _resolve_zip_url(src) if src else "https://github.com/Themobizila/JiraBot/archive/refs/heads/main.zip"
     if zip_url:
         return {
             "success": True,
             "has_update": True,
             "mode": "zip_url",
             "zip_url": zip_url,
-            "message": f"Origem de atualização configurada ({zip_url}). Clique em 'Atualizar Aplicativo Agora' para sincronizar os arquivos.",
+            "message": f"Origem de atualização configurada no GitHub ({zip_url}). Clique em 'Atualizar Aplicativo Agora (1 Clique)' para sincronizar os arquivos.",
         }
 
     return {
@@ -225,7 +227,7 @@ def check_for_updates(update_source: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
-def sync_pip_dependencies(timeout: int = 120) -> Tuple[bool, str]:
+def sync_pip_dependencies(timeout: int = 20) -> Tuple[bool, str]:
     """
     Instala ou atualiza automaticamente as dependencias declaradas em requirements.txt
     utilizando o executavel Python do ambiente em execucao.
@@ -236,7 +238,7 @@ def sync_pip_dependencies(timeout: int = 120) -> Tuple[bool, str]:
 
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", str(req_file), "--quiet"],
+            [sys.executable, "-m", "pip", "install", "-r", str(req_file), "--quiet", "--no-warn-script-location"],
             cwd=str(APP_DIR),
             capture_output=True,
             text=True,
@@ -317,14 +319,17 @@ def perform_update(update_source: Optional[str] = None, sync_deps: bool = True) 
         }
 
     # Modo 2: Repositorio Git (se existir pasta .git local e origem compativel)
+    git_error_detail: Optional[str] = None
     if (APP_DIR / ".git").exists() and (not src or "github.com" in src.lower() or src.endswith(".git")):
         try:
+            env = {"GIT_TERMINAL_PROMPT": "0", **os.environ}
             proc = subprocess.run(
                 ["git", "pull", "--ff-only"],
                 cwd=str(APP_DIR),
                 capture_output=True,
                 text=True,
-                timeout=25,
+                timeout=18,
+                env=env,
             )
             if proc.returncode == 0:
                 out = (proc.stdout or "").strip()
@@ -339,15 +344,24 @@ def perform_update(update_source: Optional[str] = None, sync_deps: bool = True) 
                     "requires_restart": True,
                     "message": f"Atualização via Git concluída com sucesso!\n{out}{pip_msg}\nSuas configurações pessoais em ~/.jirabot foram preservadas.",
                 }
-            return {
-                "success": False,
-                "message": f"Não foi possível executar git pull automaticamente: {proc.stderr or proc.stdout}",
-            }
+            else:
+                git_error_detail = (proc.stderr or proc.stdout or "").strip()
+                logger.warning(
+                    f"git pull falhou com codigo {proc.returncode} ({git_error_detail}). "
+                    f"Ativando fallback automatico para download direto do pacote ZIP do GitHub..."
+                )
         except Exception as e:
-            return {"success": False, "message": f"Erro ao executar git pull: {e}"}
+            git_error_detail = str(e)
+            logger.warning(
+                f"Excecao ao executar git pull ({e}). "
+                f"Ativando fallback automatico para download direto do pacote ZIP do GitHub..."
+            )
 
-    # Modo 3: URL HTTP/HTTPS apontando para um pacote .zip ou repositorio GitHub
-    resolved_zip = _resolve_zip_url(src) if src.startswith(("http://", "https://")) else None
+    # Modo 3: URL HTTP/HTTPS apontando para um pacote .zip ou repositorio GitHub (ou fallback transparente)
+    resolved_zip = _resolve_zip_url(src) if (src and src.startswith(("http://", "https://"))) else None
+    if not resolved_zip and (not src or "github.com" in src.lower() or git_error_detail):
+        resolved_zip = "https://github.com/Themobizila/JiraBot/archive/refs/heads/main.zip"
+
     if resolved_zip:
         try:
             req = urllib.request.Request(resolved_zip, headers={"User-Agent": f"JiraBot-Updater/{APP_VERSION}"})
@@ -382,14 +396,38 @@ def perform_update(update_source: Optional[str] = None, sync_deps: bool = True) 
                 ok_pip, p_text = sync_pip_dependencies()
                 pip_msg = f"\n{p_text}"
 
+            fallback_note = " (via download direto do GitHub)" if git_error_detail else ""
+            if not updated_files:
+                return {
+                    "success": True,
+                    "mode": "zip_fallback" if git_error_detail else "zip_url",
+                    "updated_count": 0,
+                    "updated_files": [],
+                    "requires_restart": True,
+                    "message": (
+                        f"Seus arquivos já estão na versão mais recente disponível no GitHub!{fallback_note}"
+                        f"{pip_msg}\nConfigurações individuais em ~/.jirabot preservadas."
+                    ),
+                }
+
             return {
                 "success": True,
+                "mode": "zip_fallback" if git_error_detail else "zip_url",
                 "updated_count": len(updated_files),
                 "updated_files": updated_files,
                 "requires_restart": True,
-                "message": f"Atualização via pacote ZIP concluída! {len(updated_files)} arquivo(s) atualizado(s).{pip_msg}\nConfigurações individuais preservadas.",
+                "message": (
+                    f"Atualização concluída com sucesso{fallback_note}! "
+                    f"{len(updated_files)} arquivo(s) atualizado(s).{pip_msg}\n"
+                    f"Configurações individuais em ~/.jirabot preservadas."
+                ),
             }
         except Exception as e:
+            if git_error_detail:
+                return {
+                    "success": False,
+                    "message": f"Falha no git pull ({git_error_detail[:120]}) e falha no download do pacote ZIP: {e}",
+                }
             return {"success": False, "message": f"Falha ao baixar/extrair pacote de atualização: {e}"}
 
     return {

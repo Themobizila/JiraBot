@@ -30,10 +30,9 @@ backupP/
 backupCore/
 .test_runs/
 
-# Mascote local runtime e locks
+# Mascote local runtime e locks temporarios (apenas arquivos de estado e logs locais)
 mascote.lock
 mascote_runtime.json
 mascote_settings.json
-mascote_runtime/
 mascote_test_err.log
 assets/debug_preview.png

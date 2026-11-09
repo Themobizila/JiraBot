@@ -1,0 +1,5 @@
+# Dependencias adicionais utilizadas exclusivamente para execucao dos scripts
+# offline de geracao e recorte de spritesheets (scripts/build_sprites.py)
+-r requirements.txt
+numpy>=1.24
+opencv-python>=4.8

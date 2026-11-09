@@ -323,7 +323,7 @@ def start_background() -> int:
     if pid_file.exists():
         try:
             existing_pid = int(pid_file.read_text().strip())
-            if is_process_running(existing_pid):
+            if existing_pid != os.getpid() and is_process_running(existing_pid):
                 return existing_pid
         except Exception:
             pass
@@ -374,10 +374,51 @@ def stop_background() -> bool:
 
 
 def restart_background() -> int:
-    """Interrompe a instancia atual em segundo plano e inicia uma nova instancia limpa."""
-    stop_background()
-    time.sleep(1.0)
-    return start_background()
+    """
+    Interrompe a instancia atual em segundo plano e inicia uma nova instancia limpa.
+    Garante reinicio desacoplado e confiavel tanto de dentro quanto de fora do processo daemon.
+    """
+    pid_file = get_pid_file()
+    target_pid = None
+    if pid_file.exists():
+        try:
+            target_pid = int(pid_file.read_text().strip())
+        except Exception:
+            pass
+
+    python_exe = sys.executable
+    pythonw_exe = Path(python_exe).parent / "pythonw.exe"
+    executable = str(pythonw_exe) if pythonw_exe.exists() else python_exe
+    script_path = Path(__file__).resolve()
+
+    current_pid = os.getpid()
+    if target_pid and target_pid == current_pid:
+        restart_launcher = (
+            "import sys, time, subprocess; "
+            "time.sleep(1.5); "
+            f"subprocess.Popen([{repr(executable)}, {repr(str(script_path))}, 'run-daemon'], "
+            f"cwd={repr(str(script_path.parent))})"
+        )
+        flags = 0
+        if sys.platform == "win32":
+            DETACHED_PROCESS = 0x00000008
+            CREATE_NEW_PROCESS_GROUP = 0x00000200
+            flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+
+        subprocess.Popen(
+            [executable, "-c", restart_launcher],
+            cwd=str(script_path.parent),
+            creationflags=flags,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+        stop_background()
+        return 0
+    else:
+        stop_background()
+        time.sleep(1.5)
+        return start_background()
 
 
 def get_status() -> dict:

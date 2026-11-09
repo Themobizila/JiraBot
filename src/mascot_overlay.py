@@ -58,7 +58,7 @@ class PetPhysics:
             return x, monitor_top
         return x, y
 
-    def step(self, now, x, y, size, area, active=True, reduced=False, override=None):
+    def step(self, now, x, y, size, area, active=True, reduced=False, override=None, finish_stride=False):
         dt = 0 if self.last_tick is None else max(0, min(now - self.last_tick, .25))
         self.last_tick = now
         left, top, right, bottom = area
@@ -95,7 +95,7 @@ class PetPhysics:
             return "idle", x, y, False
         if on_ground:
             y = bottom - size
-        if now >= self.until:
+        if now >= self.until and not (finish_stride and self.mode == "walk"):
             space = ("idle", "walk", "sit", "drink", "backpack") if on_ground else ("idle", "sit")
             if self.action_space != space or not self.remaining:
                 self.remaining = list(space)
@@ -169,8 +169,13 @@ class DesktopPetWindow(MascotWindow):
             from PIL import ImageTk, ImageOps
             from mascote_runtime.catalog import load_frames
             # Somente o tema ativo e suas poses de caminhada espelhadas.
-            frames = load_frames(self.model, self.size, actions=("walk",))["walk"]
-            self.mirrored_walk = [ImageTk.PhotoImage(ImageOps.mirror(frame), master=self.root) for frame in frames]
+            groups = load_frames(self.model, self.size, actions=("walk", "walk_stop", "idle_quad"))
+            self.mirrored_ground = {
+                name: [ImageTk.PhotoImage(ImageOps.mirror(frame), master=self.root) for frame in frames]
+                for name, frames in groups.items()
+            }
+            self.mirrored_walk = self.mirrored_ground.pop("walk")
+            self._walk_mirror = False
             if self.physics.hanging:
                 self.place(self.x, work_area(self.x, self.y, physical=True)[1])
 
@@ -238,10 +243,15 @@ class DesktopPetWindow(MascotWindow):
         reduced = self.prefs["reduced_motion"]
         reaction = self.behavior.reaction is not None and self.behavior.reaction.until > now
         override = action if self.demo or self.behavior.dragging or reaction or self.behavior.active_requests or self.behavior.status in {"PAUSED_LUNCH", "PAUSED_AWAY"} else None
-        action, x, y, flip = self.physics.step(now, self.x, self.y, self.size, work_area(self.x, self.y), active=not self.behavior.dragging, reduced=reduced, override=override)
+        player = getattr(self, "player", None)
+        finish_stride = (player is not None and override is None and not reduced
+                         and player.action == "walk" and "walk_stop" in player.actions
+                         and not player.at_last_walk_frame(now))
+        action, x, y, flip = self.physics.step(now, self.x, self.y, self.size, work_area(self.x, self.y),
+                                                active=not self.behavior.dragging, reduced=reduced,
+                                                override=override, finish_stride=finish_stride)
         if self.behavior.dragging:
             action, flip = "walk", getattr(self, "_drag_flip", False)
-        player = getattr(self, "player", None)
         if player is not None:
             immediate = self.behavior.dragging or self.physics.hanging or self.physics.falling or action == "recover" or reduced
             progress = None
@@ -256,8 +266,15 @@ class DesktopPetWindow(MascotWindow):
             if (x, y) != (self.x, self.y):
                 self.place(x, y)
             self.action, self.frame = shown, index
-            mirror = not flip if self.model.get("walk_faces_left") else flip
-            frames = self.mirrored_walk if shown == "walk" and mirror else self.frames[shown]
+            frames = self.frames[shown]
+            if shown == "walk":
+                self._walk_mirror = not flip if self.model.get("walk_faces_left") else flip
+                if self._walk_mirror:
+                    frames = self.mirrored_walk
+            elif shown in {"fall", "recover"}:
+                self._walk_mirror = False
+            elif shown in {"walk_stop", "idle_quad"} and getattr(self, "_walk_mirror", False):
+                frames = self.mirrored_ground[shown]
             photo = frames[0 if reduced else index]
             if photo is not getattr(self, "_displayed_photo", None):
                 self.sprite.configure(image=photo)
