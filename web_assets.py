@@ -182,615 +182,118 @@ THEME_BADGES_HTML = (
     '</svg></div>'
 )
 
-# Icones vetoriais tematicos ao lado do titulo JiraBot
-BRAND_TITLE_ICONS_HTML = (
-    '''<svg class="brand-title-icon title-icon-halloween" viewBox="0 0 24 24" fill="none" aria-hidden="true" title="Halloween (Sazonal)">
-  <path d="M12 2C13 1 15 1.5 15.5 3.5" stroke="#557a2b" stroke-width="2.2" stroke-linecap="round"/>
-  <ellipse cx="12" cy="14" rx="10.5" ry="8.5" fill="#ff7518" stroke="#d94f00" stroke-width="1.5"/>
-  <ellipse cx="12" cy="14" rx="6.5" ry="8.2" fill="#ffa34d" opacity="0.6"/>
-  <polygon points="7,12 9.5,13.5 7,15" fill="#fff599"/>
-  <polygon points="17,12 14.5,13.5 17,15" fill="#fff599"/>
-  <polygon points="12,12.5 10.5,14.5 13.5,14.5" fill="#fff599"/>
-  <path d="M7 17 Q12 21 17 17 Q14 19.5 12 19.2 Q10 19.5 7 17 Z" fill="#fff599"/>
-</svg>
-<svg class="brand-title-icon title-icon-natal" viewBox="0 0 24 24" fill="none" aria-hidden="true" title="Natal (Sazonal)">
-  <polygon points="12,1 13.5,4.5 17,5 14,7.5 15,11 12,9 9,11 10,7.5 7,5 10.5,4.5" fill="#ffd166"/>
-  <polygon points="12,4 17,10 7,10" fill="#2ec4b6" stroke="#c6f6d5" stroke-width="0.8"/>
-  <polygon points="12,8 19,15 5,15" fill="#1f694a" stroke="#2ec4b6" stroke-width="0.8"/>
-  <polygon points="12,12 21,20 3,20" fill="#144d34" stroke="#1f694a" stroke-width="0.8"/>
-  <rect x="10.5" y="20" width="3" height="3.5" fill="#8d5b28"/>
-  <circle cx="12" cy="10" r="1.3" fill="#e63946"/>
-  <circle cx="9" cy="14" r="1.3" fill="#ffd166"/>
-  <circle cx="15" cy="14" r="1.3" fill="#e63946"/>
-  <circle cx="8" cy="18.5" r="1.4" fill="#ffd166"/>
-  <circle cx="16" cy="18.5" r="1.4" fill="#e63946"/>
-</svg>
-<svg class="brand-title-icon title-icon-ano_novo" viewBox="0 0 24 24" fill="none" aria-hidden="true" title="Ano Novo (Sazonal)">
-  <polygon points="12,1 14.5,8.5 22,12 14.5,15.5 12,23 9.5,15.5 2,12 9.5,8.5" fill="#ffd700"/>
-  <polygon points="12,4 13.5,9.5 19,12 13.5,14.5 12,20 10.5,14.5 5,12 10.5,9.5" fill="#ffffff"/>
-  <circle cx="12" cy="12" r="2.2" fill="#fff599"/>
-  <line x1="6" y1="6" x2="18" y2="18" stroke="#ffe082" stroke-width="1.2" stroke-linecap="round"/>
-  <line x1="18" y1="6" x2="6" y2="18" stroke="#ffe082" stroke-width="1.2" stroke-linecap="round"/>
-</svg>
-<svg class="brand-title-icon title-icon-pascoa" viewBox="0 0 24 24" fill="none" aria-hidden="true" title="Páscoa (Sazonal)">
-  <path d="M12 22 V11" stroke="#38a169" stroke-width="2.2" stroke-linecap="round"/>
-  <path d="M12 16 C8 16 6 13 6 10 C9 10 12 13 12 16 Z" fill="#68d391" stroke="#38a169" stroke-width="1"/>
-  <path d="M12 13 C16 13 18 10 18 7 C15 7 12 10 12 13 Z" fill="#48bb78" stroke="#38a169" stroke-width="1"/>
-  <circle cx="12" cy="7" r="4.2" fill="#b794f4" stroke="#9f7aea" stroke-width="1"/>
-  <circle cx="12" cy="7" r="1.8" fill="#ecc94b"/>
-</svg>''')
+# Símbolos vetoriais integrados às letras do título.
+def _brand_glyph(name: str, drawing: str) -> str:
+    return f'<svg class="brand-glyph glyph-{name}" viewBox="0 0 24 24">{drawing}</svg>'
 
-# Cenarios Aconchegantes Animados Estilo Lofi Girl para o menu lateral
+
+_BRAND_FLOWER = _brand_glyph("flower", '''
+  <path d="M12 11v12m0-5c-4 0-6-2-6-5 3 0 5 2 6 5m0 2c4 0 6-2 6-5-3 0-5 2-6 5"
+    fill="#72c98a" stroke="#4a9c66" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M12 3c-3-5-8 0-5 3-5 0-5 6 0 6-2 4 3 6 5 2 2 4 7 2 5-2 5 0 5-6 0-6 3-3-2-8-5-3Z"
+    fill="#d3a7f6" stroke="#9c66c6" stroke-width="1"/>
+  <circle cx="12" cy="8" r="3.1" fill="#ffe197"/>
+''')
+_BRAND_EGG = _brand_glyph("egg", '''
+  <path d="M12 1.5C8 1.5 3.5 10 3.5 15a8.5 8.5 0 0 0 17 0C20.5 10 16 1.5 12 1.5Z"
+    fill="#c4a5ed" stroke="#795598" stroke-width="1.2"/>
+  <path d="m5 12 3 2 4-2 4 2 3-2M5 17h14" fill="none" stroke="#fff0bb" stroke-width="1.8"/>
+  <circle cx="12" cy="7" r="1.4" fill="#ffe4f4"/>
+''')
+_BRAND_PUMPKIN = _brand_glyph("pumpkin", '''
+  <path d="M12 7c0-4 1-5 4-5" fill="none" stroke="#83ad54" stroke-width="2" stroke-linecap="round"/>
+  <path d="M12 6c-6-3-11 1-11 7s5 9 11 9 11-3 11-9-5-10-11-7Z"
+    fill="#f57d25" stroke="#aa3c13" stroke-width="1.1"/>
+  <path d="M7 7c-3 4-3 10 0 13m10-13c3 4 3 10 0 13" fill="none" stroke="#b84c17" stroke-width="1.1"/>
+  <path d="m5 10 5 2-4 2Zm14 0-5 2 4 2Zm-7 3-1.4 2h2.8Zm-7 3 4 1 .7-1 2.3 1 2.3-1 .7 1 4-1-2.7 4-3.5-1-2.8 1-3-1Z"
+    fill="#472015"/>
+''')
+_BRAND_TREE = _brand_glyph("tree", '''
+  <path d="m12 3 5 7h-2l5 6h-3l5 5H2l5-5H4l5-6H7Z"
+    fill="#4ac68b" stroke="#246e53" stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M10.5 21h3v3h-3z" fill="#b2764a"/>
+  <path d="M12 0l1 2 2 .5-1.5 1.3.5 2.2L12 5l-2 1 .5-2.2L9 2.5l2-.5Z" fill="#ffd36b"/>
+  <path d="M9 12h.1m5 3h.1m-6 3h.1m8 1h.1" stroke="#ff777e" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M13 10h.1m-2 8h.1" stroke="#ffe498" stroke-width="2.2" stroke-linecap="round"/>
+''')
+_BRAND_STAR = _brand_glyph("star", '''
+  <path d="m12 1 3.2 6.8 7.4.9-5.4 5.2 1.5 7.4-6.7-3.7-6.7 3.7 1.5-7.4-5.4-5.2 7.4-.9Z"
+    fill="#ffe096" stroke="#bb7c25" stroke-width="1.1" stroke-linejoin="round"/>
+  <path d="m12 4 1.4 6 5.6 1.2-5.6 1.3L12 18l-1.4-5.5-5.6-1.3 5.6-1.2Z" fill="#fff8da"/>
+''')
+_BRAND_STOPWATCH = _brand_glyph("stopwatch", '''
+  <path d="M10 2h4m-2 0v3m5.5 2.2L19 5.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+  <circle cx="12" cy="14" r="8.2" fill="var(--brand-clock-face)" stroke="currentColor" stroke-width="1.9"/>
+  <path d="M12 9v5l3 1.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <circle cx="12" cy="14" r="1" fill="currentColor"/>
+''')
+
+BRAND_TITLE_FILES = frozenset({
+    "halloween_cat_idle.png",
+    "halloween_cat_walk.png",
+    "ano_novo_fireworks.png",
+    "natal_snow.png",
+    "clock_pendulum.png",
+})
+_BRAND_CAT = (
+    '<span class="brand-cat brand-cat-walk"></span>'
+    '<span class="brand-cat brand-cat-idle"></span>'
+)
+_BRAND_SNOW = '<span class="brand-snow brand-snow-fall"></span>'
+_BRAND_FIREWORKS = (
+    '<span class="brand-fireworks">'
+    '<span class="brand-burst brand-burst-gold"></span>'
+    '<span class="brand-burst brand-burst-rose"></span>'
+    '<span class="brand-burst brand-burst-blue"></span>'
+    '</span>'
+)
+_BRAND_PENDULUM = '<span class="brand-pendulum"></span>'
+_BRAND_PETALS = '''
+<svg class="brand-petals" viewBox="0 0 150 46">
+  <g class="brand-petal-drift" fill="#f3a9c4">
+    <path d="M7 22q4-6 9-3-2 5-9 3Zm31-10q4-5 8-1-3 4-8 1Zm36 19q4-5 9-2-3 5-9 2Zm29-17q4-6 9-2-2 5-9 2Z"/>
+  </g>
+  <g class="brand-petal-drift brand-petal-late" fill="#dfb2ff">
+    <path d="M20 32q4-5 9-1-4 4-9 1Zm41-12q3-7 8-3-2 5-8 3Zm48 10q4-5 9-1-3 4-9 1Zm20-18q3-5 7-1-3 4-7 1Z"/>
+  </g>
+</svg>'''
+
+
+def _brand_word(theme: str, parts: tuple[str, ...], effect: str = "") -> str:
+    letters = "".join(part if part.startswith("<svg") else f'<span class="brand-letters">{part}</span>' for part in parts)
+    return f'<span class="brand-name brand-name-{theme}" aria-hidden="true">{effect}{letters}</span>'
+
+
+BRAND_TITLE_HTML = "".join((
+    _brand_word("clock", ("JIRAB", _BRAND_STOPWATCH, "T"), _BRAND_PENDULUM),
+    _brand_word("pascoa", ("J", _BRAND_FLOWER, "RAB", _BRAND_EGG, "T"), _BRAND_PETALS),
+    _brand_word("halloween", ("JIRAB", _BRAND_PUMPKIN, "T"), _BRAND_CAT),
+    _brand_word("natal", ("J", _BRAND_TREE, "RABOT"), _BRAND_SNOW),
+    _brand_word("ano_novo", ("JIRAB", _BRAND_STAR, "T"), _BRAND_FIREWORKS),
+))
+
+
+# Banners do player na barra lateral.
+LOFI_BANNER_CAPTIONS = {
+    "halloween": "Noite de Outono | Lofi Chill",
+    "natal": "Lareira Aconchegante | Noite de Inverno",
+    "ano_novo": "Meia-Noite na Cidade | Ano Novo",
+    "pascoa": "Brisa de Primavera | Manhã Serena",
+    "dark": "Oficina do Relojoeiro | Foco Suave",
+    "light": "Oficina do Relojoeiro | Foco Suave",
+}
+
+_LOFI_BANNERS_HTML = "".join(
+    f'<div class="lofi-scene scene-{theme}">'
+    f'<div class="lofi-banner" aria-hidden="true" style="'
+    f'--lofi-animation: url(/assets/lofi/{theme}.gif);'
+    f'--lofi-still: url(/assets/lofi/{theme}.png)"></div>'
+    f'<div class="lofi-caption">{caption}</div></div>'
+    for theme, caption in LOFI_BANNER_CAPTIONS.items()
+)
+
 LOFI_SCENES_HTML = (
-    '''<div class="lofi-scene scene-halloween">
-  <svg class="lofi-canvas-svg" viewBox="0 0 240 135" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cenario Halloween Lofi">
-    <defs>
-      <linearGradient id="hwSkyReal" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#080211"/>
-        <stop offset="50%" stop-color="#140624"/>
-        <stop offset="100%" stop-color="#260b3d"/>
-      </linearGradient>
-      <radialGradient id="hwMoonHalo" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#fff8d6" stop-opacity="0.95"/>
-        <stop offset="35%" stop-color="#ffd580" stop-opacity="0.45"/>
-        <stop offset="70%" stop-color="#ff9933" stop-opacity="0.15"/>
-        <stop offset="100%" stop-color="#260b3d" stop-opacity="0"/>
-      </radialGradient>
-      <radialGradient id="hwPumpGlowReal" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#fff9b3" stop-opacity="0.95"/>
-        <stop offset="40%" stop-color="#ff9900" stop-opacity="0.75"/>
-        <stop offset="80%" stop-color="#ff5500" stop-opacity="0.3"/>
-        <stop offset="100%" stop-color="#ff3300" stop-opacity="0"/>
-      </radialGradient>
-      <linearGradient id="hwMistGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#3d145c" stop-opacity="0"/>
-        <stop offset="50%" stop-color="#4d1b70" stop-opacity="0.35"/>
-        <stop offset="100%" stop-color="#190629" stop-opacity="0.8"/>
-      </linearGradient>
-      <linearGradient id="hwWoodPost" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stop-color="#1d0d29"/>
-        <stop offset="50%" stop-color="#3b1d4f"/>
-        <stop offset="100%" stop-color="#14081c"/>
-      </linearGradient>
-    </defs>
-    <!-- Ceu Noturno -->
-    <rect width="240" height="135" fill="url(#hwSkyReal)"/>
-    <!-- Estrelas distantes cintilantes -->
-    <g class="lofi-stars">
-      <circle cx="18" cy="14" r="0.7" fill="#ffffff" opacity="0.8"/>
-      <circle cx="45" cy="22" r="0.9" fill="#ffe0b2" opacity="0.9"/>
-      <circle cx="78" cy="10" r="0.6" fill="#ffffff" opacity="0.7"/>
-      <circle cx="108" cy="20" r="0.8" fill="#fff3e0" opacity="0.85"/>
-      <circle cx="138" cy="8" r="0.7" fill="#ffffff" opacity="0.75"/>
-      <circle cx="218" cy="12" r="0.8" fill="#ffd580" opacity="0.8"/>
-      <circle cx="232" cy="24" r="0.6" fill="#ffffff" opacity="0.6"/>
-    </g>
-    <!-- Lua Cheia da Colheita com Halo Atmosferico -->
-    <circle cx="182" cy="36" r="32" fill="url(#hwMoonHalo)"/>
-    <circle cx="182" cy="36" r="18" fill="#fff5cc"/>
-    <!-- Crateras realistas da Lua -->
-    <ellipse cx="176" cy="31" rx="3.5" ry="2.8" fill="#e8cf90" opacity="0.5"/>
-    <ellipse cx="188" cy="42" rx="4.5" ry="3.5" fill="#e8cf90" opacity="0.45"/>
-    <ellipse cx="190" cy="29" rx="2.2" ry="1.8" fill="#e8cf90" opacity="0.4"/>
-    <circle cx="181" cy="45" r="2.2" fill="#e8cf90" opacity="0.4"/>
-    <!-- Colinas ao Longe (3 Camadas de Profundidade) -->
-    <path d="M0 90 Q65 72 135 84 Q195 94 240 78 L240 135 L0 135 Z" fill="#140624"/>
-    <path d="M0 98 Q85 86 165 96 Q205 102 240 92 L240 135 L0 135 Z" fill="#1c0a30"/>
-    <rect x="0" y="82" width="240" height="28" fill="url(#hwMistGrad)"/>
-    <!-- Cerca de Madeira Rustica -->
-    <line x1="0" y1="98" x2="240" y2="98" stroke="#250f38" stroke-width="2.5"/>
-    <line x1="0" y1="110" x2="240" y2="110" stroke="#250f38" stroke-width="2.5"/>
-    <rect x="32" y="90" width="6" height="34" rx="1" fill="url(#hwWoodPost)"/>
-    <rect x="108" y="90" width="6" height="34" rx="1" fill="url(#hwWoodPost)"/>
-    <rect x="188" y="90" width="6" height="34" rx="1" fill="url(#hwWoodPost)"/>
-    <!-- Reflexo de madeira -->
-    <line x1="33" y1="90" x2="33" y2="124" stroke="#4d2866" stroke-width="0.8"/>
-    <line x1="109" y1="90" x2="109" y2="124" stroke="#4d2866" stroke-width="0.8"/>
-    <line x1="189" y1="90" x2="189" y2="124" stroke="#4d2866" stroke-width="0.8"/>
-    <!-- Espantalho Detalhado (Centro-Esquerda) -->
-    <g class="lofi-scarecrow" transform="translate(68, 42)">
-      <!-- Poste de sustentacao -->
-      <rect x="7" y="18" width="4.5" height="66" fill="#2d160b"/>
-      <rect x="-18" y="32" width="55" height="3.5" fill="#2d160b"/>
-      <!-- Fibras de palha nos punhos e gola -->
-      <path d="M-18 34 L-26 38 M-18 32 L-27 30 M-18 35 L-25 33" stroke="#e0a943" stroke-width="1.3"/>
-      <path d="M37 34 L45 38 M37 32 L46 30 M37 35 L44 33" stroke="#e0a943" stroke-width="1.3"/>
-      <path d="M6 24 L2 19 M12 24 L16 19 M9 25 L9 18" stroke="#e0a943" stroke-width="1.2"/>
-      <!-- Casaco com dobras realistas -->
-      <path d="M-4 32 L22 32 L26 64 L-8 64 Z" fill="#221130" stroke="#3d1e54" stroke-width="1"/>
-      <path d="M-4 32 L8 46 L22 32" stroke="#13081c" stroke-width="1.2" fill="none"/>
-      <line x1="9" y1="32" x2="9" y2="64" stroke="#15091f" stroke-width="1.5"/>
-      <circle cx="9" cy="40" r="1" fill="#c8aa6e"/>
-      <circle cx="9" cy="48" r="1" fill="#c8aa6e"/>
-      <!-- Luz quente projetada no peito pela abobora -->
-      <ellipse class="lofi-pumpkin-glow-chest" cx="9" cy="30" rx="14" ry="7" fill="url(#hwPumpGlowReal)" opacity="0.5"/>
-      <!-- Cabeca de Abobora Esculpida (3D Jack-o'-lantern) -->
-      <g transform="translate(9, 14)">
-        <!-- Gomos externos -->
-        <ellipse cx="0" cy="0" rx="14.5" ry="12.5" fill="#e65c00"/>
-        <ellipse cx="0" cy="0" rx="11.5" ry="12.2" fill="#ff7518"/>
-        <ellipse cx="0" cy="0" rx="6.5" ry="11.8" fill="#ffa34d"/>
-        <!-- Talo de madeira e folha -->
-        <path d="M0 -12 C1 -16 4 -18 6 -18" stroke="#557a2b" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-        <!-- Cavidades entalhadas com luz de vela interna -->
-        <g class="lofi-pumpkin-glow">
-          <polygon points="-7,-3 -2,1 -6,3" fill="#fff599"/>
-          <polygon points="7,-3 2,1 6,3" fill="#fff599"/>
-          <polygon points="0,-1 -2,2 2,2" fill="#fff599"/>
-          <path d="M-7 5 Q0 11 7 5 Q4 8 0 8 Q-4 8 -7 5 Z" fill="#fff599"/>
-        </g>
-        <!-- Chapeu de bruxo rustico com remendo -->
-        <ellipse cx="0" cy="-11" rx="19" ry="4.5" fill="#170824"/>
-        <polygon points="-11,-11 11,-11 2,-32" fill="#220c36"/>
-        <rect x="-8" y="-14" width="16" height="3" fill="#ff7518"/>
-        <polygon points="4,-24 8,-22 6,-18 2,-20" fill="#3b1d4f" stroke="#e0a943" stroke-width="0.6"/>
-      </g>
-    </g>
-    <!-- Gato Preto Realista Sentado na Cerca (Direita) -->
-    <g class="lofi-cat" transform="translate(182, 78)">
-      <!-- Sombra do gato na cerca -->
-      <ellipse cx="10" cy="24" rx="9" ry="3" fill="#08020d" opacity="0.7"/>
-      <!-- Corpo com anatomia organica -->
-      <g class="lofi-cat-body">
-        <!-- Patas e peito -->
-        <ellipse cx="10" cy="18" rx="6.5" ry="8.5" fill="#0c0414"/>
-        <circle cx="10" cy="8" r="5.5" fill="#0c0414"/>
-        <polygon points="6,5 8,0 10.5,5" fill="#0c0414"/>
-        <polygon points="10,5 12.5,0 14.5,5" fill="#0c0414"/>
-        <!-- Luz suave da lua na silhueta do gato -->
-        <path d="M15 12 Q17 18 15 24" stroke="#7a42a0" stroke-width="0.8" fill="none" opacity="0.6"/>
-        <!-- Olhos felinos amendoados com pupilas -->
-        <g class="lofi-cat-eyes">
-          <ellipse cx="8.2" cy="7.5" rx="1.3" ry="1.8" fill="#ffd166"/>
-          <ellipse cx="12.2" cy="7.5" rx="1.3" ry="1.8" fill="#ffd166"/>
-          <line x1="8.2" y1="6" x2="8.2" y2="9" stroke="#0c0414" stroke-width="0.7"/>
-          <line x1="12.2" y1="6" x2="12.2" y2="9" stroke="#0c0414" stroke-width="0.7"/>
-        </g>
-      </g>
-      <!-- Cauda felina longa e ondulante -->
-      <g class="lofi-cat-tail-wrap">
-        <path class="lofi-cat-tail" d="M15 22 C22 25 24 16 26 12" fill="none" stroke="#0c0414" stroke-width="2.6" stroke-linecap="round"/>
-      </g>
-    </g>
-    <!-- Campo de Trigo em Camadas com Espigas Detalhadas -->
-    <!-- Camada de fundo de trigo -->
-    <g class="lofi-wheat lofi-wheat-back" opacity="0.75">
-      <path d="M5 135 Q10 112 8 96 M12 135 Q16 116 14 100 M24 135 Q20 110 26 94 M38 135 Q44 114 40 98" stroke="#a66e1e" stroke-width="1.3" fill="none"/>
-      <path d="M115 135 Q120 114 116 96 M128 135 Q124 110 130 94 M140 135 Q146 116 142 100" stroke="#a66e1e" stroke-width="1.3" fill="none"/>
-      <path d="M205 135 Q212 115 208 96 M220 135 Q216 110 224 92 M232 135 Q236 116 234 98" stroke="#a66e1e" stroke-width="1.3" fill="none"/>
-    </g>
-    <!-- Camada frontal de trigo iluminada -->
-    <g class="lofi-wheat lofi-wheat-1">
-      <path d="M8 135 Q12 108 6 88 M16 135 Q22 112 18 92 M28 135 Q24 106 32 86 M45 135 Q50 110 46 90" stroke="#e0a943" stroke-width="1.6" fill="none"/>
-      <!-- Graos de trigo na ponta -->
-      <circle cx="6" cy="88" r="1.4" fill="#ffd580"/>
-      <circle cx="18" cy="92" r="1.4" fill="#ffd580"/>
-      <circle cx="32" cy="86" r="1.4" fill="#ffd580"/>
-      <circle cx="46" cy="90" r="1.4" fill="#ffd580"/>
-    </g>
-    <g class="lofi-wheat lofi-wheat-2">
-      <path d="M120 135 Q116 108 124 88 M132 135 Q138 112 134 92 M148 135 Q144 106 152 86" stroke="#e0a943" stroke-width="1.6" fill="none"/>
-      <circle cx="124" cy="88" r="1.4" fill="#ffd580"/>
-      <circle cx="134" cy="92" r="1.4" fill="#ffd580"/>
-      <circle cx="152" cy="86" r="1.4" fill="#ffd580"/>
-      <path d="M200 135 Q208 110 204 90 M215 135 Q210 106 218 86 M228 135 Q234 112 230 92" stroke="#e0a943" stroke-width="1.6" fill="none"/>
-      <circle cx="204" cy="90" r="1.4" fill="#ffd580"/>
-      <circle cx="218" cy="86" r="1.4" fill="#ffd580"/>
-      <circle cx="230" cy="92" r="1.4" fill="#ffd580"/>
-    </g>
-    <!-- Vaga-lumes e Brasas Flutuantes Sutis -->
-    <circle class="lofi-ember lofi-ember-1" cx="74" cy="65" r="1.3" fill="#ffe082"/>
-    <circle class="lofi-ember lofi-ember-2" cx="88" cy="74" r="1" fill="#ffb74d"/>
-    <circle class="lofi-ember lofi-ember-3" cx="165" cy="88" r="1.2" fill="#ffe082"/>
-    <circle class="lofi-ember lofi-ember-4" cx="140" cy="78" r="0.9" fill="#ff9800"/>
-  </svg>
-  <div class="lofi-caption">Noite de Outono | Lofi Chill</div>
-</div>
-<div class="lofi-scene scene-natal">
-  <svg class="lofi-canvas-svg" viewBox="0 0 240 135" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cenario Natal Lofi">
-    <defs>
-      <linearGradient id="ntWallReal" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#120806"/>
-        <stop offset="50%" stop-color="#1f0d09"/>
-        <stop offset="100%" stop-color="#2a120d"/>
-      </linearGradient>
-      <radialGradient id="ntHearthGlowReal" cx="42%" cy="78%" r="68%">
-        <stop offset="0%" stop-color="#ff9933" stop-opacity="0.6"/>
-        <stop offset="40%" stop-color="#e63946" stop-opacity="0.25"/>
-        <stop offset="75%" stop-color="#991b1b" stop-opacity="0.08"/>
-        <stop offset="100%" stop-color="#120806" stop-opacity="0"/>
-      </radialGradient>
-      <linearGradient id="ntWinterNight" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#030814"/>
-        <stop offset="60%" stop-color="#081830"/>
-        <stop offset="100%" stop-color="#122a4a"/>
-      </linearGradient>
-      <linearGradient id="ntWoodPlank" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#1c0f0a"/>
-        <stop offset="50%" stop-color="#29160e"/>
-        <stop offset="100%" stop-color="#140a06"/>
-      </linearGradient>
-      <clipPath id="ntWindowArchClip">
-        <path d="M148 18 Q182 10 216 18 L216 88 L148 88 Z"/>
-      </clipPath>
-    </defs>
-    <!-- Parede de Tijolos Rústicos -->
-    <rect width="240" height="135" fill="url(#ntWallReal)"/>
-    <!-- Linhas e juntas de argamassa da alvenaria -->
-    <g stroke="#3d1b14" stroke-width="0.7" opacity="0.4">
-      <line x1="0" y1="18" x2="142" y2="18"/><line x1="0" y1="32" x2="142" y2="32"/><line x1="0" y1="46" x2="142" y2="46"/>
-      <line x1="0" y1="60" x2="20" y2="60"/><line x1="122" y1="60" x2="142" y2="60"/>
-      <line x1="28" y1="18" x2="28" y2="32"/><line x1="68" y1="18" x2="68" y2="32"/><line x1="108" y1="18" x2="108" y2="32"/>
-      <line x1="48" y1="32" x2="48" y2="46"/><line x1="88" y1="32" x2="88" y2="46"/><line x1="128" y1="32" x2="128" y2="46"/>
-    </g>
-    <!-- Assoalho de Madeira Nobre com Tabuas -->
-    <rect x="0" y="118" width="240" height="17" fill="url(#ntWoodPlank)"/>
-    <line x1="0" y1="118" x2="240" y2="118" stroke="#3d2116" stroke-width="1.2"/>
-    <line x1="0" y1="126" x2="240" y2="126" stroke="#26130b" stroke-width="0.8"/>
-    <!-- Brilho aconchegante da lareira refletido na sala e piso -->
-    <rect class="lofi-hearth-glow" x="0" y="15" width="165" height="120" fill="url(#ntHearthGlowReal)"/>
-    <!-- JANELA EM ARCO COM VISTA PARA A NEVASCA DE INVERNO (Direita) -->
-    <g class="lofi-window-wrap">
-      <!-- Moldura chanfrada de madeira macica -->
-      <path d="M145 16 Q182 8 219 16 L219 90 L145 90 Z" fill="#26140e" stroke="#42251a" stroke-width="2.2"/>
-      <!-- Ceu noturno de inverno atras da janela -->
-      <rect x="148" y="18" width="68" height="70" fill="url(#ntWinterNight)" clip-path="url(#ntWindowArchClip)"/>
-      <!-- Pinheiros cobertos de neve ao fundo -->
-      <polygon points="172,68 180,48 188,68" fill="#061324" clip-path="url(#ntWindowArchClip)"/>
-      <polygon points="170,82 180,62 190,82" fill="#061324" clip-path="url(#ntWindowArchClip)"/>
-      <polygon points="196,75 204,58 212,75" fill="#07172b" clip-path="url(#ntWindowArchClip)"/>
-      <!-- Neve caindo la fora (Camada lenta e Camada rapida 3D) -->
-      <g class="lofi-window-snow-back" clip-path="url(#ntWindowArchClip)">
-        <circle cx="156" cy="24" r="0.8" fill="#e2f1ff" opacity="0.7"/>
-        <circle cx="172" cy="38" r="0.9" fill="#e2f1ff" opacity="0.65"/>
-        <circle cx="192" cy="26" r="0.8" fill="#e2f1ff" opacity="0.7"/>
-        <circle cx="210" cy="44" r="0.9" fill="#e2f1ff" opacity="0.65"/>
-        <circle cx="166" cy="58" r="0.8" fill="#e2f1ff" opacity="0.7"/>
-        <circle cx="186" cy="68" r="0.9" fill="#e2f1ff" opacity="0.65"/>
-      </g>
-      <g class="lofi-window-snow-front" clip-path="url(#ntWindowArchClip)">
-        <circle cx="162" cy="28" r="1.4" fill="#ffffff" opacity="0.95"/>
-        <circle cx="180" cy="42" r="1.3" fill="#ffffff" opacity="0.9"/>
-        <circle cx="204" cy="32" r="1.5" fill="#ffffff" opacity="0.95"/>
-        <circle cx="174" cy="62" r="1.3" fill="#ffffff" opacity="0.9"/>
-        <circle cx="198" cy="66" r="1.4" fill="#ffffff" opacity="0.9"/>
-      </g>
-      <!-- Divisoes da vidraca (mullions) -->
-      <line x1="182" y1="12" x2="182" y2="90" stroke="#361c14" stroke-width="2"/>
-      <line x1="148" y1="50" x2="216" y2="50" stroke="#361c14" stroke-width="1.8"/>
-      <!-- Peitoril da Janela com Neve Acumulada -->
-      <rect x="142" y="88" width="80" height="6" rx="1.5" fill="#361c14" stroke="#4a271c" stroke-width="1"/>
-      <path d="M144 88 Q182 85 220 88 L218 89.5 Q182 87.5 144 89.5 Z" fill="#ebf8ff"/>
-    </g>
-    <!-- LAREIRA RUSTICA DE PEDRA E TIJOLOS (Centro-Esquerda) -->
-    <g class="lofi-fireplace">
-      <!-- Estrutura de pedras chanfradas -->
-      <path d="M18 42 Q70 34 122 42 L122 118 L18 118 Z" fill="#2b1913" stroke="#472a20" stroke-width="2"/>
-      <!-- Cavidade interna do fogo com fuligem escura -->
-      <path d="M30 60 Q70 52 110 60 L110 118 L30 118 Z" fill="#0a0403"/>
-      <!-- Leito de brasas incandescentes e lenha de vidoeiro -->
-      <rect x="38" y="108" width="64" height="8" rx="2" fill="#210c06"/>
-      <ellipse cx="70" cy="112" rx="30" ry="5" fill="#9e1b26"/>
-      <ellipse cx="70" cy="112" rx="22" ry="3.5" fill="#e63946"/>
-      <ellipse cx="70" cy="112" rx="14" ry="2" fill="#ffd166"/>
-      <!-- LABAREDAS VIVAS DE FOGO EM 3 CAMADAS ORGANICAS -->
-      <g class="lofi-fire-flames">
-        <!-- Chamas externas carmesim -->
-        <path d="M46 112 Q54 84 62 94 Q70 74 76 92 Q84 82 94 112 Z" fill="#e63946" opacity="0.85"/>
-        <!-- Chamas intermediarias alaranjadas vibrantes -->
-        <path d="M50 112 Q58 88 66 98 Q71 78 77 96 Q85 88 90 112 Z" fill="#ff7518"/>
-        <!-- Chamas centrais incandescentes douradas/amarelas -->
-        <path d="M58 112 Q64 94 70 102 Q73 86 77 100 Q82 94 82 112 Z" fill="#fff599"/>
-      </g>
-      <!-- Fagulhas que sobem da lareira -->
-      <circle class="lofi-spark lofi-spark-1" cx="66" cy="80" r="1" fill="#fff599"/>
-      <circle class="lofi-spark lofi-spark-2" cx="74" cy="74" r="0.8" fill="#ffd166"/>
-      <!-- Aparador / Prateleira de Carvalho Macico -->
-      <rect x="12" y="38" width="116" height="7" rx="1.5" fill="#3d2116" stroke="#573121" stroke-width="1.2"/>
-      <!-- Guirlanda de Pinheiro e Azevinho com Lacos Vermelhos -->
-      <path d="M14 45 Q42 54 70 46 Q98 54 126 45" stroke="#1f694a" stroke-width="3" fill="none" stroke-linecap="round"/>
-      <circle cx="42" cy="51" r="1.8" fill="#e63946"/><circle cx="98" cy="51" r="1.8" fill="#e63946"/>
-      <circle cx="70" cy="48" r="1.5" fill="#ffd166"/>
-      <!-- Meias de La Aconchegantes Penduradas -->
-      <path d="M36 45 L36 56 L30 58 L30 63 L39 63 L40 56 L40 45 Z" fill="#e63946"/>
-      <rect x="34" y="44" width="8" height="2.5" rx="1" fill="#f0fff4"/>
-      <path d="M96 45 L96 56 L90 58 L90 63 L99 63 L100 56 L100 45 Z" fill="#e63946"/>
-      <rect x="94" y="44" width="8" height="2.5" rx="1" fill="#f0fff4"/>
-      <!-- Caneca de Ceramica de Chocolate Quente com Fumaca Ondulante -->
-      <rect x="64" y="30" width="8" height="9" rx="1.5" fill="#9e1b26" stroke="#c72030" stroke-width="0.8"/>
-      <path d="M72 32 Q76 34.5 72 37" stroke="#9e1b26" stroke-width="1.2" fill="none"/>
-      <!-- Fumaca ondulante subindo suavemente da caneca -->
-      <g class="lofi-steam">
-        <path d="M66 28 Q63 22 67 16" stroke="#ffffff" stroke-width="1" fill="none" opacity="0.65" stroke-linecap="round"/>
-        <path d="M70 28 Q73 21 69 14" stroke="#ffffff" stroke-width="1" fill="none" opacity="0.65" stroke-linecap="round"/>
-      </g>
-    </g>
-  </svg>
-  <div class="lofi-caption">Lareira Acolhedora | Noite de Inverno</div>
-</div>
-<div class="lofi-scene scene-ano_novo">
-  <svg class="lofi-canvas-svg" viewBox="0 0 240 135" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cenario Ano Novo Lofi">
-    <defs>
-      <linearGradient id="nySkyReal" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#030614"/>
-        <stop offset="45%" stop-color="#070f2b"/>
-        <stop offset="80%" stop-color="#111c47"/>
-        <stop offset="100%" stop-color="#1a275c"/>
-      </linearGradient>
-      <radialGradient id="nyLanternGlowReal" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#fff599" stop-opacity="0.95"/>
-        <stop offset="40%" stop-color="#ffd700" stop-opacity="0.6"/>
-        <stop offset="75%" stop-color="#ff9900" stop-opacity="0.2"/>
-        <stop offset="100%" stop-color="#ff6600" stop-opacity="0"/>
-      </radialGradient>
-    </defs>
-    <!-- Ceu Azul Meia-Noite Profundo -->
-    <rect width="240" height="135" fill="url(#nySkyReal)"/>
-    <!-- Estrelas Cintilantes no Ceu -->
-    <g class="lofi-stars">
-      <circle cx="16" cy="14" r="0.8" fill="#ffffff" opacity="0.85"/>
-      <circle cx="58" cy="10" r="1.1" fill="#fff9c4" opacity="0.95"/>
-      <circle cx="98" cy="22" r="0.7" fill="#ffffff" opacity="0.7"/>
-      <circle cx="145" cy="12" r="0.9" fill="#80d8ff" opacity="0.85"/>
-      <circle cx="205" cy="18" r="1" fill="#ffffff" opacity="0.9"/>
-      <circle cx="178" cy="8" r="0.8" fill="#ffd54f" opacity="0.8"/>
-    </g>
-    <!-- FOGOS DE ARTIFICIO CINEMATOGRAFICOS (2 Explosões em Cascata) -->
-    <!-- Fogo 1: Cascata Dourada (Esquerda) -->
-    <g class="lofi-firework lofi-firework-1">
-      <circle cx="0" cy="0" r="2.2" fill="#ffffff"/>
-      <line x1="0" y1="0" x2="0" y2="-18" stroke="#ffd700" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="13" y2="-13" stroke="#fff599" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="18" y2="0" stroke="#ffd700" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="13" y2="13" stroke="#fff599" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="0" y2="18" stroke="#ffd700" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="-13" y2="13" stroke="#fff599" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="-18" y2="0" stroke="#ffd700" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="-13" y2="-13" stroke="#fff599" stroke-width="1.3" stroke-linecap="round"/>
-      <!-- Fagulhas caindo com gravidade -->
-      <circle cx="18" cy="-8" r="0.9" fill="#ffd700"/>
-      <circle cx="-16" cy="6" r="0.9" fill="#ffd700"/>
-      <circle cx="8" cy="20" r="0.9" fill="#fff599"/>
-      <circle cx="-8" cy="20" r="0.9" fill="#fff599"/>
-    </g>
-    <!-- Fogo 2: Estrela Azul Turquesa / Violeta (Direita) -->
-    <g class="lofi-firework lofi-firework-2">
-      <circle cx="0" cy="0" r="2" fill="#ffffff"/>
-      <line x1="0" y1="0" x2="0" y2="-16" stroke="#38bdf8" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="11" y2="-11" stroke="#818cf8" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="16" y2="0" stroke="#38bdf8" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="11" y2="11" stroke="#818cf8" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="0" y2="16" stroke="#38bdf8" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="-11" y2="11" stroke="#818cf8" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="-16" y2="0" stroke="#38bdf8" stroke-width="1.3" stroke-linecap="round"/>
-      <line x1="0" y1="0" x2="-11" y2="-11" stroke="#818cf8" stroke-width="1.3" stroke-linecap="round"/>
-    </g>
-    <!-- HORIZONTE DA CIDADE (Skyline Detalhado com Luzes em Andares) -->
-    <g class="lofi-city-skyline">
-      <!-- Edificios de Fundo (Silhuetas Escuras) -->
-      <rect x="8" y="58" width="24" height="48" fill="#091026"/>
-      <rect x="36" y="66" width="18" height="40" fill="#0c1636"/>
-      <rect x="70" y="48" width="28" height="58" fill="#080e22"/>
-      <polygon points="84,36 82,48 86,48" fill="#080e22"/> <!-- Agulha/Antena -->
-      <circle cx="84" cy="36" r="1" fill="#f43f5e"/> <!-- Luz de alerta de voo -->
-      <rect x="110" y="60" width="22" height="46" fill="#0a122e"/>
-      <rect x="138" y="52" width="32" height="54" fill="#070d20"/>
-      <polygon points="154,42 152,52 156,52" fill="#070d20"/>
-      <circle cx="154" cy="42" r="1" fill="#f43f5e"/>
-      <rect x="178" y="62" width="22" height="44" fill="#0b1433"/>
-      <rect x="206" y="54" width="26" height="52" fill="#080f24"/>
-      <!-- Grade Realista de Janelas Iluminadas em Tons Quentes e Frios -->
-      <g fill="#ffd700" opacity="0.8">
-        <rect x="12" y="64" width="2.8" height="3.5"/><rect x="20" y="72" width="2.8" height="3.5"/><rect x="12" y="82" width="2.8" height="3.5"/>
-        <rect x="40" y="70" width="2.8" height="2.8"/><rect x="46" y="78" width="2.8" height="2.8"/>
-        <rect x="75" y="54" width="2.8" height="4.5"/><rect x="82" y="64" width="2.8" height="4.5"/><rect x="89" y="54" width="2.8" height="4.5"/>
-        <rect x="82" y="76" width="2.8" height="4.5"/><rect x="75" y="86" width="2.8" height="4.5"/>
-        <rect x="114" y="66" width="2.8" height="3.5"/><rect x="122" y="74" width="2.8" height="3.5"/>
-        <rect x="144" y="58" width="2.8" height="4.5"/><rect x="156" y="68" width="2.8" height="4.5"/><rect x="150" y="80" width="2.8" height="4.5"/>
-        <rect x="182" y="68" width="2.8" height="3.5"/><rect x="190" y="76" width="2.8" height="3.5"/>
-        <rect x="212" y="60" width="2.8" height="3.5"/><rect x="220" y="70" width="2.8" height="3.5"/>
-      </g>
-      <g fill="#38bdf8" opacity="0.65">
-        <rect x="20" y="64" width="2.8" height="3.5"/><rect x="75" y="70" width="2.8" height="4.5"/><rect x="156" y="58" width="2.8" height="4.5"/>
-        <rect x="220" y="60" width="2.8" height="3.5"/>
-      </g>
-    </g>
-    <!-- SACADA PANORAMICA MODERNA (Primeiro Plano) -->
-    <rect x="0" y="104" width="240" height="31" fill="#060914" stroke="#1b284a" stroke-width="1.2"/>
-    <rect x="0" y="104" width="240" height="4.5" fill="#141f3d"/>
-    <!-- Gradil de vidro e trilhos de aco da sacada -->
-    <line x1="0" y1="110" x2="240" y2="110" stroke="#25355e" stroke-width="1.6"/>
-    <g stroke="#1e2c4f" stroke-width="1.8">
-      <line x1="24" y1="110" x2="24" y2="135"/><line x1="64" y1="110" x2="64" y2="135"/><line x1="104" y1="110" x2="104" y2="135"/>
-      <line x1="144" y1="110" x2="144" y2="135"/><line x1="184" y1="110" x2="184" y2="135"/><line x1="224" y1="110" x2="224" y2="135"/>
-    </g>
-    <!-- Lanterna de Vidro e Latao Polido (Apoiada na grade a direita) -->
-    <g class="lofi-lantern" transform="translate(184, 82)">
-      <circle class="lofi-lantern-glow" cx="12" cy="14" r="18" fill="url(#nyLanternGlowReal)"/>
-      <polygon points="5,7 19,7 15,2 9,2" fill="#c49b08" stroke="#ffd700" stroke-width="0.8"/>
-      <rect x="5" y="7" width="14" height="15" fill="#0d142b" stroke="#ffd700" stroke-width="1.2"/>
-      <rect x="7" y="9" width="10" height="11" fill="#fff9c4" opacity="0.95"/>
-      <!-- Vela e chama dentro da lanterna -->
-      <rect x="10" y="14" width="4" height="6" fill="#fdfcf0"/>
-      <polygon points="12,10 10.5,14 13.5,14" fill="#ff9900"/>
-      <rect x="4" y="22" width="16" height="3" rx="1" fill="#c49b08"/>
-    </g>
-  </svg>
-  <div class="lofi-caption">Meia-Noite na Cidade | Ano Novo</div>
-</div>
-<div class="lofi-scene scene-pascoa">
-  <svg class="lofi-canvas-svg" viewBox="0 0 240 135" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cenario Pascoa Lofi">
-    <defs>
-      <linearGradient id="psSkyReal" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#0f261d"/>
-        <stop offset="45%" stop-color="#183d2e"/>
-        <stop offset="85%" stop-color="#2a5742"/>
-        <stop offset="100%" stop-color="#3d7559"/>
-      </linearGradient>
-      <radialGradient id="psSunReal" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#fffde7" stop-opacity="0.95"/>
-        <stop offset="45%" stop-color="#fff59d" stop-opacity="0.6"/>
-        <stop offset="80%" stop-color="#81c784" stop-opacity="0.2"/>
-        <stop offset="100%" stop-color="#2a5742" stop-opacity="0"/>
-      </radialGradient>
-      <linearGradient id="psHill1" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#1a3d2c"/>
-        <stop offset="100%" stop-color="#10261b"/>
-      </linearGradient>
-      <linearGradient id="psHill2" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#26543c"/>
-        <stop offset="100%" stop-color="#183626"/>
-      </linearGradient>
-      <linearGradient id="psHill3" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#357050"/>
-        <stop offset="100%" stop-color="#214733"/>
-      </linearGradient>
-    </defs>
-    <!-- Ceu Matinal Primaveril Suave -->
-    <rect width="240" height="135" fill="url(#psSkyReal)"/>
-    <!-- Sol Nascente Suave com Halo Dourado -->
-    <circle cx="204" cy="34" r="28" fill="url(#psSunReal)"/>
-    <circle cx="204" cy="34" r="14" fill="#fff9c4"/>
-    <!-- Nuvem de Manha Suavemente Flutuante -->
-    <g class="lofi-cloud" opacity="0.4">
-      <path d="M35 26 Q45 18 58 22 Q70 16 80 24 Q90 28 82 35 L35 35 Q26 30 35 26 Z" fill="#f0fff4"/>
-    </g>
-    <!-- Colinas Onduladas Verdes (3 Camadas de Profundidade) -->
-    <path d="M0 84 Q70 66 140 78 Q200 88 240 72 L240 135 L0 135 Z" fill="url(#psHill1)"/>
-    <path d="M0 96 Q80 84 160 94 Q210 100 240 90 L240 135 L0 135 Z" fill="url(#psHill2)"/>
-    <path d="M0 110 Q90 100 170 108 Q210 114 240 106 L240 135 L0 135 Z" fill="url(#psHill3)"/>
-    <!-- Flores do Campo Delicadas (Margaridas, Lavanda e Trevo) -->
-    <g>
-      <circle cx="32" cy="116" r="2.2" fill="#fff59d"/><circle cx="32" cy="116" r="4.2" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-dasharray="2,2"/>
-      <circle cx="92" cy="120" r="1.8" fill="#fff59d"/><circle cx="92" cy="120" r="3.6" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-dasharray="2,2"/>
-      <circle cx="218" cy="118" r="2.2" fill="#fff59d"/><circle cx="218" cy="118" r="4.2" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-dasharray="2,2"/>
-      <circle cx="56" cy="114" r="2.2" fill="#b794f4"/><circle cx="178" cy="115" r="2.2" fill="#b794f4"/>
-      <circle cx="148" cy="122" r="1.8" fill="#f48fb1"/>
-    </g>
-    <!-- COELHINHO REALISTA MACIO ACONCHEGADO NA RELVA (Centro) -->
-    <g class="lofi-bunny" transform="translate(122, 84)">
-      <!-- Sombra do coelho na grama -->
-      <ellipse cx="16" cy="26" rx="14" ry="4" fill="#0d2117" opacity="0.6"/>
-      <!-- Corpo macio com degradê de pelagem -->
-      <ellipse cx="14" cy="19" rx="10" ry="9" fill="#f5fdf7"/>
-      <circle cx="23" cy="12" r="6.8" fill="#f5fdf7"/>
-      <circle cx="4" cy="20" r="3.5" fill="#ffffff"/> <!-- Rabinho pompom -->
-      <!-- Orelhas Macias com Interior Rosado e Movimento Realista -->
-      <g class="lofi-bunny-ears">
-        <ellipse cx="22" cy="3" rx="2.4" ry="6.8" fill="#f5fdf7" stroke="#e9d8fd" stroke-width="0.8"/>
-        <ellipse cx="22" cy="3" rx="1.3" ry="4.8" fill="#fbb6ce"/>
-        <ellipse cx="26" cy="3" rx="2.4" ry="6.8" fill="#f5fdf7" stroke="#e9d8fd" stroke-width="0.8"/>
-        <ellipse cx="26" cy="3" rx="1.3" ry="4.8" fill="#fbb6ce"/>
-      </g>
-      <!-- Olhinho e Focinho Delicado -->
-      <circle cx="26" cy="11" r="1.1" fill="#1b3d2e"/>
-      <polygon points="28,13 29,14 27,14" fill="#fbb6ce"/>
-      <!-- Ovo de Pascoa Decorado Delicadamente ao Lado do Coelho -->
-      <ellipse cx="36" cy="22" rx="4.5" ry="6" fill="#b794f4"/>
-      <line x1="32" y1="22" x2="40" y2="22" stroke="#faf089" stroke-width="1.3"/>
-      <line x1="32.5" y1="20" x2="39.5" y2="20" stroke="#81e6d9" stroke-width="0.8"/>
-    </g>
-    <!-- Borboleta Colorida Esvoacante -->
-    <g class="lofi-butterfly" transform="translate(68, 74)">
-      <ellipse cx="3.5" cy="4" rx="3.5" ry="2.6" fill="#b794f4"/>
-      <ellipse cx="3.5" cy="8.5" rx="2.6" ry="2.2" fill="#ffd54f"/>
-      <line x1="0" y1="2" x2="0" y2="11" stroke="#1b3d2e" stroke-width="0.9"/>
-    </g>
-    <!-- Folhas de Grama Fresca Balancando com o Vento -->
-    <g class="lofi-grass">
-      <path d="M14 135 Q18 118 10 106 M24 135 Q20 120 28 110 M46 135 Q52 118 44 104" stroke="#48bb78" stroke-width="1.6" fill="none"/>
-      <path d="M104 135 Q108 120 100 108 M116 135 Q112 116 120 104 M184 135 Q188 118 180 106" stroke="#38a169" stroke-width="1.6" fill="none"/>
-    </g>
-  </svg>
-  <div class="lofi-caption">Brisa de Primavera | Manha Serena</div>
-</div>
-<div class="lofi-scene scene-default">
-  <svg class="lofi-canvas-svg" viewBox="0 0 240 135" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cenario Classico Lofi">
-    <defs>
-      <linearGradient id="defWoodDesk" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#2a1a0e"/>
-        <stop offset="50%" stop-color="#3d2716"/>
-        <stop offset="100%" stop-color="#1c1108"/>
-      </linearGradient>
-      <radialGradient id="defLampBeam" cx="82%" cy="14%" r="85%">
-        <stop offset="0%" stop-color="#fffde7" stop-opacity="0.85"/>
-        <stop offset="35%" stop-color="#ffecb3" stop-opacity="0.5"/>
-        <stop offset="70%" stop-color="#ffd54f" stop-opacity="0.2"/>
-        <stop offset="100%" stop-color="#2a1a0e" stop-opacity="0"/>
-      </radialGradient>
-      <linearGradient id="defBrassMetal" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#ffffff"/>
-        <stop offset="25%" stop-color="#fff275"/>
-        <stop offset="65%" stop-color="#ffd700"/>
-        <stop offset="100%" stop-color="#b38600"/>
-      </linearGradient>
-    </defs>
-    <!-- Superficie da Escrivaninha de Mogno -->
-    <rect width="240" height="135" fill="url(#defWoodDesk)"/>
-    <!-- Cone Aconchegante de Luz da Luminaria de Mesa -->
-    <rect class="lofi-lamp-warmth" width="240" height="135" fill="url(#defLampBeam)"/>
-    <line x1="0" y1="104" x2="240" y2="104" stroke="#332216" stroke-width="1.6"/>
-    <!-- Caderno de Estudos com Diagramas e Manuscrito (Esquerda) -->
-    <g transform="translate(22, 74)">
-      <polygon points="0,16 30,10 60,16 60,42 30,36 0,42" fill="#24180d" stroke="#7a5a26" stroke-width="1.2"/>
-      <polygon points="2,17 29,11 29,35 2,39" fill="#f4ebd9"/>
-      <polygon points="31,11 58,17 58,39 31,35" fill="#e8dac0"/>
-      <line x1="6" y1="18" x2="25" y2="16" stroke="#8c7553" stroke-width="0.9"/>
-      <line x1="6" y1="23" x2="25" y2="21" stroke="#8c7553" stroke-width="0.9"/>
-      <line x1="6" y1="28" x2="20" y2="26" stroke="#8c7553" stroke-width="0.9"/>
-      <!-- Esboco astronomico no caderno -->
-      <circle cx="44" cy="24" r="5.5" fill="none" stroke="#8c7553" stroke-width="0.9"/>
-      <line x1="44" y1="24" x2="48" y2="21" stroke="#8c7553" stroke-width="0.9"/>
-      <ellipse cx="44" cy="24" rx="7" ry="2.5" fill="none" stroke="#8c7553" stroke-width="0.6"/>
-    </g>
-    <!-- ENGRENAGENS POLIDAS DE PRECISAO HEXTECH (Centro-Esquerda) -->
-    <g class="lofi-cogs" transform="translate(100, 56)">
-      <!-- Engrenagem Grande com Raios Abertos -->
-      <g class="lofi-cog-large">
-        <circle cx="0" cy="0" r="17" fill="none" stroke="url(#defBrassMetal)" stroke-width="4.5" stroke-dasharray="4.2,4.6"/>
-        <circle cx="0" cy="0" r="13" fill="#171009" stroke="url(#defBrassMetal)" stroke-width="1.6"/>
-        <line x1="-12" y1="0" x2="12" y2="0" stroke="url(#defBrassMetal)" stroke-width="1.4"/>
-        <line x1="0" y1="-12" x2="0" y2="12" stroke="url(#defBrassMetal)" stroke-width="1.4"/>
-        <circle cx="0" cy="0" r="3.5" fill="url(#defBrassMetal)"/>
-      </g>
-      <!-- Engrenagem Secundaria que Engrena e Contragira -->
-      <g class="lofi-cog-small" transform="translate(24, 18)">
-        <circle cx="0" cy="0" r="11" fill="none" stroke="url(#defBrassMetal)" stroke-width="3.5" stroke-dasharray="3.2,3.8"/>
-        <circle cx="0" cy="0" r="8" fill="#171009" stroke="url(#defBrassMetal)" stroke-width="1.4"/>
-        <circle cx="0" cy="0" r="2.5" fill="url(#defBrassMetal)"/>
-      </g>
-    </g>
-    <!-- AMPULHETA DE CRISTAL E LATAO COM AREIA DOURADA REALISTA (Centro-Direita) -->
-    <g class="lofi-hourglass" transform="translate(156, 42)">
-      <!-- Placas superior e inferior usinadas -->
-      <rect x="-16" y="0" width="32" height="4.5" rx="1.8" fill="url(#defBrassMetal)"/>
-      <rect x="-16" y="60" width="32" height="4.5" rx="1.8" fill="url(#defBrassMetal)"/>
-      <!-- Colunas de suporte de latao polido -->
-      <line x1="-13" y1="4.5" x2="-13" y2="60" stroke="url(#defBrassMetal)" stroke-width="1.8"/>
-      <line x1="13" y1="4.5" x2="13" y2="60" stroke="url(#defBrassMetal)" stroke-width="1.8"/>
-      <!-- Bulbos de cristal transparente com brilho de vidro -->
-      <path d="M-10 6 Q-10 23 0 32 Q10 23 10 6 Z" fill="#ffffff" fill-opacity="0.1" stroke="#d4af37" stroke-width="1"/>
-      <path d="M-10 58 Q-10 41 0 32 Q10 41 10 58 Z" fill="#ffffff" fill-opacity="0.1" stroke="#d4af37" stroke-width="1"/>
-      <!-- Areia dourada no bulbo superior -->
-      <path d="M-8 14 Q0 26 8 14 Z" fill="#ffd54f"/>
-      <!-- Fio contínuo de areia escorrendo pelo gargalo -->
-      <line class="lofi-sand-stream" x1="0" y1="24" x2="0" y2="55" stroke="#ffd54f" stroke-width="1.6" stroke-dasharray="2.5,2"/>
-      <!-- Monticulo de areia acumulada no bulbo inferior -->
-      <path d="M-8 57 Q0 48 8 57 Z" fill="#ffd54f"/>
-      <!-- Brilho especular no vidro -->
-      <path d="M-7 10 Q-8 22 -3 28" stroke="#ffffff" stroke-width="0.8" fill="none" opacity="0.6"/>
-      <path d="M7 38 Q8 50 3 56" stroke="#ffffff" stroke-width="0.8" fill="none" opacity="0.6"/>
-    </g>
-    <!-- Luminaria de Leitura Shaded Brass Lamp (Extremo Direito) -->
-    <g transform="translate(212, 14)">
-      <path d="M14 90 L14 24 Q14 12 -6 10" stroke="url(#defBrassMetal)" stroke-width="3.5" fill="none"/>
-      <ellipse cx="-9" cy="14" rx="13" ry="6.5" fill="url(#defBrassMetal)"/>
-      <circle cx="-9" cy="17" r="4.5" fill="#fff9c4"/>
-    </g>
-  </svg>
-  <div class="lofi-caption">Oficina do Relojoeiro | Foco Suave</div>
-</div>
-<div class="lofi-player" id="lofi-player">
+    _LOFI_BANNERS_HTML + '''<div class="lofi-player" id="lofi-player">
   <div class="yt-audio-host" aria-hidden="true">
     <div id="yt-player-music"></div>
     <div id="yt-player-fire"></div>
@@ -1416,68 +919,194 @@ html:not([data-theme]) .brand-logo .theme-logo.logo-default,
 .brand-title {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   font-family: var(--font-display) !important;
   font-size: 20px !important;
   font-weight: 700 !important;
   letter-spacing: 0.08em !important;
-  text-transform: uppercase !important;
   line-height: 1.15 !important;
   margin: 0 !important;
   padding: 0 !important;
 }
 
 .brand-title .brand-name {
-  font-family: var(--font-display) !important;
-  font-size: 20px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.08em !important;
-  text-transform: uppercase !important;
-  display: inline-block !important;
-  background: linear-gradient(180deg, #fbefc9 0%, #c8aa6e 55%, #8f6d30 100%) !important;
-  -webkit-background-clip: text !important;
-  background-clip: text !important;
-  -webkit-text-fill-color: transparent !important;
-  color: #c8aa6e !important;
-}
-
-.brand-title-icon {
   display: none;
-  width: 28px !important;
-  height: 28px !important;
-  flex-shrink: 0;
-  vertical-align: middle;
-  filter: drop-shadow(0 2px 7px rgba(0, 0, 0, 0.55));
+  position: relative;
+  isolation: isolate;
+  align-items: center;
+  white-space: nowrap;
+  color: #d6bb82;
+  --brand-clock-face: #221b14;
 }
 
-[data-theme="halloween"] .brand-title-icon.title-icon-halloween {
-  display: inline-block;
-  animation: titleIconFloat 3.2s ease-in-out infinite alternate;
+html:not([data-theme]) .brand-name-clock,
+[data-theme="dark"] .brand-name-clock,
+[data-theme="light"] .brand-name-clock,
+[data-theme="pascoa"] .brand-name-pascoa,
+[data-theme="halloween"] .brand-name-halloween,
+[data-theme="natal"] .brand-name-natal,
+[data-theme="ano_novo"] .brand-name-ano_novo {
+  display: inline-flex;
 }
 
-[data-theme="natal"] .brand-title-icon.title-icon-natal {
-  display: inline-block;
-  animation: titleIconFloat 3.2s ease-in-out infinite alternate;
+.brand-letters {
+  background: linear-gradient(180deg, #fbefc9 0%, #c8aa6e 55%, #a48043 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
-[data-theme="ano_novo"] .brand-title-icon.title-icon-ano_novo {
-  display: inline-block;
-  animation: titleIconFloat 3.2s ease-in-out infinite alternate;
+[data-theme="light"] .brand-name-clock {
+  color: #805725;
+  --brand-clock-face: #fff3d9;
 }
 
-[data-theme="pascoa"] .brand-title-icon.title-icon-pascoa {
-  display: inline-block;
-  animation: titleIconFloat 3.2s ease-in-out infinite alternate;
+[data-theme="light"] .brand-letters {
+  background-image: linear-gradient(180deg, #805725, #4e351e);
 }
 
-@keyframes titleIconFloat {
-  0% { transform: translateY(0px) rotate(0deg); }
-  50% { transform: translateY(-2px) rotate(3deg); }
-  100% { transform: translateY(0px) rotate(0deg); }
+.brand-glyph {
+  width: .92em;
+  height: .98em;
+  flex: none;
+  margin-inline: .04em .09em;
 }
 
-html.sidebar-collapsed .brand-title-icon {
-  display: none !important;
+.brand-glyph.glyph-tree,
+.brand-glyph.glyph-flower {
+  width: .75em;
+  height: 1.06em;
+}
+
+.brand-pendulum,
+.brand-fireworks,
+.brand-snow,
+.brand-petals {
+  position: absolute;
+  z-index: 0;
+  inset: -.48em 0 auto;
+  width: 100%;
+  height: 1.9em;
+  pointer-events: none;
+}
+
+.brand-letters,
+.brand-glyph { position: relative; z-index: 1; }
+
+.brand-petals {
+  inset: -.54em auto auto 0;
+  width: calc(100% + 1.65em);
+  height: 2.2em;
+  overflow: visible;
+}
+.brand-pendulum {
+  inset: -.94em auto auto calc(100% + 1.55em);
+  width: 1.47em;
+  height: auto;
+  aspect-ratio: 5 / 8;
+  background: url(/assets/title/clock_pendulum.png) 0% 0% / 2400% 100% no-repeat;
+}
+.brand-fireworks { opacity: .92; }
+.brand-petals { opacity: .82; }
+.brand-snow {
+  z-index: 2;
+  inset: -.66em auto auto -.35em;
+  width: calc(100% + .9em);
+  height: auto;
+  aspect-ratio: 8 / 3;
+  background: url(/assets/title/natal_snow.png) no-repeat;
+  background-size: 3200% 100%;
+  background-position-x: calc(1200% / 31);
+}
+
+.brand-burst {
+  --burst-size: 2.4em;
+  position: absolute;
+  width: var(--burst-size);
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  background: url(/assets/title/ano_novo_fireworks.png) no-repeat;
+  background-size: 2400% 300%;
+  background-position-x: calc(-9 * var(--burst-size));
+}
+
+.brand-burst-gold { left: 10%; top: -.18em; background-position-y: 0%; }
+.brand-burst-rose { left: 55%; top: -.31em; background-position-y: 50%; }
+.brand-burst-blue { left: calc(100% + .74em); top: -.08em; background-position-y: 100%; }
+
+.brand-cat {
+  position: absolute;
+  --brand-cat-width: 3.6em;
+  width: var(--brand-cat-width);
+  aspect-ratio: 144 / 76;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+
+.brand-cat-idle {
+  z-index: 0;
+  right: -.24em;
+  bottom: .32em;
+  background-image: url(/assets/title/halloween_cat_idle.png);
+  background-size: 1600% 100%;
+}
+
+.brand-name-halloween { margin-top: .3em; }
+
+.brand-cat-walk {
+  display: none;
+  z-index: 0;
+  left: -.2em;
+  bottom: .1em;
+  background-image: url(/assets/title/halloween_cat_walk.png);
+  background-size: 400% 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html:not(.fx-paused) .brand-cat-idle {
+    animation: brand-cat-idle 3.2s steps(16, end) infinite, brand-cat-settle 12s infinite;
+  }
+  html:not(.fx-paused) .brand-cat-walk {
+    display: block;
+    animation: brand-cat-steps .62s steps(4, end) infinite, brand-cat-cross 12s linear infinite;
+  }
+  html:not(.fx-paused) .brand-snow-fall { animation: brand-snow-fall 3.8s steps(32, jump-none) infinite; }
+  html:not(.fx-paused) .brand-burst { animation: brand-burst 3.1s steps(24, end) infinite; }
+  html:not(.fx-paused) .brand-burst-rose { animation-delay: -1.04s; }
+  html:not(.fx-paused) .brand-burst-blue { animation-delay: -2.08s; }
+  html:not(.fx-paused) .brand-pendulum { animation: brand-pendulum 2.1s steps(24, jump-none) infinite; }
+  html:not(.fx-paused) .brand-petal-drift { animation: brand-petal-drift 4.4s linear infinite; }
+  html:not(.fx-paused) .brand-petal-late { animation-delay: -2.2s; }
+}
+
+@keyframes brand-cat-idle { to { background-position-x: calc(-16 * var(--brand-cat-width)); } }
+@keyframes brand-cat-steps { to { background-position-x: calc(-4 * var(--brand-cat-width)); } }
+@keyframes brand-cat-settle {
+  0%, 31%, 97%, 100% { opacity: 0; }
+  38%, 93% { opacity: 1; }
+}
+@keyframes brand-cat-cross {
+  0% { opacity: 0; transform: translateX(-.3em); }
+  5% { opacity: 1; }
+  27% { opacity: 1; }
+  34%, 100% { opacity: 0; transform: translateX(3.5em); }
+}
+@keyframes brand-snow-fall {
+  from { background-position-x: 0%; }
+  to { background-position-x: 100%; }
+}
+@keyframes brand-burst {
+  from { background-position-x: 0; }
+  to { background-position-x: calc(-24 * var(--burst-size)); }
+}
+@keyframes brand-pendulum {
+  from { background-position-x: 0%; }
+  to { background-position-x: 100%; }
+}
+@keyframes brand-petal-drift {
+  0% { transform: translate(-11px, -3px); opacity: .2; }
+  26% { opacity: 1; }
+  62% { transform: translate(6px, 5px); opacity: .88; }
+  100% { transform: translate(19px, 1px); opacity: .2; }
 }
 
 html:not(.fx-paused) .brand-logo {
@@ -1509,15 +1138,19 @@ html.sidebar-collapsed .sidebar-lofi-wrap {
 [data-theme="natal"] .lofi-scene.scene-natal { display: block; }
 [data-theme="ano_novo"] .lofi-scene.scene-ano_novo { display: block; }
 [data-theme="pascoa"] .lofi-scene.scene-pascoa { display: block; }
-html:not([data-theme]) .lofi-scene.scene-default,
-[data-theme="dark"] .lofi-scene.scene-default,
-[data-theme="light"] .lofi-scene.scene-default { display: block; }
+html:not([data-theme]) .lofi-scene.scene-dark,
+[data-theme="dark"] .lofi-scene.scene-dark,
+[data-theme="light"] .lofi-scene.scene-light { display: block; }
 
-.lofi-canvas-svg {
-  display: block;
-  width: 100%;
-  height: auto;
+.lofi-banner {
   aspect-ratio: 16 / 9;
+  background: #15100e var(--lofi-animation) center / cover no-repeat;
+}
+
+html.fx-paused .lofi-banner { background-image: var(--lofi-still); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lofi-banner { background-image: var(--lofi-still); }
 }
 
 .lofi-caption {
@@ -1739,231 +1372,132 @@ html.fx-paused .lofi-player.is-playing .lofi-eq-bar {
   top: -9999px;
 }
 
-/* ==================== ANIMATION KEYFRAMES ==================== */
-/* Halloween */
-html:not(.fx-paused) .lofi-pumpkin-glow {
-  animation: lofiPumpkinFlicker 3s ease-in-out infinite;
-  transform-origin: center;
-}
-@keyframes lofiPumpkinFlicker {
-  0%, 100% { opacity: 0.85; filter: drop-shadow(0 0 3px rgba(255, 140, 0, 0.6)); }
-  45% { opacity: 1; filter: drop-shadow(0 0 8px rgba(255, 220, 50, 0.95)); }
-  75% { opacity: 0.9; filter: drop-shadow(0 0 4px rgba(255, 120, 0, 0.7)); }
+/* Calendário de lançamentos em lote */
+.batch-calendar-card {
+  border-top: 2px solid var(--primary);
 }
 
-html:not(.fx-paused) .lofi-cat-tail {
-  animation: lofiCatTail 4s ease-in-out infinite alternate;
-  transform-origin: 14px 20px;
-}
-@keyframes lofiCatTail {
-  0% { transform: rotate(-6deg); }
-  100% { transform: rotate(12deg); }
-}
-
-html:not(.fx-paused) .lofi-cat-eyes {
-  animation: lofiCatBlink 4.5s ease-in-out infinite;
-  transform-origin: 9px 7px;
-}
-@keyframes lofiCatBlink {
-  0%, 92%, 100% { transform: scaleY(1); }
-  96% { transform: scaleY(0.1); }
+.batch-calendar-header,
+.batch-calendar-nav,
+.batch-calendar-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-html:not(.fx-paused) .lofi-wheat-1 {
-  animation: lofiWheatSway1 4.2s ease-in-out infinite alternate;
-  transform-origin: bottom center;
-}
-@keyframes lofiWheatSway1 {
-  0% { transform: rotate(-2deg); }
-  100% { transform: rotate(3deg); }
+.batch-calendar-header {
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin-bottom: 16px;
 }
 
-html:not(.fx-paused) .lofi-wheat-2 {
-  animation: lofiWheatSway2 3.8s ease-in-out infinite alternate;
-  transform-origin: bottom center;
+#batch-calendar-heading {
+  font-size: 23px;
 }
-@keyframes lofiWheatSway2 {
-  0% { transform: rotate(2.5deg); }
-  100% { transform: rotate(-2.5deg); }
+#batch-calendar-heading::first-letter { text-transform: uppercase; }
+
+.batch-calendar-header p,
+.batch-calendar-editor p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
-html:not(.fx-paused) .lofi-ember-1 {
-  animation: lofiEmberDrift1 3.5s ease-in infinite;
-}
-html:not(.fx-paused) .lofi-ember-2 {
-  animation: lofiEmberDrift2 4.2s ease-in infinite 1.2s;
-}
-html:not(.fx-paused) .lofi-ember-3 {
-  animation: lofiEmberDrift1 4.8s ease-in infinite 2.1s;
-}
-@keyframes lofiEmberDrift1 {
-  0% { transform: translateY(0) translateX(0); opacity: 0; }
-  30% { opacity: 0.85; }
-  80% { opacity: 0.6; }
-  100% { transform: translateY(-26px) translateX(6px); opacity: 0; }
-}
-@keyframes lofiEmberDrift2 {
-  0% { transform: translateY(0) translateX(0); opacity: 0; }
-  25% { opacity: 0.9; }
-  75% { opacity: 0.5; }
-  100% { transform: translateY(-24px) translateX(-5px); opacity: 0; }
+.batch-calendar-nav input { width: auto; }
+.batch-calendar-nav .btn { min-height: 36px; }
+.batch-calendar-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 22%);
+  align-items: start;
+  gap: 16px;
 }
 
-/* Natal */
-html:not(.fx-paused) .lofi-fire-flames {
-  animation: lofiFireFlicker 2.6s ease-in-out infinite;
-  transform-origin: 70px 114px;
-}
-@keyframes lofiFireFlicker {
-  0%, 100% { transform: scaleY(0.95) skewX(-1.5deg); opacity: 0.92; }
-  35% { transform: scaleY(1.06) skewX(2deg); opacity: 1; }
-  70% { transform: scaleY(0.97) skewX(-1deg); opacity: 0.95; }
+.batch-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
 }
 
-html:not(.fx-paused) .lofi-hearth-glow {
-  animation: lofiHearthPulse 3.2s ease-in-out infinite;
-}
-@keyframes lofiHearthPulse {
-  0%, 100% { opacity: 0.65; }
-  50% { opacity: 0.95; }
-}
-
-html:not(.fx-paused) .lofi-window-snow {
-  animation: lofiWindowSnowFall 3.8s linear infinite;
-}
-@keyframes lofiWindowSnowFall {
-  0% { transform: translateY(-20px) translateX(0); }
-  100% { transform: translateY(45px) translateX(-10px); }
+.batch-calendar-weekday {
+  padding: 4px 0 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
 }
 
-html:not(.fx-paused) .lofi-steam {
-  animation: lofiSteamRise 3s ease-out infinite;
-}
-@keyframes lofiSteamRise {
-  0% { transform: translateY(0) scaleX(0.85); opacity: 0; }
-  30% { opacity: 0.7; }
-  100% { transform: translateY(-12px) scaleX(1.3); opacity: 0; }
-}
-
-/* Ano Novo */
-html:not(.fx-paused) .lofi-stars circle {
-  animation: lofiStarTwinkle 2.8s ease-in-out infinite alternate;
-}
-html:not(.fx-paused) .lofi-stars circle:nth-child(2n) {
-  animation-delay: 1.4s;
-}
-@keyframes lofiStarTwinkle {
-  0% { opacity: 0.35; transform: scale(0.85); }
-  100% { opacity: 1; transform: scale(1.15); }
+.batch-calendar-day {
+  min-height: 84px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
 }
 
-html:not(.fx-paused) .lofi-firework-1 {
-  animation: lofiFireworkBurst1 4s cubic-bezier(0.1, 0.7, 0.3, 1) infinite;
-  transform-origin: 65px 36px;
+.batch-calendar-day:hover { border-color: var(--primary); }
+.batch-calendar-day[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: var(--primary-light);
 }
-@keyframes lofiFireworkBurst1 {
-  0% { transform: translate(65px, 36px) scale(0.1); opacity: 0; }
-  15% { opacity: 1; }
-  65% { transform: translate(65px, 36px) scale(1.05); opacity: 0.8; }
-  100% { transform: translate(65px, 36px) scale(1.2); opacity: 0; }
+.batch-calendar-day[aria-current="date"] > strong {
+  border-radius: 5px;
+  color: var(--bg-card);
+  background: var(--primary);
+  padding: 0 5px;
+}
+.batch-calendar-day:focus-visible { outline: 2px solid var(--primary-text); }
+
+.batch-calendar-event,
+.batch-calendar-legend > span {
+  display: block;
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-size: 11px;
 }
 
-html:not(.fx-paused) .lofi-firework-2 {
-  animation: lofiFireworkBurst2 4s cubic-bezier(0.1, 0.7, 0.3, 1) infinite 2s;
-  transform-origin: 170px 30px;
-}
-@keyframes lofiFireworkBurst2 {
-  0% { transform: translate(170px, 30px) scale(0.1); opacity: 0; }
-  15% { opacity: 1; }
-  65% { transform: translate(170px, 30px) scale(1.05); opacity: 0.8; }
-  100% { transform: translate(170px, 30px) scale(1.2); opacity: 0; }
-}
-
-html:not(.fx-paused) .lofi-lantern-glow {
-  animation: lofiLanternPulse 3.4s ease-in-out infinite;
-}
-@keyframes lofiLanternPulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 0.95; }
+.batch-calendar-event {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-/* Pascoa */
-html:not(.fx-paused) .lofi-bunny-ears {
-  animation: lofiBunnyEarTwitch 5s ease-in-out infinite;
-  transform-origin: 23px 10px;
-}
-@keyframes lofiBunnyEarTwitch {
-  0%, 82%, 100% { transform: rotate(0deg); }
-  86% { transform: rotate(-7deg); }
-  92% { transform: rotate(4deg); }
-}
+.batch-calendar-legend { margin-top: 12px; }
+.calendar-holiday { color: color-mix(in srgb, var(--warning) 72%, var(--text-main)); background: var(--warning-bg); }
+.calendar-absence { color: color-mix(in srgb, var(--danger) 72%, var(--text-main)); background: var(--danger-bg); }
+.calendar-note { color: var(--text-muted); background: var(--primary-light); }
 
-html:not(.fx-paused) .lofi-butterfly {
-  animation: lofiButterflyFly 5s ease-in-out infinite alternate;
+.batch-calendar-editor {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-card);
 }
-@keyframes lofiButterflyFly {
-  0% { transform: translate(70px, 78px) scaleX(1); }
-  25% { transform: translate(73px, 73px) scaleX(0.4); }
-  50% { transform: translate(78px, 76px) scaleX(1); }
-  75% { transform: translate(74px, 71px) scaleX(0.3); }
-  100% { transform: translate(70px, 78px) scaleX(1); }
-}
+.batch-calendar-editor label { font-size: 13px; font-weight: 600; }
+.batch-calendar-editor input { width: 100%; }
+#batch-calendar-remove[hidden], .batch-calendar-editor p:empty { display: none; }
 
-html:not(.fx-paused) .lofi-cloud {
-  animation: lofiCloudMove 12s ease-in-out infinite alternate;
+@media (max-width: 1100px) {
+  .batch-calendar-layout { grid-template-columns: minmax(0, 1fr); }
 }
-@keyframes lofiCloudMove {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(20px); }
-}
-
-html:not(.fx-paused) .lofi-grass path {
-  animation: lofiGrassWind 3.6s ease-in-out infinite alternate;
-  transform-origin: bottom center;
-}
-@keyframes lofiGrassWind {
-  0% { transform: rotate(-2deg); }
-  100% { transform: rotate(3deg); }
-}
-
-/* Classico / Default */
-html:not(.fx-paused) .lofi-cog-large {
-  animation: lofiCogRotate 14s linear infinite;
-  transform-origin: 0 0;
-}
-html:not(.fx-paused) .lofi-cog-small {
-  animation: lofiCogRotateRev 9.3s linear infinite;
-  transform-origin: 0 0;
-}
-@keyframes lofiCogRotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-@keyframes lofiCogRotateRev {
-  from { transform: translate(22px, 16px) rotate(0deg); }
-  to { transform: translate(22px, 16px) rotate(-360deg); }
-}
-
-html:not(.fx-paused) .lofi-sand-stream {
-  animation: lofiSandPulse 1.8s ease-in-out infinite;
-}
-@keyframes lofiSandPulse {
-  0%, 100% { opacity: 0.9; }
-  50% { opacity: 0.45; }
-}
-
-html:not(.fx-paused) .lofi-lamp-warmth {
-  animation: lofiLampBreathe 4.5s ease-in-out infinite alternate;
-}
-@keyframes lofiLampBreathe {
-  0% { opacity: 0.75; }
-  100% { opacity: 1; }
-}
-
-/* Reducao de movimento e pausa global */
-html.fx-paused .lofi-scene * {
-  animation: none !important;
-  animation-play-state: paused !important;
+@media (max-width: 540px) {
+  .batch-calendar-grid { gap: 4px; }
+  .batch-calendar-day { min-height: 60px; padding: 4px; font-size: 13px; }
+  .batch-calendar-event { font-size: 10px; padding-inline: 2px; }
 }
 
 /* ==================== SELETOR DE TEMAS DROPDOWN ==================== */
@@ -2135,23 +1669,9 @@ html.fx-paused .theme-dropdown-wrap.open .theme-menu {
 
 .brand-text {
   min-width: 0;
-  overflow: hidden;
   white-space: nowrap;
   max-width: 190px;
   transition: max-width 0.3s var(--ease), opacity 0.25s ease;
-}
-
-.brand-text h1 {
-  font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  background: linear-gradient(180deg, #fbefc9 0%, #c8aa6e 55%, #8f6d30 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: #c8aa6e;
 }
 
 .brand-text span#sidebar-version-label,
@@ -5894,6 +5414,93 @@ html.fx-paused *::after {
   .content {
     padding: 16px 14px 32px;
   }
+}
+
+
+/* ==================== MODAL CONTAINER & DDS PARTITIONS ==================== */
+.modal-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius, 12px);
+  color: var(--text-main);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+.dds-partition-card {
+  flex: 1;
+  min-width: 260px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 8px);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dds-partition-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.dds-partition-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dds-partition-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ==================== DDS IMAGENS & DROP ZONE ==================== */
+.dds-image-upload-zone {
+  border: 2px dashed var(--border-strong, #334155);
+  border-radius: var(--radius-sm, 8px);
+  padding: 16px;
+  text-align: center;
+  background: var(--bg-subtle, rgba(255,255,255,0.02));
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.dds-image-upload-zone:hover, .dds-image-upload-zone.drag-over {
+  border-color: var(--primary, #8b5cf6);
+  background: rgba(139, 92, 246, 0.06);
+}
+.dds-image-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.dds-image-thumb-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.dds-image-thumb-card img {
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+  background: #000;
+}
+.dds-image-thumb-card .thumb-info {
+  padding: 4px 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
 }
 """
 

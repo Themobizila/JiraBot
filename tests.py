@@ -106,10 +106,14 @@ class TestTimeWindowAndCustom(unittest.TestCase):
 
 class TestStorageAndDuration(unittest.TestCase):
     def setUp(self):
+        from jira_client import JiraClient
+        JiraClient.invalidate_ticket_cache()
         self.test_dir = Path(tempfile.mkdtemp())
         self.state_mgr = StateManager(base_dir=self.test_dir)
 
     def tearDown(self):
+        from jira_client import JiraClient
+        JiraClient.invalidate_ticket_cache()
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_duration_calculation(self):
@@ -609,6 +613,67 @@ class TestWebPanelAndShiftSchedule(unittest.TestCase):
         self.assertEqual(c1["total_seconds"] + c2["total_seconds"], 21600)
 
 
+    def test_batch_calendar_checks_dates_before_posting_to_jira(self):
+        from web_panel import JiraBotWebHandler
+
+        for allowed_weekdays, expected_indices in [
+            (list(range(5)), [2]),
+            (list(range(7)), [1, 2]),
+        ]:
+            with self.subTest(allowed_weekdays=allowed_weekdays):
+                handler = MagicMock(path="/api/worklogs/batch-create")
+                handler._read_json_body.return_value = {
+                    "entries": [
+                        {"date": day, "issue_key": "TEST-1", "start_hm": "08:00", "end_hm": "10:00"}
+                        for day in ("2026-12-25", "2026-12-26", "2026-12-28")
+                    ],
+                    "no_comment": True,
+                    "allowed_weekdays": allowed_weekdays,
+                }
+                with patch("web_panel.BotConfig.load", return_value=BotConfig()), \
+                     patch("web_panel.StateManager"), patch("web_panel.load_calendar_absences", return_value={}), \
+                     patch("web_panel.JiraClient") as jira:
+                    jira.return_value.submit_worklog.return_value = {"status": "success", "worklog_id": "1"}
+                    JiraBotWebHandler.do_POST(handler)
+                result = handler._send_json.call_args.args[0]
+                self.assertEqual(result["created_indices"], expected_indices)
+                self.assertIn("Natal", result["errors"][0])
+                self.assertEqual(jira.return_value.submit_worklog.call_count, len(expected_indices))
+
+    def test_calendar_absence_persists_and_blocks_stale_batch(self):
+        from web_panel import JiraBotWebHandler
+
+        day = "2026-12-28"
+        with tempfile.TemporaryDirectory() as temp:
+            base_dir = Path(temp)
+            with patch("web_panel.get_default_config_dir", return_value=base_dir):
+                for title in ("Férias", "Folga"):
+                    handler = MagicMock(path="/api/calendar/absences")
+                    handler._read_json_body.return_value = {"date": day, "title": title}
+                    JiraBotWebHandler.do_POST(handler)
+                    self.assertEqual(handler._send_json.call_args.args[0]["absences"], {day: title})
+
+                reader = MagicMock(path="/api/calendar/absences")
+                JiraBotWebHandler.do_GET(reader)
+                self.assertEqual(reader._send_json.call_args.args[0]["absences"], {day: "Folga"})
+
+                batch = MagicMock(path="/api/worklogs/batch-create")
+                batch._read_json_body.return_value = {
+                    "entries": [{"date": day, "issue_key": "TEST-1", "start_hm": "08:00", "end_hm": "10:00"}],
+                    "no_comment": True,
+                }
+                with patch("web_panel.BotConfig.load", return_value=BotConfig()), \
+                     patch("web_panel.StateManager", return_value=MagicMock(base_dir=base_dir)), \
+                     patch("web_panel.JiraClient") as jira:
+                    JiraBotWebHandler.do_POST(batch)
+                    jira.return_value.submit_worklog.assert_not_called()
+                self.assertIn("ausência no calendário", batch._send_json.call_args.args[0]["error"])
+
+                handler._read_json_body.return_value = {"date": day, "title": ""}
+                JiraBotWebHandler.do_POST(handler)
+                self.assertEqual(handler._send_json.call_args.args[0]["absences"], {})
+
+
 class TestAnalyticsAndRedesign(unittest.TestCase):
     def test_build_analytics_aggregation(self):
         from datetime import date
@@ -1043,7 +1108,7 @@ class TestThemeSelectorAndSeasonalThemes(unittest.TestCase):
     def test_thematic_logos_and_lofi_scenes(self):
         from web_assets import (
             THEME_LOGOS_HTML,
-            BRAND_TITLE_ICONS_HTML,
+            BRAND_TITLE_HTML,
             LOFI_SCENES_HTML,
             THEME_CSS,
         )
@@ -1056,31 +1121,33 @@ class TestThemeSelectorAndSeasonalThemes(unittest.TestCase):
         self.assertIn('logo-ano_novo', THEME_LOGOS_HTML)
         self.assertIn('logo-pascoa', THEME_LOGOS_HTML)
 
-        # Icones de titulo
-        self.assertIn('title-icon-halloween', BRAND_TITLE_ICONS_HTML)
-        self.assertIn('title-icon-natal', BRAND_TITLE_ICONS_HTML)
-        self.assertIn('title-icon-ano_novo', BRAND_TITLE_ICONS_HTML)
-        self.assertIn('title-icon-pascoa', BRAND_TITLE_ICONS_HTML)
+        # Os símbolos ocupam o lugar das letras, e os efeitos respeitam a pausa.
+        for glyph in ("flower", "egg", "pumpkin", "tree", "star", "stopwatch"):
+            self.assertIn(f"glyph-{glyph}", BRAND_TITLE_HTML)
+        for effect in ("brand-cat-idle", "brand-cat-walk", "brand-snow-fall", "brand-burst", "brand-pendulum", "brand-petal-drift"):
+            self.assertIn(effect, BRAND_TITLE_HTML)
+            self.assertIn(f"html:not(.fx-paused) .{effect}", THEME_CSS)
+        self.assertIn("@media (prefers-reduced-motion: no-preference)", THEME_CSS)
 
-        # 5 Cenarios Lofi com animacoes SVG
-        self.assertIn('scene-halloween', LOFI_SCENES_HTML)
-        self.assertIn('scene-natal', LOFI_SCENES_HTML)
-        self.assertIn('scene-ano_novo', LOFI_SCENES_HTML)
-        self.assertIn('scene-pascoa', LOFI_SCENES_HTML)
-        self.assertIn('scene-default', LOFI_SCENES_HTML)
+        from updater import is_allowed_app_file
 
-        # Elementos especificos dos cenarios solicitados
-        self.assertIn('lofi-scarecrow', LOFI_SCENES_HTML)
-        self.assertIn('lofi-cat', LOFI_SCENES_HTML)
-        self.assertIn('lofi-fireplace', LOFI_SCENES_HTML)
-        self.assertIn('lofi-window-snow', LOFI_SCENES_HTML)
-        self.assertIn('lofi-steam', LOFI_SCENES_HTML)
+        # Cada tema aponta para o GIF e para o quadro estático da mesma cena.
+        for theme in ("dark", "light", "halloween", "natal", "ano_novo", "pascoa"):
+            self.assertIn(f'scene-{theme}', LOFI_SCENES_HTML)
+            self.assertIn(f'[data-theme="{theme}"] .lofi-scene.scene-{theme}', THEME_CSS)
+            for extension in ("gif", "png"):
+                asset = Path("assets") / "lofi" / f"{theme}.{extension}"
+                self.assertIn(f"/{asset.as_posix()}", LOFI_SCENES_HTML)
+                self.assertTrue((Path(__file__).parent / asset).is_file())
+                self.assertTrue(is_allowed_app_file(asset))
+        self.assertIn("html.fx-paused .lofi-banner", THEME_CSS)
+        self.assertIn("prefers-reduced-motion: reduce", THEME_CSS)
 
         # Presenca no HTML renderizado
         self.assertIn('sidebar-lofi-wrap', HTML_PAGE)
         self.assertIn('brand-title', HTML_PAGE)
         self.assertIn('brand-name', HTML_PAGE)
-        self.assertIn('brand-title-icon', HTML_PAGE)
+        self.assertIn('class="brand-title" aria-label="JiraBot"', HTML_PAGE)
         # Protecao de layout: badges antigos nao vazam na marca
         self.assertNotIn('__THEME_BADGES__', HTML_PAGE)
         self.assertIn('.brand-theme-badge', THEME_CSS)
@@ -1988,7 +2055,7 @@ Não aplicável
             <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
                 <Relationship Id="rIdLogo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
                 <Relationship Id="rIdDevImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image2.png"/>
-                <Relationship Id="rIdTestImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image3.png"/>
+                <Relationship Id="rIdTestImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="/media/image3.png"/>
             </Relationships>
             """
             doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -2064,7 +2131,7 @@ Não aplicável
             zf.writestr("word/document.xml", doc_xml)
             zf.writestr("word/media/image1.png", b"\x89PNG\r\n\x1a\nlogo_consisa")
             zf.writestr("word/media/image2.png", b"\x89PNG\r\n\x1a\nprint_caio_dev")
-            zf.writestr("word/media/image3.png", b"\x89PNG\r\n\x1a\nprint_jhonatan_teste")
+            zf.writestr("media/image3.png", b"\x89PNG\r\n\x1a\nprint_jhonatan_teste")
 
         parsed = extrair_documento_docx_completo(docx_buf.getvalue())
         emb = parsed["embedded_images"]
@@ -3379,6 +3446,193 @@ Não aplicável
         self.assertIn('class="ui-dropdown drop-up"', HTML_PAGE)
         self.assertIn('id="switch-comment-input"', HTML_PAGE)
         self.assertIn('function setOfficialGithubUpdateSource', HTML_PAGE)
+
+
+
+    def test_sharepoint_manager_save_and_load_filled_dds(self):
+        from sharepoint_client import SharePointManager, DEFAULT_DDS_CHECKLIST_TEMPLATE
+        test_dir = tempfile.mkdtemp()
+        try:
+            sp = SharePointManager(base_dir=Path(test_dir))
+            self.assertIsNone(sp.load_filled_dds("OR-999"))
+
+            self.assertTrue(len(DEFAULT_DDS_CHECKLIST_TEMPLATE) > 10)
+
+            fill_data = {
+                "role": "desenvolvimento",
+                "author": "Analista Teste",
+                "date": "26/10/2026",
+                "package": "pkg_financeiro",
+                "source": "fin01.prg",
+                "card": "77889",
+                "implementation": "Ajuste na rotina de conciliacao",
+                "recommendations": "Rodar script de atualizacao antes do teste",
+                "checklist": [
+                    {"id": "c1", "question": "Item 1", "answer": "Sim", "comment": "Validado"},
+                    {"id": "c2", "question": "Item 2", "answer": "Nao aplicavel", "comment": ""},
+                ]
+            }
+            saved = sp.save_filled_dds("OR-999", fill_data)
+            self.assertTrue(saved.get("success"))
+
+            loaded = sp.load_filled_dds("OR-999")
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.get("author"), "Analista Teste")
+            self.assertEqual(loaded.get("package"), "pkg_financeiro")
+            self.assertEqual(len(loaded.get("checklist", [])), 2)
+            self.assertEqual(loaded["checklist"][0]["answer"], "Sim")
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
+
+    @patch("sharepoint_client.SharePointManager.load_filled_dds")
+    @patch("urllib.request.urlopen")
+    def test_jira_client_structured_dds_merges_local_fill(self, mock_urlopen, mock_load_fill):
+        import json
+        from jira_client import JiraClient
+        from config import BotConfig
+        test_dir = tempfile.mkdtemp()
+        try:
+            mock_data = {
+                "key": "CONSISABI-555",
+                "fields": {
+                    "summary": "Ticket teste DDS",
+                    "status": {"name": "Em Andamento"},
+                    "priority": {"name": "Media"},
+                    "issuetype": {"name": "Tarefa"},
+                    "created": "2026-10-26T10:00:00.000-0300",
+                    "updated": "2026-10-26T12:00:00.000-0300",
+                    "description": "DDS: https://consisa.sharepoint.com/:w:/r/sites/DDS.docx",
+                    "attachment": []
+                }
+            }
+            mock_resp = MagicMock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
+            mock_resp.__enter__.return_value = mock_resp
+            mock_urlopen.return_value = mock_resp
+
+            mock_load_fill.return_value = {
+                "role": "desenvolvimento",
+                "autor_nome": "Dev Atualizado",
+                "data_preenchimento": "26/10/2026",
+                "pacote": "pkg_novo",
+                "implementacao_texto": "Nova implementacao local",
+                "recomendacoes": "Recomendacao local",
+                "checklist": [
+                    {"categoria": "Padrao", "pergunta": "Compilou?", "resposta": "Sim"}
+                ]
+            }
+
+            cfg = BotConfig(notifications_enabled=False)
+            jc = JiraClient(cfg.jira)
+
+            details = jc.get_ticket_dds_details("CONSISABI-555")
+            dds = details.get("structured_dds")
+            self.assertIsNotNone(dds)
+            self.assertTrue(dds.get("has_local_fill"))
+            self.assertEqual(dds.get("desenvolvimento", {}).get("responsavel"), "Dev Atualizado")
+            self.assertEqual(dds.get("desenvolvimento", {}).get("detalhamento"), "Nova implementacao local")
+            self.assertEqual(dds.get("team_leader", {}).get("pacote"), "pkg_novo")
+            self.assertEqual(len(dds.get("checklist", [])), 1)
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
+
+    def test_web_panel_dds_fill_ui_and_routes(self):
+        from web_panel import HTML_PAGE
+
+        self.assertIn("modal-fill-dds", HTML_PAGE)
+        self.assertIn("openFillDdsModal", HTML_PAGE)
+        self.assertIn("closeFillDdsModal", HTML_PAGE)
+        self.assertIn("renderFillChecklist", HTML_PAGE)
+        self.assertIn("applyChecklistPreset", HTML_PAGE)
+        self.assertIn("submitDdsFill", HTML_PAGE)
+        self.assertIn("/api/jira/dds/fill-template", HTML_PAGE)
+        self.assertIn("/api/jira/dds/fill", HTML_PAGE)
+
+    def test_web_panel_dds_toolbar_partitions(self):
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        self.assertIn('id="dds-partition-official"', HTML_PAGE)
+        self.assertIn('id="dds-partition-import"', HTML_PAGE)
+        self.assertIn("DDS Oficial & Edição", HTML_PAGE)
+        self.assertIn("Importação & Arquivos Locais", HTML_PAGE)
+        self.assertIn("openFillDdsModal()", HTML_PAGE)
+        self.assertIn("detectDdsFromDownloads()", HTML_PAGE)
+        self.assertIn("triggerManualDocxUpload()", HTML_PAGE)
+        self.assertIn("openPasteDdsModal()", HTML_PAGE)
+        self.assertIn('id="dds-top-sharepoint-btn"', HTML_PAGE)
+
+        # Valida estilos CSS correspondentes em web_assets
+        self.assertIn(".dds-partition-card", THEME_CSS)
+        self.assertIn(".dds-partition-title", THEME_CSS)
+        self.assertIn(".dds-partition-actions", THEME_CSS)
+
+    def test_dds_modal_redesign_checklist_toggle_and_image_endpoints(self):
+        from web_panel import HTML_PAGE
+        from web_assets import THEME_CSS
+
+        # Valida que o modal de preenchimento tem fundo opaco e master toggle de checklist
+        self.assertIn('id="modal-fill-dds"', HTML_PAGE)
+        self.assertIn('id="fill-include-checklist"', HTML_PAGE)
+        self.assertIn('toggleFillChecklist', HTML_PAGE)
+        self.assertIn('id="fill-checklist-actions"', HTML_PAGE)
+        self.assertIn('id="fill-checklist-inner"', HTML_PAGE)
+
+        # Valida que o bloco de upload de imagens esta presente no HTML
+        self.assertIn('id="fill-image-file-input"', HTML_PAGE)
+        self.assertIn('id="fill-image-drop-zone"', HTML_PAGE)
+        self.assertIn('id="fill-images-preview-grid"', HTML_PAGE)
+        self.assertIn('handleFillImagesSelected', HTML_PAGE)
+        self.assertIn('loadDdsImages', HTML_PAGE)
+        self.assertIn('deleteDdsImage', HTML_PAGE)
+        self.assertIn('/api/jira/dds/images/upload', HTML_PAGE)
+        self.assertIn('/api/jira/dds/images/list', HTML_PAGE)
+
+        # Valida que o CSS contem as regras de opacidade e estilo de upload
+        self.assertIn('.modal-container {', THEME_CSS)
+        self.assertIn('.dds-image-upload-zone', THEME_CSS)
+        self.assertIn('.dds-image-preview-grid', THEME_CSS)
+        self.assertIn('.dds-image-thumb-card', THEME_CSS)
+
+    def test_sharepoint_manager_image_storage_and_parent_folder_retrieval(self):
+        from sharepoint_client import SharePointManager
+        test_dir = tempfile.mkdtemp()
+        try:
+            sp = SharePointManager(base_dir=Path(test_dir))
+
+            # 1. Teste de salvamento, listagem e delecao de imagem local da DDS
+            fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+            res = sp.save_dds_image("TEST-100", "evidencia_tela.png", fake_png)
+            self.assertTrue(res.get("success"))
+            self.assertIn("evidencia_tela.png", res.get("filename"))
+
+            imgs = sp.list_dds_images("TEST-100")
+            self.assertEqual(len(imgs), 1)
+            self.assertEqual(imgs[0]["name"], "evidencia_tela.png")
+            self.assertTrue(imgs[0]["url"].startswith("data:image/png;base64,"))
+            self.assertTrue(imgs[0]["is_local"])
+
+            # 2. Exclusao da imagem
+            del_ok = sp.delete_dds_image("TEST-100", imgs[0]["id"])
+            self.assertTrue(del_ok)
+            imgs_after = sp.list_dds_images("TEST-100")
+            self.assertEqual(len(imgs_after), 0)
+
+            # 3. Teste de inclusao opcional de checklist
+            fill_payload = {
+                "role": "desenvolvimento",
+                "autor_nome": "Dev Teste",
+                "incluir_checklist": False,
+                "checklist": [],
+            }
+            sp.save_filled_dds("TEST-100", fill_payload)
+            loaded = sp.load_filled_dds("TEST-100")
+            self.assertIsNotNone(loaded)
+            self.assertFalse(loaded.get("incluir_checklist"))
+            self.assertEqual(loaded.get("checklist"), [])
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import sys
@@ -29,17 +30,20 @@ import webbrowser
 import winreg
 
 from analytics import get_analytics, normalize_days
-from config import BotConfig, ShiftProfile
+from config import BotConfig, ShiftProfile, get_default_config_dir
 from daemon import get_status, restart_background, start_background, stop_background
 from engine import BotEngine, format_duration
 from history import WEEKDAYS_PT, generate_report
 from jira_client import JiraClient
 from review_dialog import get_fallback_description, show_pre_exit_popup
 from sharepoint_client import SharePointManager
+from work_calendar import FIRST_YEAR, LAST_YEAR, calendar_events, load_calendar_absences, save_calendar_absence
 from web_assets import (
     ANALYTICS_JS,
-    BRAND_TITLE_ICONS_HTML,
+    BRAND_TITLE_FILES,
+    BRAND_TITLE_HTML,
     EARLY_JS,
+    LOFI_BANNER_CAPTIONS,
     LOFI_GIRL_AVATAR_DATA_URI,
     LOFI_SCENES_HTML,
     LOGO_SVG,
@@ -635,10 +639,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       __THEME_LOGOS__
     </div>
     <div class="brand-text">
-      <h1 class="brand-title">
-        <span class="brand-name">JiraBot</span>
-        __BRAND_TITLE_ICONS__
-      </h1>
+      <h1 class="brand-title" aria-label="JiraBot">__BRAND_TITLE__</h1>
       <span id="sidebar-version-label" class="brand-version">Gerenciador de Horas v2.2.1</span>
     </div>
   </div>
@@ -1590,6 +1591,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <button type="button" class="chapter-pill is-active" id="btn-subview-batch-setup" onclick="switchSubView('tab-batch', 'batch-pane-setup', this)"><span class="chapter-num">01</span> Período &amp; Tickets</button>
         <button type="button" class="chapter-pill" id="btn-subview-batch-base" onclick="switchSubView('tab-batch', 'batch-pane-base', this)"><span class="chapter-num">02</span> Expediente Base &amp; Dias</button>
         <button type="button" class="chapter-pill" id="btn-subview-batch-preview" onclick="switchSubView('tab-batch', 'batch-pane-preview', this)"><span class="chapter-num">03</span> Grade de Revisão</button>
+        <button type="button" class="chapter-pill" onclick="switchSubView('tab-batch', 'batch-pane-calendar', this); openBatchCalendar()"><span class="chapter-num">04</span> Calendário</button>
       </nav>
 
       <!-- SUB-VISTA 1: PERIODO E TICKETS DO LOTE -->
@@ -1740,6 +1742,47 @@ HTML_PAGE = r"""<!DOCTYPE html>
               </div>
               <div id="batch-period-days-info" style="font-size:12.5px; color:var(--primary-text); font-weight:600;"></div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="subview-pane" id="batch-pane-calendar">
+        <div class="card batch-calendar-card">
+          <div class="batch-calendar-header">
+            <div>
+              <div class="card-title" id="batch-calendar-heading">Calendário</div>
+              <p>Selecione um dia para marcar uma ausência no expediente.</p>
+            </div>
+            <div class="batch-calendar-nav">
+              <button type="button" class="btn btn-outline btn-sm" id="batch-calendar-prev" aria-label="Mês anterior" onclick="moveBatchCalendar(-1)">‹</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="moveBatchCalendar(0)">Hoje</button>
+              <button type="button" class="btn btn-outline btn-sm" id="batch-calendar-next" aria-label="Próximo mês" onclick="moveBatchCalendar(1)">›</button>
+              <input type="month" class="form-control" id="batch-calendar-month" aria-label="Escolher mês e ano"
+                min="__CALENDAR_FIRST_YEAR__-01" max="__CALENDAR_LAST_YEAR__-12" onchange="changeBatchCalendarMonth()">
+            </div>
+          </div>
+          <div class="batch-calendar-layout">
+            <div>
+              <div class="batch-calendar-grid" id="batch-calendar-grid" aria-label="Dias do mês"></div>
+              <div class="batch-calendar-legend">
+                <span class="calendar-holiday">Feriado</span>
+                <span class="calendar-absence">Ausência</span>
+                <span class="calendar-note">Data informativa</span>
+              </div>
+            </div>
+            <form class="batch-calendar-editor" onsubmit="event.preventDefault(); submitBatchAbsence(false)">
+              <div class="card-title" id="batch-calendar-selected">Escolha uma data</div>
+              <p id="batch-calendar-day-note"></p>
+              <label for="batch-calendar-title">Motivo da ausência</label>
+              <input type="text" class="form-control" id="batch-calendar-title" maxlength="120"
+                placeholder="Ex.: férias ou folga" required>
+              <p>Bloqueia lançamentos em lote durante o dia inteiro.</p>
+              <div class="btn-group">
+                <button type="submit" class="btn btn-primary btn-sm" id="batch-calendar-save">Salvar ausência</button>
+                <button type="button" class="btn btn-outline btn-sm" id="batch-calendar-remove" onclick="submitBatchAbsence(true)" hidden>Remover</button>
+              </div>
+              <p id="batch-calendar-status" role="status"></p>
+            </form>
           </div>
         </div>
       </div>
@@ -2742,6 +2785,53 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </div>
         </div>
 
+      <!-- Barra de Acoes Rapidas da DDS Dividida em 2 Particoes (Oficial vs Importacao/Arquivos) -->
+      <div class="dds-offline-toolbar" id="dds-offline-toolbar">
+        <!-- Particao 1: DDS Oficial & Edicao -->
+        <div class="dds-partition-card" id="dds-partition-official">
+          <div class="dds-partition-header">
+            <span class="dds-partition-title">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              DDS Oficial & Edição
+            </span>
+          </div>
+          <div class="dds-partition-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="openFillDdsModal()" style="display:inline-flex; align-items:center; gap:6px; background:var(--accent-primary, #8b5cf6); border-color:var(--accent-primary, #7c3aed);" title="Preencher secao de Desenvolvimento e Checklist de Revisao de Codigo">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Preencher DDS
+            </button>
+            <a id="dds-top-sharepoint-btn" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-warning btn-sm" style="display:none; align-items:center; gap:6px; background:#f59e0b; border-color:#d97706; color:#ffffff;" title="Abrir DDS no Word Online usando o navegador corporativo">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              Abrir no SharePoint (Navegador)
+            </a>
+          </div>
+        </div>
+
+        <!-- Particao 2: Importacao & Arquivos Locais -->
+        <div class="dds-partition-card" id="dds-partition-import">
+          <div class="dds-partition-header">
+            <span class="dds-partition-title">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Importação & Arquivos Locais
+            </span>
+          </div>
+          <div class="dds-partition-actions">
+            <button type="button" class="btn btn-outline btn-sm" onclick="detectDdsFromDownloads()" title="Verificar se o arquivo .docx da DDS foi baixado na pasta Downloads">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Detectar em Downloads
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="triggerManualDocxUpload()" title="Carregar arquivo .docx salvo no seu computador">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="12" y2="12"/><line x1="15" y1="15" x2="12" y2="12"/></svg>
+              Importar .docx Local
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="openPasteDdsModal()" title="Colar texto copiado do Word Online da DDS">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Colar Texto da DDS
+            </button>
+          </div>
+        </div>
+      </div>
+
         <!-- Painel de Sincronizacao e Conexao Microsoft 365 SharePoint -->
         <div class="dds-sp-callout-banner" id="dds-sharepoint-callout-banner" style="display:none; flex-wrap:wrap;">
           <div style="display:flex; align-items:flex-start; gap:10px; flex:1; min-width:260px;">
@@ -2971,7 +3061,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); margin-bottom:8px;">
                 Imagens e Diagramas Integrados na DDS
               </div>
-              <div id="dds-embedded-images-grid" class="image-gallery-grid"></div>
+              <div id="dds-embedded-images-grid"></div>
             </div>
           </div>
         </div>
@@ -3155,6 +3245,169 @@ HTML_PAGE = r"""<!DOCTYPE html>
 </div>
 
 <!-- ==================== MODAL: COLAR TEXTO DA DDS ==================== -->
+<!-- ==================== MODAL: PREENCHIMENTO ESTRUTURADO DA DDS (OPCAO 1) ==================== -->
+<div class="modal-backdrop" id="modal-fill-dds" style="display:none; z-index:10002; background:rgba(0, 0, 0, 0.75);" onclick="closeFillDdsModal()">
+  <div class="modal-container" style="max-width:920px; width:95vw; max-height:92vh; display:flex; flex-direction:column; background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius, 12px); box-shadow:0 25px 60px rgba(0,0,0,0.6);" onclick="event.stopPropagation();">
+    <div class="modal-header" style="flex-shrink:0; background:var(--bg-card); border-bottom:1px solid var(--border-color); padding:16px 22px; display:flex; align-items:center; justify-content:space-between;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:32px; height:32px; border-radius:8px; background:rgba(139,92,246,0.15); display:flex; align-items:center; justify-content:center;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--accent-primary, #8b5cf6)" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </div>
+        <div>
+          <span class="modal-title" style="font-size:15px; font-weight:700;">Preenchimento Rápido da DDS: <strong id="fill-dds-ticket-key" style="color:var(--accent-primary, #8b5cf6);">-</strong></span>
+          <div style="font-size:11.5px; color:var(--text-muted);">Edição estruturada oficial de desenvolvimento, testes e evidências</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="closeFillDdsModal()">&times;</button>
+    </div>
+
+    <div class="modal-body" style="padding:18px 22px; overflow-y:auto; flex:1; background:var(--bg-card);">
+      <!-- Seletor de Papel -->
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border-color);">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <span style="font-size:12px; font-weight:700; color:var(--text-main);">Etapa do Preenchimento:</span>
+          <label style="font-size:12.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-main); font-weight:500;">
+            <input type="radio" name="fill_role_radio" value="desenvolvimento" checked onchange="onFillRoleChange(this.value)" style="accent-color:var(--accent-primary, #8b5cf6);">
+            Desenvolvimento &amp; Revisão Técnica
+          </label>
+          <label style="font-size:12.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-main); font-weight:500;">
+            <input type="radio" name="fill_role_radio" value="homologacao" onchange="onFillRoleChange(this.value)" style="accent-color:var(--accent-primary, #8b5cf6);">
+            Teste de Implementação &amp; Homologação
+          </label>
+        </div>
+        <div id="fill-saved-notice" style="font-size:11.5px; color:var(--text-muted);"></div>
+      </div>
+
+      <!-- Bloco 1: Campos do Desenvolvimento -->
+      <div id="fill-section-dev" style="display:block;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-bottom:14px;">
+          <div>
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Nome do Desenvolvedor *</label>
+            <input type="text" id="fill-dev-nome" class="form-control" style="font-size:13px; height:38px;" placeholder="ex: João Moura">
+          </div>
+          <div>
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Data de Conclusão *</label>
+            <input type="text" id="fill-dev-data" class="form-control" style="font-size:13px; height:38px;" placeholder="DD/MM/AAAA">
+          </div>
+          <div>
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Pacote / Cartão / Branch</label>
+            <input type="text" id="fill-dev-pacote" class="form-control" style="font-size:13px; height:38px;" placeholder="ex: CNET-2026.01 / Pacote 45">
+          </div>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Detalhamento da Implementação *</label>
+          <textarea id="fill-dev-detalhes" class="form-control" rows="5" style="font-size:13px; line-height:1.5; min-height:120px;" placeholder="Descreva claramente o que foi alterado no código ou banco de dados..."></textarea>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Recomendações e Instruções de Teste</label>
+          <textarea id="fill-dev-rec" class="form-control" rows="3" style="font-size:13px; line-height:1.5;" placeholder="Instruções para o testador, parâmetros necessários ou procedimentos específicos..."></textarea>
+        </div>
+
+        <!-- Bloco de Imagens e Evidencias Anexadas a DDS -->
+        <div style="margin-bottom:18px; background:var(--bg-subtle); border:1px solid var(--border-color); border-radius:var(--radius-sm, 8px); padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+            <div>
+              <div style="font-size:13px; font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                Imagens e Capturas de Tela da DDS
+              </div>
+              <div style="font-size:11.5px; color:var(--text-muted);">Cole com Ctrl+V diretamente nesta tela ou arraste imagens para ilustrar seu detalhamento</div>
+            </div>
+            <div>
+              <input type="file" id="fill-image-file-input" multiple accept="image/*" style="display:none;" onchange="handleFillImagesSelected(this.files)">
+              <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('fill-image-file-input').click()" style="font-size:11.5px; padding:4px 10px;">
+                + Adicionar Imagens
+              </button>
+            </div>
+          </div>
+
+          <div id="fill-image-drop-zone" class="dds-image-upload-zone" onclick="document.getElementById('fill-image-file-input').click()">
+            <div style="font-size:12px; color:var(--text-muted); pointer-events:none;">
+              Arraste imagens aqui, clique para procurar ou <strong>pressione Ctrl+V em qualquer lugar do modal</strong>
+            </div>
+          </div>
+
+          <div id="fill-images-preview-grid" class="dds-image-preview-grid" style="display:none;"></div>
+        </div>
+
+        <!-- Bloco do Checklist de Revisao de Codigo Consisa -->
+        <div style="background:var(--bg-subtle); border:1px solid var(--border-color); border-radius:var(--radius-sm, 8px); padding:14px; margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+            <div>
+              <label style="display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:700; color:var(--text-main); user-select:none;">
+                <input type="checkbox" id="fill-include-checklist" checked onchange="toggleFillChecklist(this.checked)" style="width:17px; height:17px; accent-color:var(--accent-primary, #8b5cf6); cursor:pointer;">
+                Preencher Revisão Final de Código (Checklist Oficial)
+              </label>
+              <div style="font-size:11.5px; color:var(--text-muted); margin-left:25px;">Marque para incluir a verificação de código ou desmarque para dispensar nesta entrega</div>
+            </div>
+            <div id="fill-checklist-actions" style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('dev_standard')" style="font-size:11px; padding:4px 9px; color:#22c55e; border-color:#22c55e;">
+                Marcar Padrão de Envio (1 Clique)
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('all_sim')" style="font-size:11px; padding:4px 9px;">
+                Todos Sim
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="applyChecklistPreset('all_na')" style="font-size:11px; padding:4px 9px;">
+                Todos N/A
+              </button>
+            </div>
+          </div>
+
+          <div id="fill-checklist-inner">
+            <div id="fill-checklist-container" style="display:flex; flex-direction:column; gap:8px; max-height:260px; overflow-y:auto; padding-right:4px;">
+              <!-- Carregado dinamicamente via JS -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bloco 2: Campos de Homologacao -->
+      <div id="fill-section-hom" style="display:none;">
+        <div style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-bottom:14px; display:grid;">
+          <div>
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Nome do Testador *</label>
+            <input type="text" id="fill-test-nome" class="form-control" style="font-size:13px; height:38px;" placeholder="ex: Jhonatan">
+          </div>
+          <div>
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Data do Teste *</label>
+            <input type="text" id="fill-test-data" class="form-control" style="font-size:13px; height:38px;" placeholder="DD/MM/AAAA">
+          </div>
+          <div>
+            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Parecer / Status</label>
+            <select id="fill-test-status" class="form-control" style="font-size:13px; height:38px;">
+              <option value="aprovado">Aprovado para Release</option>
+              <option value="divergencia">Divergência Encontrada</option>
+              <option value="em_andamento">Em Andamento</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Resultado do Teste / Divergência Encontrada</label>
+          <textarea id="fill-test-detalhes" class="form-control" rows="5" style="font-size:13px; line-height:1.5; min-height:120px;" placeholder="Detalhe as validações realizadas, cenários testados ou divergências constatadas..."></textarea>
+        </div>
+      </div>
+
+      <!-- Opcoes de Envio -->
+      <div style="background:var(--bg-subtle); padding:10px 14px; border-radius:6px; margin-top:10px; border:1px solid var(--border-color);">
+        <label style="font-size:12px; display:inline-flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-main);">
+          <input type="checkbox" id="fill-opt-post-jira" style="accent-color:var(--accent-primary, #8b5cf6);">
+          Publicar também comentário formal de entrega no chamado do Jira Cloud
+        </label>
+      </div>
+    </div>
+
+    <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:14px 22px; border-top:1px solid var(--border-color); flex-shrink:0; background:var(--bg-card);">
+      <button type="button" class="btn btn-outline btn-sm" onclick="closeFillDdsModal()">Cancelar</button>
+      <button type="button" class="btn btn-primary btn-sm" id="btn-submit-dds-fill" onclick="submitDdsFill()" style="background:var(--accent-primary, #8b5cf6); border-color:var(--accent-primary, #7c3aed); font-size:12.5px; padding:6px 14px;">
+        Salvar Preenchimento da DDS
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="modal-paste-dds" style="display:none; z-index:10001;" onclick="closePasteDdsModal()">
   <div class="modal-container" style="max-width:680px; width:92vw;" onclick="event.stopPropagation();">
     <div class="modal-header">
@@ -5134,6 +5387,403 @@ async function detectDdsFromDownloads(explicitFilename = '') {
   }
 }
 
+
+let currentFillDdsTemplate = [];
+let currentDdsLocalImages = [];
+
+async function openFillDdsModal(preferredRole = 'desenvolvimento') {
+  if (!currentModalTicketKey) {
+    showToast('Nenhum chamado selecionado no momento.', 'warning');
+    return;
+  }
+
+  const modal = document.getElementById('modal-fill-dds');
+  const keyLabel = document.getElementById('fill-dds-ticket-key');
+  if (keyLabel) keyLabel.textContent = currentModalTicketKey;
+
+  const roleRadio = document.querySelector(`input[name="fill_role_radio"][value="${preferredRole}"]`);
+  if (roleRadio) roleRadio.checked = true;
+  onFillRoleChange(preferredRole);
+
+  try {
+    const res = await apiCall('/api/jira/dds/fill-template', 'POST', { key: currentModalTicketKey });
+    currentFillDdsTemplate = res.default_checklist || [];
+    const saved = res.current_fill || {};
+
+    const devNomeInp = document.getElementById('fill-dev-nome');
+    const devDataInp = document.getElementById('fill-dev-data');
+    const devPctInp = document.getElementById('fill-dev-pacote');
+    const devDetInp = document.getElementById('fill-dev-detalhes');
+    const devRecInp = document.getElementById('fill-dev-rec');
+
+    if (devNomeInp) devNomeInp.value = saved.autor_nome || res.default_autor || '';
+    if (devDataInp) devDataInp.value = saved.data_preenchimento || res.default_data || '';
+    if (devPctInp) devPctInp.value = saved.pacote || '';
+    if (devDetInp) devDetInp.value = saved.implementacao_texto || '';
+    if (devRecInp) devRecInp.value = saved.recomendacoes || '';
+
+    const testNomeInp = document.getElementById('fill-test-nome');
+    const testDataInp = document.getElementById('fill-test-data');
+    const testStInp = document.getElementById('fill-test-status');
+    const testDetInp = document.getElementById('fill-test-detalhes');
+
+    if (testNomeInp) testNomeInp.value = saved.testador_nome || '';
+    if (testDataInp) testDataInp.value = saved.testador_data || res.default_data || '';
+    if (testStInp) testStInp.value = saved.resultado_tipo || 'aprovado';
+    if (testDetInp) testDetInp.value = saved.resultado_homologacao || '';
+
+    const noticeEl = document.getElementById('fill-saved-notice');
+    if (noticeEl) {
+      noticeEl.textContent = saved.saved_at ? `Salvo localmente em ${new Date(saved.saved_at).toLocaleString()}` : '';
+    }
+
+    const chkMaster = document.getElementById('fill-include-checklist');
+    const shouldInclude = saved.incluir_checklist !== undefined ? !!saved.incluir_checklist : true;
+    if (chkMaster) chkMaster.checked = shouldInclude;
+    toggleFillChecklist(shouldInclude);
+
+    renderFillChecklist(saved.checklist || []);
+
+    // Carrega imagens locais da DDS e configura dropzone
+    setupFillImageDropZone();
+    loadDdsImages(currentModalTicketKey);
+
+    if (modal) modal.style.display = 'flex';
+  } catch (err) {
+    showToast('Falha ao abrir formulário de preenchimento: ' + err.message, 'error');
+  }
+}
+
+function closeFillDdsModal() {
+  const modal = document.getElementById('modal-fill-dds');
+  if (modal) modal.style.display = 'none';
+}
+
+function toggleFillChecklist(checked) {
+  const inner = document.getElementById('fill-checklist-inner');
+  const actions = document.getElementById('fill-checklist-actions');
+  if (inner) inner.style.display = checked ? 'block' : 'none';
+  if (actions) actions.style.display = checked ? 'flex' : 'none';
+}
+
+function onFillRoleChange(role) {
+  const devSec = document.getElementById('fill-section-dev');
+  const homSec = document.getElementById('fill-section-hom');
+  if (devSec) devSec.style.display = (role === 'desenvolvimento') ? 'block' : 'none';
+  if (homSec) homSec.style.display = (role === 'homologacao') ? 'block' : 'none';
+}
+
+async function loadDdsImages(ticketKey) {
+  const grid = document.getElementById('fill-images-preview-grid');
+  if (!grid || !ticketKey) return;
+  try {
+    const res = await apiCall('/api/jira/dds/images/list?key=' + encodeURIComponent(ticketKey));
+    currentDdsLocalImages = (res && res.images) || [];
+    renderDdsImagesPreview();
+  } catch (err) {
+    console.error('Erro ao carregar imagens da DDS:', err);
+  }
+}
+
+function insertImageTagIntoText(imageName, targetId = 'fill-dev-detalhes') {
+  const ta = document.getElementById(targetId) || document.getElementById('fill-dev-detalhes');
+  if (!ta) return;
+  const tag = `\n!${imageName}!\n`;
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  if (start !== undefined && end !== undefined) {
+    const val = ta.value;
+    ta.value = val.substring(0, start) + tag + val.substring(end);
+    ta.selectionStart = ta.selectionEnd = start + tag.length;
+  } else {
+    ta.value += tag;
+  }
+  ta.focus();
+  showToast(`Marcador !${imageName}! inserido na posição do texto.`, 'success');
+}
+
+function renderDdsImagesPreview() {
+  const grid = document.getElementById('fill-images-preview-grid');
+  if (!grid) return;
+  if (!currentDdsLocalImages || currentDdsLocalImages.length === 0) {
+    grid.style.display = 'none';
+    grid.innerHTML = '';
+    return;
+  }
+  grid.style.display = 'grid';
+  grid.innerHTML = currentDdsLocalImages.map(img => {
+    const safeArg = escapeHtml(img.name).replace(/'/g, "\\'");
+    return `
+      <div class="dds-image-thumb-card" title="${escapeHtml(img.name)}">
+        <button type="button" class="thumb-del-btn" onclick="deleteDdsImage('${escapeHtml(img.id)}')" title="Excluir imagem">&times;</button>
+        <img src="${escapeHtml(img.thumbnail_url || img.url)}" alt="${escapeHtml(img.name)}" onclick="openImageLightbox('${escapeHtml(img.thumbnail_url || img.url)}', '${escapeHtml(img.name)}')">
+        <div class="thumb-info" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</div>
+        <button type="button" class="btn btn-outline btn-sm" onclick="insertImageTagIntoText('${safeArg}')" style="font-size:10px; padding:3px 6px; margin:2px 4px 6px; border-color:var(--accent-primary, #8b5cf6); color:var(--accent-primary, #c084fc); text-align:center; width:calc(100% - 8px);" title="Inserir marcador no meio do texto onde estiver o cursor">
+          + Inserir no Texto
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function uploadDdsImageFile(file, ticketKey) {
+  if (!file || !ticketKey) return;
+  const reader = new FileReader();
+  return new Promise((resolve, reject) => {
+    reader.onload = async () => {
+      try {
+        const res = await apiCall('/api/jira/dds/images/upload', 'POST', {
+          key: ticketKey,
+          filename: file.name,
+          content_base64: reader.result,
+        });
+        if (res.error) throw new Error(res.error);
+        resolve(res);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleFillImagesSelected(fileList) {
+  if (!fileList || fileList.length === 0 || !currentModalTicketKey) return;
+  const files = Array.from(fileList);
+  showToast(`Enviando ${files.length} imagem(ns)...`, 'info');
+  for (const f of files) {
+    try {
+      await uploadDdsImageFile(f, currentModalTicketKey);
+    } catch (err) {
+      showToast(`Erro ao enviar ${f.name}: ${err.message}`, 'error');
+    }
+  }
+  showToast('Imagens anexadas à DDS com sucesso!', 'success');
+  await loadDdsImages(currentModalTicketKey);
+}
+
+async function deleteDdsImage(imageId) {
+  if (!currentModalTicketKey || !imageId) return;
+  if (!confirm('Deseja remover esta imagem da DDS?')) return;
+  try {
+    const res = await apiCall('/api/jira/dds/images/delete', 'POST', {
+      key: currentModalTicketKey,
+      id: imageId,
+    });
+    if (res.error) throw new Error(res.error);
+    showToast('Imagem removida com sucesso.', 'success');
+    await loadDdsImages(currentModalTicketKey);
+  } catch (err) {
+    showToast('Erro ao remover imagem: ' + err.message, 'error');
+  }
+}
+
+function setupFillImageDropZone() {
+  const zone = document.getElementById('fill-image-drop-zone');
+  if (!zone || zone._dragInit) return;
+  zone._dragInit = true;
+
+  ['dragenter', 'dragover'].forEach(name => {
+    zone.addEventListener(name, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.add('dragover');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach(name => {
+    zone.addEventListener(name, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.remove('dragover');
+    });
+  });
+
+  zone.addEventListener('drop', (e) => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const imgFiles = Array.from(files).filter(f => f.type.startsWith('image/') || f.name.toLowerCase().match(/\.(png|jpe?g|gif|webp|bmp)$/));
+      if (imgFiles.length > 0) {
+        handleFillImagesSelected(imgFiles);
+      } else {
+        showToast('Apenas arquivos de imagem são suportados.', 'warning');
+      }
+    }
+  });
+}
+
+// Suporte a Ctrl + V para colar capturas de tela quando o modal estiver aberto
+window.addEventListener('paste', async (e) => {
+  const modal = document.getElementById('modal-fill-dds');
+  if (!modal || modal.style.display === 'none' || !currentModalTicketKey) return;
+  const dt = e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData);
+  if (!dt || !dt.items) return;
+  for (let i = 0; i < dt.items.length; i++) {
+    if (dt.items[i].type && dt.items[i].type.indexOf('image') !== -1) {
+      const blob = dt.items[i].getAsFile();
+      if (blob) {
+        e.preventDefault();
+        const ext = dt.items[i].type.split('/')[1] || 'png';
+        const file = new File([blob], `print_${Date.now()}.${ext}`, { type: dt.items[i].type });
+        showToast('Colando captura de tela da área de transferência...', 'info');
+        try {
+          const res = await uploadDdsImageFile(file, currentModalTicketKey);
+          showToast('Captura colada e anexada com sucesso!', 'success');
+          await loadDdsImages(currentModalTicketKey);
+          const activeEl = document.activeElement;
+          const targetTa = (activeEl && (activeEl.id === 'fill-dev-detalhes' || activeEl.id === 'fill-dev-rec' || activeEl.id === 'fill-test-detalhes')) ? activeEl : document.getElementById('fill-dev-detalhes');
+          if (targetTa && res && (res.filename || file.name)) {
+            const imgName = res.filename || file.name;
+            insertImageTagIntoText(imgName, targetTa.id);
+          }
+        } catch (err) {
+          showToast('Erro ao colar captura: ' + err.message, 'error');
+        }
+      }
+    }
+  }
+});
+
+function renderFillChecklist(savedChecklist = []) {
+  const container = document.getElementById('fill-checklist-container');
+  if (!container) return;
+
+  const savedMap = {};
+  if (Array.isArray(savedChecklist)) {
+    savedChecklist.forEach(it => {
+      if (it && it.pergunta) savedMap[it.pergunta.trim().toLowerCase()] = it.resposta;
+    });
+  }
+
+  const items = currentFillDdsTemplate.length > 0 ? currentFillDdsTemplate : [];
+  container.innerHTML = items.map((it, idx) => {
+    const key = (it.pergunta || '').trim().toLowerCase();
+    const curResp = savedMap[key] || it.padrao || 'Sim';
+
+    return `
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:4px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:240px;">
+          <span style="font-size:10px; text-transform:uppercase; color:var(--text-muted); font-weight:700;">${escapeHtml(it.categoria || '')}</span>
+          <div style="font-size:11.5px; color:var(--text-main); line-height:1.35;">${escapeHtml(it.pergunta || '')}</div>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <label style="font-size:11px; display:inline-flex; align-items:center; gap:3px; cursor:pointer;">
+            <input type="radio" name="chk_resp_${idx}" value="Sim" ${curResp === 'Sim' ? 'checked' : ''}> Sim
+          </label>
+          <label style="font-size:11px; display:inline-flex; align-items:center; gap:3px; cursor:pointer;">
+            <input type="radio" name="chk_resp_${idx}" value="Não" ${curResp === 'Não' ? 'checked' : ''}> Não
+          </label>
+          <label style="font-size:11px; display:inline-flex; align-items:center; gap:3px; cursor:pointer;">
+            <input type="radio" name="chk_resp_${idx}" value="Não aplicável" ${curResp === 'Não aplicável' ? 'checked' : ''}> N/A
+          </label>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function applyChecklistPreset(mode) {
+  if (!Array.isArray(currentFillDdsTemplate)) return;
+  currentFillDdsTemplate.forEach((it, idx) => {
+    let targetVal = 'Sim';
+    if (mode === 'dev_standard') {
+      targetVal = it.padrao || 'Sim';
+    } else if (mode === 'all_sim') {
+      targetVal = 'Sim';
+    } else if (mode === 'all_na') {
+      targetVal = 'Não aplicável';
+    }
+
+    const rad = document.querySelector(`input[name="chk_resp_${idx}"][value="${targetVal}"]`);
+    if (rad) rad.checked = true;
+  });
+}
+
+async function submitDdsFill() {
+  if (!currentModalTicketKey) return;
+  const roleRadio = document.querySelector('input[name="fill_role_radio"]:checked');
+  const role = roleRadio ? roleRadio.value : 'desenvolvimento';
+
+  const devNome = (document.getElementById('fill-dev-nome').value || '').trim();
+  const devData = (document.getElementById('fill-dev-data').value || '').trim();
+  const devPacote = (document.getElementById('fill-dev-pacote').value || '').trim();
+  const devDet = (document.getElementById('fill-dev-detalhes').value || '').trim();
+  const devRec = (document.getElementById('fill-dev-rec').value || '').trim();
+
+  const testNome = (document.getElementById('fill-test-nome').value || '').trim();
+  const testData = (document.getElementById('fill-test-data').value || '').trim();
+  const testStatus = document.getElementById('fill-test-status').value;
+  const testDet = (document.getElementById('fill-test-detalhes').value || '').trim();
+  const postJira = document.getElementById('fill-opt-post-jira').checked;
+
+  if (role === 'desenvolvimento' && !devNome) {
+    showToast('Informe o nome do desenvolvedor.', 'warning');
+    return;
+  }
+  if (role === 'desenvolvimento' && !devDet) {
+    showToast('Informe o detalhamento da implementação.', 'warning');
+    return;
+  }
+
+  const includeChecklist = document.getElementById('fill-include-checklist') ? document.getElementById('fill-include-checklist').checked : true;
+
+  // Coleta o checklist apenas se o usuario manteve a opcao marcada
+  const checklistPayload = [];
+  if (includeChecklist && Array.isArray(currentFillDdsTemplate)) {
+    currentFillDdsTemplate.forEach((it, idx) => {
+      const checked = document.querySelector(`input[name="chk_resp_${idx}"]:checked`);
+      const resp = checked ? checked.value : (it.padrao || 'Sim');
+      checklistPayload.push({
+        categoria: it.categoria || 'Geral',
+        pergunta: it.pergunta || '',
+        resposta: resp,
+      });
+    });
+  }
+
+  const payload = {
+    key: currentModalTicketKey,
+    role: role,
+    autor_nome: devNome,
+    data_preenchimento: devData,
+    pacote: devPacote,
+    implementacao_texto: devDet,
+    recomendacoes: devRec,
+    incluir_checklist: includeChecklist,
+    checklist: includeChecklist ? checklistPayload : [],
+    testador_nome: testNome,
+    testador_data: testData,
+    resultado_tipo: testStatus,
+    resultado_homologacao: testDet,
+    post_jira_comment: postJira,
+  };
+
+  const btn = document.getElementById('btn-submit-dds-fill');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Salvando preenchimento...';
+  }
+
+  try {
+    const res = await apiCall('/api/jira/dds/fill', 'POST', payload);
+    if (res.error) throw new Error(res.error);
+
+    showToast(res.message || 'Preenchimento da DDS salvo com sucesso!', 'success');
+    closeFillDdsModal();
+
+    // Recarrega o modal para exibir os dados preenchidos imediatamente
+    await openTicketDdsModal(currentModalTicketKey, true, true);
+  } catch (err) {
+    showToast('Falha ao salvar preenchimento da DDS: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Salvar Preenchimento da DDS';
+    }
+  }
+}
+
 function openPasteDdsModal() {
   const m = document.getElementById('modal-paste-dds');
   if (m) {
@@ -5445,11 +6095,17 @@ async function openTicketDdsModal(key, forceRefresh = false, preserveSubtab = fa
     document.getElementById('dds-native-content').innerHTML = formatDdsRichText(currentModalDdsText);
 
     const spBtn = document.getElementById('dds-sharepoint-btn');
+    const topSpBtn = document.getElementById('dds-top-sharepoint-btn');
     if (currentModalDdsLinks.length > 0 && currentModalDdsLinks[0].url) {
       spBtn.href = currentModalDdsLinks[0].url;
       spBtn.style.display = 'inline-flex';
+      if (topSpBtn) {
+        topSpBtn.href = currentModalDdsLinks[0].url;
+        topSpBtn.style.display = 'inline-flex';
+      }
     } else {
       spBtn.style.display = 'none';
+      if (topSpBtn) topSpBtn.style.display = 'none';
     }
 
     // Configuracao de Documento Completo & SharePoint Hub
@@ -5474,7 +6130,6 @@ async function openTicketDdsModal(key, forceRefresh = false, preserveSubtab = fa
       spFolderBtn.style.display = 'none';
     }
 
-    const topSpBtn = document.getElementById('dds-top-sharepoint-btn');
     if (topSpBtn) {
       if (firstSpLink && firstSpLink.url) {
         topSpBtn.href = firstSpLink.url;
@@ -5821,21 +6476,30 @@ async function openTicketDdsModal(key, forceRefresh = false, preserveSubtab = fa
       const embGrid = document.getElementById('dds-embedded-images-grid');
       if (embeddedImgs.length > 0) {
         embSection.style.display = 'block';
-        embGrid.innerHTML = embeddedImgs.map(img => {
-          const origIdx = currentModalImages.findIndex(i => i.id === img.id);
-          const clickCall = origIdx !== -1 ? `openImageLightboxByIndex(${origIdx})` : ``;
-          return `
-            <div class="image-card">
-              <div class="image-card-thumb-wrap" onclick="${clickCall}">
-                <img src="${escapeHtml(img.thumbnail_url || img.proxy_url || img.url)}" class="image-card-thumb" alt="${escapeHtml(img.name)}" loading="lazy">
+        const imagesBySection = new Map();
+        embeddedImgs.forEach(img => {
+          const section = img.section || 'Documento DDS';
+          if (!imagesBySection.has(section)) imagesBySection.set(section, []);
+          imagesBySection.get(section).push(img);
+        });
+        embGrid.innerHTML = Array.from(imagesBySection, ([section, sectionImages]) => `
+          <h4>${escapeHtml(section)}</h4>
+          <div class="image-gallery-grid">${sectionImages.map(img => {
+            const origIdx = currentModalImages.findIndex(i => i.id === img.id);
+            const clickCall = origIdx !== -1 ? `openImageLightboxByIndex(${origIdx})` : ``;
+            return `
+              <div class="image-card">
+                <div class="image-card-thumb-wrap" onclick="${clickCall}">
+                  <img src="${escapeHtml(img.thumbnail_url || img.proxy_url || img.url)}" class="image-card-thumb" alt="${escapeHtml(img.name)}" loading="lazy">
+                </div>
+                <div class="image-card-info">
+                  <div class="image-card-title" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</div>
+                  <div class="image-card-meta">${Math.round((img.size || 0) / 1024)} KB &bull; ${escapeHtml(img.author || 'Integrada no DOCX')}</div>
+                </div>
               </div>
-              <div class="image-card-info">
-                <div class="image-card-title" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</div>
-                <div class="image-card-meta">${Math.round((img.size || 0) / 1024)} KB &bull; ${escapeHtml(img.author || 'Integrada no DOCX')}</div>
-              </div>
-            </div>
-          `;
-        }).join('');
+            `;
+          }).join('')}</div>
+        `).join('');
       } else {
         embSection.style.display = 'none';
       }
@@ -6138,6 +6802,135 @@ function formatDateBrFromIso(isoStr) {
   return `${d}/${m}/${y}`;
 }
 
+const batchCalendar = __BATCH_CALENDAR__;
+let batchAbsences = {};
+let batchCalendarDate = '';
+let batchAbsencesRevision = 0;
+
+function batchLocalDate(day = new Date()) {
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+}
+
+function applyBatchAbsences(absences) {
+  const previous = getBatchActiveDaysInfo().activeDays;
+  batchAbsences = absences;
+  const next = getBatchActiveDaysInfo().activeDays;
+  if (previous.map(day => day.date).join() === next.map(day => day.date).join()) return;
+
+  if (document.getElementById('batch-multi-mode').value === 'one_per_day' && previous.length && next.length) {
+    const templates = new Map(previous.map((day, index) => [day.date, batchTemplateTickets[index]]));
+    const schedule = getProfileDefaultSchedule();
+    batchTemplateTickets = next.map(day => templates.get(day.date) || {
+      ...schedule, issue_key: '', comment: ''
+    });
+  }
+  onBatchPeriodOrWeekdayChange();
+}
+
+async function refreshBatchAbsences() {
+  const revision = ++batchAbsencesRevision;
+  const { absences } = await apiCall('/api/calendar/absences');
+  if (revision === batchAbsencesRevision) applyBatchAbsences(absences);
+}
+
+async function openBatchCalendar() {
+  if (!batchCalendarDate) batchCalendarDate = batchLocalDate();
+  renderBatchCalendar();
+  try {
+    await refreshBatchAbsences();
+    renderBatchCalendar();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function moveBatchCalendar(direction) {
+  const month = new Date(batchCalendarDate.slice(0, 7) + '-01T00:00:00Z');
+  month.setUTCMonth(month.getUTCMonth() + direction);
+  const next = direction === 0 ? batchLocalDate() : month.toISOString().slice(0, 10);
+  if (!batchCalendar[next.slice(0, 4)]) return;
+  batchCalendarDate = next;
+  renderBatchCalendar();
+}
+
+function changeBatchCalendarMonth() {
+  const month = document.getElementById('batch-calendar-month').value;
+  if (month && batchCalendar[month.slice(0, 4)]) batchCalendarDate = month + '-01';
+  renderBatchCalendar();
+}
+
+function selectBatchCalendarDay(day) {
+  batchCalendarDate = day;
+  renderBatchCalendar();
+  document.querySelector('#batch-calendar-grid [aria-pressed="true"]')?.focus();
+}
+
+function renderBatchCalendar() {
+  const month = batchCalendarDate.slice(0, 7);
+  const first = new Date(month + '-01T00:00:00Z');
+  const year = first.getUTCFullYear();
+  const monthIndex = first.getUTCMonth();
+  const days = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const offset = (first.getUTCDay() + 6) % 7;
+  const today = batchLocalDate();
+  const events = new Map(batchCalendar[year].map(event => [event[0], event]));
+  document.getElementById('batch-calendar-month').value = month;
+  document.getElementById('batch-calendar-heading').textContent = new Intl.DateTimeFormat('pt-BR', {
+    month: 'long', year: 'numeric', timeZone: 'UTC'
+  }).format(first);
+  document.getElementById('batch-calendar-prev').disabled = monthIndex === 0 && !batchCalendar[year - 1];
+  document.getElementById('batch-calendar-next').disabled = monthIndex === 11 && !batchCalendar[year + 1];
+
+  const cells = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map(label => `<span class="batch-calendar-weekday">${label}</span>`);
+  for (let blank = 0; blank < offset; blank++) cells.push('<span aria-hidden="true"></span>');
+  for (let number = 1; number <= days; number++) {
+    const day = month + '-' + String(number).padStart(2, '0');
+    const event = events.get(day);
+    const absence = batchAbsences[day];
+    const label = [formatDateBrFromIso(day), event?.[1], absence && 'Ausência: ' + absence].filter(Boolean).join(' · ');
+    cells.push(`<button type="button" class="batch-calendar-day" aria-pressed="${day === batchCalendarDate}"
+      ${day === today ? 'aria-current="date"' : ''} aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"
+      onclick="selectBatchCalendarDay('${day}')">
+      <strong>${number}</strong>
+      ${event ? `<span class="batch-calendar-event ${event[2] ? 'calendar-holiday' : 'calendar-note'}">${escapeHtml(event[1])}</span>` : ''}
+      ${absence ? `<span class="batch-calendar-event calendar-absence">${escapeHtml(absence)}</span>` : ''}
+    </button>`);
+  }
+  document.getElementById('batch-calendar-grid').innerHTML = cells.join('');
+  document.getElementById('batch-calendar-selected').textContent = formatDateBrFromIso(batchCalendarDate);
+  const selectedEvent = events.get(batchCalendarDate);
+  document.getElementById('batch-calendar-day-note').textContent = selectedEvent?.[1] || '';
+  document.getElementById('batch-calendar-title').value = batchAbsences[batchCalendarDate] || '';
+  document.getElementById('batch-calendar-remove').hidden = !batchAbsences[batchCalendarDate];
+  document.getElementById('batch-calendar-status').textContent = '';
+}
+
+async function submitBatchAbsence(remove) {
+  const title = document.getElementById('batch-calendar-title').value.trim();
+  const status = document.getElementById('batch-calendar-status');
+  if (!remove && !title) {
+    status.textContent = 'Informe o motivo da ausência.';
+    return;
+  }
+  const save = document.getElementById('batch-calendar-save');
+  const deleteButton = document.getElementById('batch-calendar-remove');
+  if (save.disabled) return;
+  save.disabled = deleteButton.disabled = true;
+  try {
+    const { absences } = await apiCall('/api/calendar/absences', 'POST', {
+      date: batchCalendarDate, title: remove ? '' : title
+    }, 0);
+    batchAbsencesRevision++;
+    applyBatchAbsences(absences);
+    renderBatchCalendar();
+    status.textContent = remove ? 'Ausência removida.' : 'Ausência salva.';
+  } catch (err) {
+    status.textContent = err.message;
+  } finally {
+    save.disabled = deleteButton.disabled = false;
+  }
+}
+
 function getBatchActiveDaysInfo() {
   const startDateStr = document.getElementById('batch-start-date').value;
   const endDateStr = document.getElementById('batch-end-date').value;
@@ -6146,35 +6939,43 @@ function getBatchActiveDaysInfo() {
   );
   const weekdaysNames = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 
-  if (!startDateStr || !endDateStr || startDateStr > endDateStr) {
+  if (!startDateStr || !endDateStr || startDateStr > endDateStr ||
+      !batchCalendar[startDateStr.slice(0, 4)] || !batchCalendar[endDateStr.slice(0, 4)]) {
     return { valid: false, calendarDays: 0, skippedDays: 0, activeDays: [] };
   }
 
-  const cur = new Date(startDateStr + 'T12:00:00');
-  const end = new Date(endDateStr + 'T12:00:00');
+  const cur = new Date(startDateStr + 'T00:00:00Z');
+  const end = new Date(endDateStr + 'T00:00:00Z');
   let calendarDays = 0;
   let skippedDays = 0;
+  let skippedHolidays = 0;
+  let skippedAbsences = 0;
   const activeDays = [];
 
   // Limite de seguranca de 180 dias para evitar loops acidentais em datas invalidas
   while (cur <= end && calendarDays < 180) {
     calendarDays++;
     const iso = cur.toISOString().slice(0, 10);
-    const wd = (cur.getDay() + 6) % 7; // Seg=0..Dom=6
-    if (allowedWeekdays.has(wd)) {
+    const wd = (cur.getUTCDay() + 6) % 7; // Seg=0..Dom=6
+    const isHoliday = batchCalendar[iso.slice(0, 4)].some(([day, , blocksBatch]) => day === iso && blocksBatch);
+    if (!allowedWeekdays.has(wd)) {
+      skippedDays++;
+    } else if (isHoliday) {
+      skippedHolidays++;
+    } else if (Object.hasOwn(batchAbsences, iso)) {
+      skippedAbsences++;
+    } else {
       activeDays.push({
         date: iso,
         date_br: formatDateBrFromIso(iso),
         weekday: weekdaysNames[wd],
         wd_index: wd
       });
-    } else {
-      skippedDays++;
     }
-    cur.setDate(cur.getDate() + 1);
+    cur.setUTCDate(cur.getUTCDate() + 1);
   }
 
-  return { valid: true, calendarDays, skippedDays, activeDays };
+  return { valid: true, calendarDays, skippedDays, skippedHolidays, skippedAbsences, activeDays };
 }
 
 function initBatchTabDefaults() {
@@ -6189,6 +6990,7 @@ function initBatchTabDefaults() {
   if (eEl && !eEl.value) eEl.value = defSch.end_hm;
   previewBatchBaseSchedule();
   onBatchPeriodOrWeekdayChange();
+  refreshBatchAbsences().catch(err => showToast(err.message, 'error'));
 }
 
 function onBatchPeriodOrWeekdayChange() {
@@ -6203,7 +7005,7 @@ function onBatchPeriodOrWeekdayChange() {
     }
   } else {
     if (infoEl) {
-      infoEl.innerHTML = `Período selecionado: <strong>${info.calendarDays} dia(s) corrido(s)</strong> | <strong>${info.activeDays.length} dia(s) habilitado(s)</strong> para lançamento (${info.skippedDays} dia(s) pulado(s) pelo seletor Seg-Dom).`;
+      infoEl.innerHTML = `Período selecionado: <strong>${info.calendarDays} dia(s) corrido(s)</strong> | <strong>${info.activeDays.length} dia(s) habilitado(s)</strong> (${info.skippedDays} pelo seletor Seg–Dom, ${info.skippedHolidays} feriado(s) e ${info.skippedAbsences} ausência(s)).`;
     }
   }
 
@@ -6622,7 +7424,6 @@ function autoSplitBatchTicketsMorningAfternoon() {
 
 function setBatchPreset(preset) {
   const today = new Date();
-  const formatIso = d => d.toISOString().slice(0, 10);
   const dayOfWeek = (today.getDay() + 6) % 7; // Segunda=0 .. Domingo=6
 
   let start = new Date(today);
@@ -6642,8 +7443,8 @@ function setBatchPreset(preset) {
     start.setDate(today.getDate() - 29);
   }
 
-  document.getElementById('batch-start-date').value = formatIso(start);
-  document.getElementById('batch-end-date').value = formatIso(end);
+  document.getElementById('batch-start-date').value = batchLocalDate(start);
+  document.getElementById('batch-end-date').value = batchLocalDate(end);
   onBatchPeriodOrWeekdayChange();
 }
 
@@ -6662,6 +7463,14 @@ function previewBatchBaseSchedule() {
 }
 
 async function generateBatchPreview() {
+  batchPreviewRows = [];
+  renderBatchPreviewTable();
+  try {
+    await refreshBatchAbsences();
+  } catch (err) {
+    showToast(err.message, 'error');
+    return;
+  }
   const startDateStr = document.getElementById('batch-start-date').value;
   const endDateStr = document.getElementById('batch-end-date').value;
   const multiMode = document.getElementById('batch-multi-mode').value || 'one_per_day';
@@ -6694,11 +7503,11 @@ async function generateBatchPreview() {
         existingByDate[w.date] = (existingByDate[w.date] || 0) + (w.time_spent_seconds || 0);
       });
     } catch (e) {
-      console.warn('Falha ao consultar existentes:', e);
+      renderBatchPreviewTable();
+      showToast('Não foi possível consultar os lançamentos existentes. Tente gerar a grade novamente.', 'error');
+      return;
     }
   }
-
-  batchPreviewRows = [];
 
   info.activeDays.forEach((dObj, dayIdx) => {
     const iso = dObj.date;
@@ -6707,8 +7516,8 @@ async function generateBatchPreview() {
 
     if (multiMode === 'one_per_day') {
       // Ordem cronologica estrita: Ticket #1 para o 1o dia habilitado, Ticket #2 para o 2o dia, ate o ultimo dia
-      if (dayIdx < validTickets.length) {
-        const tpl = validTickets[dayIdx];
+      const tpl = batchTemplateTickets[dayIdx];
+      if (tpl && (tpl.issue_key || '').trim()) {
         batchPreviewRows.push({
           date: iso,
           weekday: dObj.weekday,
@@ -6883,9 +7692,25 @@ function updateBatchSummaryCount() {
 }
 
 async function submitBatchWorklogs() {
+  const btn = document.getElementById('batch-submit-btn');
+  if (btn.disabled) return;
   const selected = batchPreviewRows.filter(r => r.selected);
   if (selected.length === 0) {
     showToast('Selecione ao menos 1 lançamento na tabela para enviar.', 'error');
+    return;
+  }
+  const activeDates = new Set(getBatchActiveDaysInfo().activeDays.map(day => day.date));
+  if (selected.some(row => !activeDates.has(row.date))) {
+    showToast('A grade contém datas desabilitadas. Gere a revisão novamente antes de enviar.', 'error');
+    return;
+  }
+  const invalid = selected.find(r => {
+    const calc = computeScheduleMinutes(r.start_hm, r.lunch_start_hm, r.lunch_end_hm, r.end_hm);
+    return !r.issue_key.trim() || !r.end_hm ||
+      Boolean(r.lunch_start_hm) !== Boolean(r.lunch_end_hm) || !calc || calc.error || calc.total <= 0;
+  });
+  if (invalid) {
+    showToast(`Revise o ticket e os horários da linha de ${formatDateBrFromIso(invalid.date)}.`, 'error');
     return;
   }
   const distinctDays = new Set(selected.map(r => r.date)).size;
@@ -6893,17 +7718,19 @@ async function submitBatchWorklogs() {
   const no_comment = document.getElementById('batch-no-comment-chk').checked;
   if (!confirm(`Confirma o lançamento em lote de ${selected.length} apontamento(s) (${distinctDays} dia(s) | Tickets: ${distinctTickets}) diretamente no Jira?`)) return;
 
-  const btn = document.getElementById('batch-submit-btn');
   btn.disabled = true;
   btn.textContent = `Enviando ${selected.length} lançamentos ao Jira...`;
 
   try {
     const res = await apiCall('/api/worklogs/batch-create', 'POST', {
       no_comment,
+      allowed_weekdays: Array.from(document.querySelectorAll('.batch-wd-chk:checked'), checkbox => Number(checkbox.value)),
       entries: selected
-    });
-    showToast(res.message, 'success');
-    await generateBatchPreview();
+    }, 0);
+    const createdRows = new Set(res.created_indices.map(index => selected[index]));
+    batchPreviewRows = batchPreviewRows.filter(row => !createdRows.has(row));
+    renderBatchPreviewTable();
+    showToast(res.message, res.errors.length ? 'error' : 'success');
     await loadDashboard();
   } catch (err) {
     showToast(err.message, 'error');
@@ -7703,10 +8530,16 @@ HTML_PAGE = (
     .replace("/*__ANALYTICS_JS__*/", ANALYTICS_JS)
     .replace("__LOGO_SVG__", LOGO_SVG)
     .replace("__THEME_LOGOS__", THEME_LOGOS_HTML)
-    .replace("__BRAND_TITLE_ICONS__", BRAND_TITLE_ICONS_HTML)
+    .replace("__BRAND_TITLE__", BRAND_TITLE_HTML)
     .replace("__LOFI_SCENES__", LOFI_SCENES_HTML)
     .replace("__THEME_BADGES__", "")
     .replace("__LOFI_GIRL_AVATAR__", LOFI_GIRL_AVATAR_DATA_URI)
+    .replace("__CALENDAR_FIRST_YEAR__", str(FIRST_YEAR))
+    .replace("__CALENDAR_LAST_YEAR__", str(LAST_YEAR))
+    .replace("__BATCH_CALENDAR__", json.dumps({
+        year: [(event.day.isoformat(), event.name, event.blocks_batch) for event in calendar_events(year)]
+        for year in range(FIRST_YEAR, LAST_YEAR + 1)
+    }, ensure_ascii=False, separators=(",", ":")))
 )
 
 
@@ -7768,6 +8601,10 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
 
         try:
+            if path == "/api/calendar/absences":
+                self._send_json({"absences": load_calendar_absences(get_default_config_dir())})
+                return
+
             if path == "/api/mascot":
                 from mascote_runtime.control import status as mascot_status
                 self._send_json(mascot_status())
@@ -7778,6 +8615,31 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
             if path in ["/favicon.svg", "/favicon.ico", "/logo.svg"]:
                 self._send_svg(LOGO_SVG)
+                return
+
+            if path.startswith(("/assets/lofi/", "/assets/title/")):
+                _, _, asset_dir, filename = path.split("/", 3)
+                theme, _, extension = filename.rpartition(".")
+                if asset_dir == "lofi":
+                    allowed = theme in LOFI_BANNER_CAPTIONS and extension in {"gif", "png"}
+                else:
+                    allowed = filename in BRAND_TITLE_FILES
+                if not allowed:
+                    self.send_error(404)
+                    return
+                image_path = Path(__file__).with_name("assets") / asset_dir / filename
+                try:
+                    image_file = image_path.open("rb")
+                except FileNotFoundError:
+                    self.send_error(404)
+                    return
+                with image_file:
+                    self.send_response(200)
+                    self.send_header("Content-Type", f"image/{extension}")
+                    self.send_header("Content-Length", str(os.fstat(image_file.fileno()).st_size))
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    shutil.copyfileobj(image_file, self.wfile)
                 return
 
             if path in ["/assets/lofigirl.png", "/lofigirl-avatar.png"]:
@@ -7912,6 +8774,17 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 self._send_json(details)
                 return
 
+            if path == "/api/jira/dds/images/list":
+                issue_key = clean_jira_issue_key(query.get("key", [""])[0] or query.get("issue_key", [""])[0] or "")
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket não informada."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                imgs = sp_mgr.list_dds_images(issue_key)
+                self._send_json({"success": True, "images": imgs})
+                return
+
             if path == "/api/sharepoint/status":
                 state_mgr = StateManager()
                 sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
@@ -7970,6 +8843,25 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
         try:
             body = self._read_json_body()
+
+            if path == "/api/calendar/absences":
+                day_str = body.get("date", "")
+                title = body.get("title")
+                try:
+                    day = date.fromisoformat(day_str)
+                except (TypeError, ValueError):
+                    self._send_json({"error": "Data inválida para a ausência."}, status_code=400)
+                    return
+                if day.isoformat() != day_str or not FIRST_YEAR <= day.year <= LAST_YEAR:
+                    self._send_json({"error": "Data fora do calendário disponível."}, status_code=400)
+                    return
+                if not isinstance(title, str) or len(title.strip()) > 120:
+                    self._send_json({"error": "Informe um motivo de até 120 caracteres."}, status_code=400)
+                    return
+                base_dir = get_default_config_dir()
+                save_calendar_absence(base_dir, day, title.strip())
+                self._send_json({"absences": load_calendar_absences(base_dir)})
+                return
 
             if path == "/api/mascot":
                 from mascote_runtime.control import configure as configure_mascot
@@ -8082,6 +8974,96 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": res.get("error", "Texto inválido.")}, status_code=400)
                     return
                 self._send_json(res)
+                return
+
+            if path == "/api/jira/dds/fill-template":
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                cfg = BotConfig.load()
+                from sharepoint_client import DEFAULT_DDS_CHECKLIST_TEMPLATE
+                current_fill = sp_mgr.load_filled_dds(issue_key) if issue_key else None
+                user_email = cfg.jira.email or ""
+                user_name = user_email.split("@")[0].replace(".", " ").title() if user_email else "Desenvolvedor"
+                self._send_json({
+                    "success": True,
+                    "default_checklist": DEFAULT_DDS_CHECKLIST_TEMPLATE,
+                    "current_fill": current_fill,
+                    "default_autor": user_name,
+                    "default_data": datetime.now().strftime("%d/%m/%Y"),
+                })
+                return
+
+            if path == "/api/jira/dds/fill":
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket inválida."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                res = sp_mgr.save_filled_dds(issue_key=issue_key, fill_data=body)
+                if res.get("success"):
+                    JiraClient.invalidate_ticket_cache(issue_key)
+
+                # Opcional: comentar no Jira caso solicitado
+                if body.get("post_jira_comment"):
+                    try:
+                        cfg = BotConfig.load()
+                        client = JiraClient(cfg.jira, state_mgr)
+                        role_label = "Desenvolvimento" if body.get("role") != "homologacao" else "Homologação"
+                        autor = body.get("autor_nome") or body.get("testador_nome") or "Desenvolvedor"
+                        dt = body.get("data_preenchimento") or body.get("testador_data") or datetime.now().strftime("%d/%m/%Y")
+                        det = body.get("implementacao_texto") or body.get("testador_detalhes") or ""
+                        comment_msg = f"*[DDS - {role_label} Concluído]*\n*Responsável:* {autor}\n*Data:* {dt}\n\n*Detalhes:*\n{det}"
+                        client.add_comment(issue_key, comment_msg)
+                        res["jira_comment_posted"] = True
+                    except Exception as je:
+                        logger.warning("Falha ao registrar comentario no Jira: %s", je)
+                        res["jira_comment_error"] = str(je)
+
+                self._send_json(res)
+                return
+
+            if path == "/api/jira/dds/images/upload":
+                import base64
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                filename = (body.get("filename") or "evidencia.png").strip()
+                b64_content = body.get("content_base64") or ""
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket inválida."}, status_code=400)
+                    return
+                if not b64_content:
+                    self._send_json({"error": "Nenhum dado de imagem recebido."}, status_code=400)
+                    return
+                if "," in b64_content:
+                    b64_content = b64_content.split(",", 1)[1]
+                try:
+                    raw_bytes = base64.b64decode(b64_content)
+                except Exception as ex_b64:
+                    self._send_json({"error": f"Conteúdo Base64 inválido: {ex_b64}"}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                res = sp_mgr.save_dds_image(issue_key, filename, raw_bytes)
+                if res.get("success"):
+                    JiraClient.invalidate_ticket_cache(issue_key)
+                self._send_json(res)
+                return
+
+            if path == "/api/jira/dds/images/delete":
+                issue_key = clean_jira_issue_key(body.get("key") or body.get("issue_key") or "")
+                img_id = (body.get("id") or body.get("image_id") or "").strip()
+                if not issue_key or not img_id:
+                    self._send_json({"error": "Chave ou ID da imagem não informados."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                ok = sp_mgr.delete_dds_image(issue_key, img_id)
+                if ok:
+                    JiraClient.invalidate_ticket_cache(issue_key)
+                    self._send_json({"success": True, "message": "Imagem removida com sucesso."})
+                else:
+                    self._send_json({"error": "Imagem não encontrada ou falha ao excluir."}, status_code=404)
                 return
 
             if path == "/api/update":
@@ -8409,23 +9391,53 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
                 entries = body.get("entries", [])
                 no_comment = bool(body.get("no_comment", False))
+                allowed_weekdays = body.get("allowed_weekdays", list(range(5)))
+                if not isinstance(allowed_weekdays, list) or any(
+                    type(day) is not int or not 0 <= day <= 6 for day in allowed_weekdays
+                ):
+                    self._send_json({"error": "Dias da semana inválidos para o lote."}, status_code=400)
+                    return
                 if not entries:
                     self._send_json({"error": "Nenhum lançamento informado no lote."}, status_code=400)
                     return
 
+                absences = load_calendar_absences(state_mgr.base_dir)
                 success_count = 0
                 days_launched: set[str] = set()
                 tickets_launched: List[str] = []
                 errors: List[str] = []
+                created_indices: List[int] = []
+                schedule_warnings: List[str] = []
                 fallback_cache: Dict[str, str] = {}
 
                 prof_act = cfg.get_active_profile()
                 def_s = prof_act.get_entry_hm()
                 def_e = prof_act.get_planned_exit_hm()
 
-                for item in entries:
+                for index, item in enumerate(entries):
                     d_str = (item.get("date") or "")[:10]
                     issue_key = (item.get("issue_key") or cfg.jira.default_issue or "ATIVDIV-32").strip().upper()
+                    try:
+                        work_day = date.fromisoformat(d_str)
+                    except ValueError:
+                        errors.append(f"{d_str} ({issue_key}): data inválida")
+                        continue
+                    if not FIRST_YEAR <= work_day.year <= LAST_YEAR:
+                        errors.append(f"{d_str} ({issue_key}): ano fora do calendário disponível")
+                        continue
+                    holiday = next(
+                        (event for event in calendar_events(work_day.year) if event.day == work_day and event.blocks_batch),
+                        None,
+                    )
+                    if holiday:
+                        errors.append(f"{d_str} ({issue_key}): feriado de {holiday.name}")
+                        continue
+                    if d_str in absences:
+                        errors.append(f"{d_str} ({issue_key}): ausência no calendário")
+                        continue
+                    if work_day.weekday() not in allowed_weekdays:
+                        errors.append(f"{d_str} ({issue_key}): dia da semana desabilitado")
+                        continue
                     start_hm = (item.get("start_hm") or def_s).strip()
                     ls_hm = (item.get("lunch_start_hm") or "").strip()
                     le_hm = (item.get("lunch_end_hm") or "").strip()
@@ -8475,20 +9487,30 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                             comment=final_comment,
                             no_comment=no_comment,
                         )
-                        wid = str(res.get("worklog_id", ""))
-                        if wid:
-                            state_mgr.save_worklog_schedule(wid, {
+                        if res.get("status") != "success":
+                            raise RuntimeError("O Jira não confirmou o lançamento.")
+                    except Exception as e:
+                        errors.append(f"{d_str} ({issue_key}): {e}")
+                        continue
+
+                    success_count += 1
+                    created_indices.append(index)
+                    days_launched.add(d_str)
+                    if issue_key not in tickets_launched:
+                        tickets_launched.append(issue_key)
+
+                    wid = res.get("worklog_id")
+                    if wid:
+                        try:
+                            state_mgr.save_worklog_schedule(str(wid), {
                                 "start_hm": start_hm,
                                 "lunch_start_hm": ls_hm,
                                 "lunch_end_hm": le_hm,
                                 "end_hm": end_hm,
                             })
-                        success_count += 1
-                        days_launched.add(d_str)
-                        if issue_key not in tickets_launched:
-                            tickets_launched.append(issue_key)
-                    except Exception as e:
-                        errors.append(f"{d_str} ({issue_key}): {e}")
+                        except Exception:
+                            logger.exception("Falha ao guardar os horários do worklog %s", wid)
+                            schedule_warnings.append(f"{d_str} ({issue_key})")
 
                 if success_count == 0 and errors:
                     self._send_json({"error": f"Falha ao lançar lote: {'; '.join(errors[:3])}"}, status_code=400)
@@ -8501,9 +9523,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 )
                 if errors:
                     msg += f" ({len(errors)} falha(s): {'; '.join(errors[:2])})"
+                if schedule_warnings:
+                    msg += f" Horários locais não salvos em {len(schedule_warnings)} lançamento(s) confirmados no Jira."
                 self._send_json({
                     "success": True,
                     "created_count": success_count,
+                    "created_indices": created_indices,
                     "days_count": len(days_launched),
                     "tickets": tickets_launched,
                     "errors": errors,

@@ -38,6 +38,105 @@ SHAREPOINT_SCOPES = [
 ]
 DEFAULT_AUTHORITY = "https://login.microsoftonline.com/organizations"
 
+# Template oficial do Checklist de Revisao Final de Codigo da Consisa (DDS)
+DEFAULT_DDS_CHECKLIST_TEMPLATE: List[Dict[str, str]] = [
+    {
+        "categoria": "Padrão de codificação",
+        "pergunta": "Todos os códigos incluídos apenas para fins de testes foram devidamente retirados?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Padrão de codificação",
+        "pergunta": "Os valores gerados pelo sistema estão corretos de acordo com as regras estabelecidas?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Padrão de codificação",
+        "pergunta": "Todas as variáveis e métodos não utilizados foram retirados?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Padrão de codificação",
+        "pergunta": "Todas as variáveis foram devidamente inicializadas?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Persistência de dados",
+        "pergunta": "O campo incluído está sendo gravado/atualizado corretamente?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Persistência de dados",
+        "pergunta": "A exclusão dos registros foi tratada adequadamente?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "SQL",
+        "pergunta": "Todos os SQLs de consulta gerados observam a ordem de índices e chaves nas cláusulas join?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "SQL",
+        "pergunta": "Todos os SQLs de consulta gerados observam a ordem de índices e chaves nas cláusulas where?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "SQL",
+        "pergunta": "Todos os SQLs de alteração / exclusão estão considerando a chave primária completa?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "A ordem de tabulação dos campos está correta?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "A máscara do(s) campo(s) está de acordo com o tipo do campo?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "O sistema está bloqueando a digitação em campos são apenas de visualização/consulta? Inclusive em grades.",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "Todas as literais de telas e/ou relatórios estão escritas corretamente (acentuação, erros de português e concordância)?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "Todos os campos e botões estão sendo habilitados e desabilitados nas situações esperadas?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "O sistema está permitindo o não preenchimento de campos opcionais?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "Todos os campos obrigatórios têm seu preenchimento criticado no sistema e devidamente destacados?",
+        "padrao": "Não aplicável",
+    },
+    {
+        "categoria": "Interface",
+        "pergunta": "Todos os objetos instanciados/criados estão sendo destruídos ao finalizar a unit?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Envio para teste",
+        "pergunta": "Todas as alterações estão descritas para o testador? inclusive identificando possíveis processos que possam ter sido afetados (em caso de alteração em algo \"público\")?",
+        "padrao": "Sim",
+    },
+    {
+        "categoria": "Envio para teste",
+        "pergunta": "A tarefa está sendo enviada para teste no ambiente correto (projeto mensal ou produção)?",
+        "padrao": "Sim",
+    },
+]
+
 
 def encode_sharepoint_sharing_url(url: str) -> str:
     """
@@ -96,6 +195,8 @@ class SharePointManager:
         self.auth_meta_path = self.base_dir / "sharepoint_auth_meta.json"
         self.docx_cache_dir = self.base_dir / "dds_docx_cache"
         self.docx_cache_dir.mkdir(parents=True, exist_ok=True)
+        self.dds_images_dir = self.base_dir / "dds_images"
+        self.dds_images_dir.mkdir(parents=True, exist_ok=True)
 
     def _load_auth_meta(self) -> Dict[str, Any]:
         if self.auth_meta_path.exists():
@@ -406,6 +507,11 @@ class SharePointManager:
             "source": "manual_upload",
         }
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            from jira_client import JiraClient
+            JiraClient.invalidate_ticket_cache(issue_key)
+        except Exception:
+            pass
         return {"success": True, "meta": meta}
 
     def detect_and_import_from_downloads(
@@ -582,6 +688,137 @@ class SharePointManager:
             return data, meta
         except Exception:
             return None
+
+    def save_filled_dds(self, issue_key: str, fill_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Salva o preenchimento estruturado da DDS (Desenvolvimento, Homologacao e Checklist)
+        para um determinado ticket, persistindo localmente e atualizando o .docx correspondente.
+        """
+        clean_key = self._safe_key(issue_key.upper())
+        fill_path = self.docx_cache_dir / f"fill_{clean_key}.json"
+
+        payload = dict(fill_data)
+        payload["issue_key"] = issue_key.upper()
+        payload["saved_at"] = datetime.now().isoformat()
+        fill_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        # Atualiza a versao manual .docx caso exista para refletir o texto atualizado
+        self._sync_fill_into_manual_docx(clean_key, payload)
+
+        return {"success": True, "message": "Preenchimento da DDS salvo com sucesso!", "meta": payload}
+
+    def load_filled_dds(self, issue_key: str) -> Optional[Dict[str, Any]]:
+        """Carrega os dados previamente preenchidos para determinado ticket, se houver."""
+        clean_key = self._safe_key(issue_key.upper())
+        fill_path = self.docx_cache_dir / f"fill_{clean_key}.json"
+        if not fill_path.exists():
+            return None
+        try:
+            return json.loads(fill_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _sync_fill_into_manual_docx(self, clean_key: str, payload: Dict[str, Any]) -> None:
+        """Sincroniza os dados preenchidos com o arquivo de cache da DDS."""
+        meta_path = self.docx_cache_dir / f"manual_{clean_key}.meta.json"
+        if meta_path.exists():
+            try:
+                cur_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                cur_meta["last_fill"] = payload.get("saved_at")
+                meta_path.write_text(json.dumps(cur_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+    # ==================== IMAGENS E EVIDENCIAS LOCAIS DA DDS ====================
+
+    def save_dds_image(self, issue_key: str, filename: str, content_bytes: bytes) -> Dict[str, Any]:
+        """Salva uma imagem avulsa ou captura colada para a DDS deste ticket."""
+        clean_key = self._safe_key(issue_key.upper())
+        if not clean_key:
+            return {"success": False, "error": "Chave do ticket invalida."}
+        if not content_bytes or len(content_bytes) < 10:
+            return {"success": False, "error": "Arquivo de imagem vazio."}
+        if len(content_bytes) > 20 * 1024 * 1024:
+            return {"success": False, "error": "A imagem excede o tamanho limite de 20MB."}
+
+        safe_fname = re.sub(r"[^a-zA-Z0-9_.-]", "_", filename or "captura.png")
+        if not safe_fname.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")):
+            safe_fname = f"{safe_fname}.png"
+
+        target_dir = self.dds_images_dir / clean_key
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
+        file_path = target_dir / f"{timestamp_str}_{safe_fname}"
+        file_path.write_bytes(content_bytes)
+
+        return {
+            "success": True,
+            "filename": file_path.name,
+            "size": len(content_bytes),
+            "id": file_path.stem,
+            "message": "Imagem anexada a DDS com sucesso!",
+        }
+
+    def list_dds_images(self, issue_key: str) -> List[Dict[str, Any]]:
+        """Lista todas as imagens locais anexadas a DDS do ticket."""
+        import base64
+        clean_key = self._safe_key(issue_key.upper())
+        target_dir = self.dds_images_dir / clean_key
+        if not target_dir.exists():
+            return []
+
+        images: List[Dict[str, Any]] = []
+        for p in sorted(target_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=False):
+            if not p.is_file():
+                continue
+            low_name = p.name.lower()
+            if not low_name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")):
+                continue
+            try:
+                raw_bytes = p.read_bytes()
+                ext = low_name.rsplit(".", 1)[-1]
+                if ext == "jpg":
+                    ext = "jpeg"
+                b64 = base64.b64encode(raw_bytes).decode("ascii")
+                data_uri = f"data:image/{ext};base64,{b64}"
+                display_name = re.sub(r"^\d{8}_\d{6}_\d{3}_", "", p.name)
+                mtime_str = datetime.fromtimestamp(p.stat().st_mtime).strftime("%d/%m/%Y %H:%M")
+                images.append({
+                    "id": f"local-dds-img-{p.stem}",
+                    "name": display_name,
+                    "filename": p.name,
+                    "size": len(raw_bytes),
+                    "url": data_uri,
+                    "proxy_url": data_uri,
+                    "thumbnail_url": data_uri,
+                    "created": mtime_str,
+                    "author": "Anexado Localmente (DDS)",
+                    "section": "Evidencias e Imagens Anexadas",
+                    "is_embedded": False,
+                    "is_local": True,
+                })
+            except Exception as e:
+                logger.warning("Falha ao ler imagem DDS local %s: %s", p, e)
+        return images
+
+    def delete_dds_image(self, issue_key: str, image_id: str) -> bool:
+        """Exclui uma imagem local da DDS."""
+        clean_key = self._safe_key(issue_key.upper())
+        target_dir = self.dds_images_dir / clean_key
+        if not target_dir.exists():
+            return False
+
+        clean_id = re.sub(r"^local-dds-img-", "", image_id).strip()
+        for p in target_dir.iterdir():
+            if p.is_file() and (p.stem == clean_id or p.name == clean_id):
+                try:
+                    p.unlink()
+                    return True
+                except Exception as e:
+                    logger.warning("Erro ao excluir imagem local DDS %s: %s", p, e)
+                    return False
+        return False
 
     # ==================== DOWNLOAD VIA MICROSOFT GRAPH API ====================
 

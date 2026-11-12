@@ -205,6 +205,7 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
     import base64
     import html as html_lib
     import io
+    import posixpath
     import re
     import xml.etree.ElementTree as ET
     import zipfile
@@ -267,11 +268,9 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
                         if t_mode == "external" or target.startswith(("http://", "https://", "mailto:")):
                             rid_to_link[rid] = target
                         else:
-                            norm = target.lstrip("/")
-                            if norm.startswith("../"):
-                                norm = norm.replace("../", "", 1)
-                            if not norm.startswith("word/"):
-                                norm = f"word/{norm}"
+                            # Caminhos absolutos partem da raiz do DOCX.
+                            # Os relativos partem do diretório de word/document.xml.
+                            norm = posixpath.normpath(posixpath.join("/word", target)).lstrip("/")
                             if norm in namelist:
                                 rid_to_media[rid] = norm
                 except Exception as ex_rel:
@@ -380,7 +379,7 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
                     if ext == "jpg":
                         ext = "jpeg"
                     data_uri = f"data:image/{ext};base64,{base64.b64encode(raw_bytes).decode('ascii')}"
-                    fname = media_path.replace("word/media/", "")
+                    fname = posixpath.basename(media_path)
                     info = (data_uri, len(raw_bytes), fname)
                     media_b64_cache[media_path] = info
                     return info
@@ -1660,6 +1659,21 @@ class JiraClient:
     """Cliente HTTP para envio de Worklogs ao Jira com auto-deteccao de protocolo de autenticacao."""
 
     _account_id_cache: Dict[str, str] = {}
+    _ticket_details_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+    _TICKET_DETAILS_CACHE_TTL: float = 30.0
+
+    @classmethod
+    def invalidate_ticket_cache(cls, issue_key: Optional[str] = None) -> None:
+        """
+        Invalida o cache em memoria de detalhes/DDS de chamados.
+        Se issue_key for informado, invalida apenas o ticket especificado.
+        Se omitido ou None, limpa todo o cache de tickets.
+        """
+        if issue_key:
+            clean = clean_jira_issue_key(issue_key)
+            cls._ticket_details_cache.pop(clean, None)
+        else:
+            cls._ticket_details_cache.clear()
 
     def __init__(self, jira_config: JiraConfig, state_manager: Optional[StateManager] = None):
         self.config = jira_config
@@ -2052,6 +2066,15 @@ class JiraClient:
         if not clean or clean == "SEM_TICKET":
             return {"error": "Chave de ticket inválida."}
 
+        import time as _time
+
+        if force_refresh:
+            self.invalidate_ticket_cache(clean)
+        elif not is_parent_call and clean in self._ticket_details_cache:
+            ts, cached_details = self._ticket_details_cache[clean]
+            if _time.time() - ts < self._TICKET_DETAILS_CACHE_TTL:
+                return cached_details
+
         base_url = self.config.get_clean_base_url()
         headers = self._get_auth_headers()
 
@@ -2434,6 +2457,57 @@ class JiraClient:
         else:
             structured_dds = regex_structured
 
+        # Carrega imagens locais anexadas a DDS deste ticket
+        local_dds_images = sp_mgr.list_dds_images(clean)
+        for loc_img in local_dds_images:
+            if not any(i.get("id") == loc_img.get("id") for i in images_list):
+                images_list.append(loc_img)
+
+        # Mescla preenchimento estruturado local caso exista para o ticket
+        local_fill = sp_mgr.load_filled_dds(clean)
+        if local_fill:
+            if not structured_dds:
+                structured_dds = estruturar_conteudo_dds("")
+            structured_dds["has_structured_data"] = True
+            structured_dds["has_local_fill"] = True
+            structured_dds["fill_saved_at"] = local_fill.get("saved_at")
+            structured_dds["incluir_checklist"] = local_fill.get("incluir_checklist", True)
+            if local_fill.get("incluir_checklist") is False:
+                structured_dds["checklist"] = []
+
+            dev_sec = structured_dds.setdefault("desenvolvimento", {})
+            if local_fill.get("autor_nome"):
+                dev_sec["responsavel"] = local_fill["autor_nome"]
+            if local_fill.get("data_preenchimento"):
+                dev_sec["data"] = local_fill["data_preenchimento"]
+            if local_fill.get("implementacao_texto"):
+                dev_sec["detalhamento"] = local_fill["implementacao_texto"]
+            if local_fill.get("recomendacoes"):
+                dev_sec["recomendacoes"] = local_fill["recomendacoes"]
+
+            if local_fill.get("checklist"):
+                structured_dds["checklist"] = local_fill["checklist"]
+
+            tl_sec = structured_dds.setdefault("team_leader", {})
+            if local_fill.get("pacote"):
+                tl_sec["pacote"] = local_fill["pacote"]
+            if local_fill.get("fonte"):
+                tl_sec["fonte"] = local_fill["fonte"]
+            if local_fill.get("cartao"):
+                tl_sec["cartao"] = local_fill["cartao"]
+
+            if local_fill.get("role") == "homologacao":
+                test_sec = structured_dds.setdefault("teste_implementacao", {})
+                if local_fill.get("testador_nome"):
+                    test_sec["responsavel"] = local_fill["testador_nome"]
+                if local_fill.get("testador_data"):
+                    test_sec["data"] = local_fill["testador_data"]
+                if local_fill.get("testador_detalhes"):
+                    test_sec["detalhamento"] = local_fill["testador_detalhes"]
+                if local_fill.get("testador_status"):
+                    res_hom = structured_dds.setdefault("resultado_homologacao", {})
+                    res_hom["parecer"] = local_fill["testador_status"]
+
         # 5. Extracao de Metadados do Movidesk
         summary = f.get("summary") or "Sem título"
         movidesk_num = ""
@@ -2515,7 +2589,7 @@ class JiraClient:
             "last_error": sp_pub_status.get("last_error") or "",
         }
 
-        return {
+        res_payload = {
             "key": clean,
             "summary": summary,
             "status": st_name,
@@ -2546,6 +2620,10 @@ class JiraClient:
             "dds_inherited_from_parent": dds_inherited_from_parent,
             "url": f"{base_url}/browse/{clean}",
         }
+        if not is_parent_call:
+            import time as _t
+            self._ticket_details_cache[clean] = (_t.time(), res_payload)
+        return res_payload
 
     @worklog_activity
     def submit_worklog(

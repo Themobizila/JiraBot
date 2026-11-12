@@ -77,6 +77,11 @@ def is_allowed_app_file(rel_path: Path) -> bool:
             return False
     if rel_path.name in FORBIDDEN_NAMES:
         return False
+    if rel_path.parts[:2] == ("assets", "lofi") and len(rel_path.parts) == 3:
+        return (
+            rel_path.stem in {"dark", "light", "halloween", "natal", "ano_novo", "pascoa"}
+            and rel_path.suffix.lower() in {".gif", ".png"}
+        )
     if rel_path.suffix.lower() == ".json" and rel_path.parts[:2] == ("assets", "sprites"):
         return True
     if rel_path.parts[:2] == ("assets", "raw_sheets") and len(rel_path.parts) == 3 and rel_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
