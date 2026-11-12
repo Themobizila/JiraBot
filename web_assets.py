@@ -4319,6 +4319,79 @@ details.ui-drawer[open] .ui-drawer-caret {
   padding: 22px 24px;
 }
 
+.ticket-focus-content {
+  display: grid;
+  gap: 16px;
+}
+
+.ticket-focus-content small {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.ticket-focus-content small { margin-top: 6px; }
+.ai-agents-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+.ticket-focus-content .btn-group { flex-wrap: wrap; }
+.ticket-mcp-global-rule {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 16px 20px;
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 8px 8px 0;
+  background: var(--bg-subtle);
+  line-height: 1.6;
+}
+.ticket-mcp-global-rule h3 { margin: 0 0 10px; font-size: 16px; }
+.ticket-mcp-global-rule p + p { margin-top: 10px; }
+.ticket-mcp-global-rule ul { list-style: disc; padding-left: 1.25em; margin: 10px 0; }
+.ticket-mcp-global-rule li + li { margin-top: 5px; }
+.ticket-mcp-global-rule code {
+  color: var(--text-main);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 1px 4px;
+  overflow-wrap: anywhere;
+}
+.ticket-mcp-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.ticket-mcp-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.ticket-mcp-list li > small:last-child { text-align: right; }
+.ticket-mcp-list li small { margin: 0; }
+.ticket-mcp-status {
+  justify-self: end;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.ticket-mcp-status.is-online { color: var(--success); font-weight: 700; }
+.ticket-focus-content p { margin: 0; }
+.ticket-focus-suggestion { margin-bottom: 18px; }
+.ticket-focus-suggestion[hidden] { display: none; }
+
 /* 3. Hero Timer Bar Estilo Toggl Track + Estudio Editorial (.toggl-hero-card) */
 .toggl-hero-card {
   background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-subtle) 100%);

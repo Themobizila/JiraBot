@@ -71,6 +71,8 @@ class BotEngine:
         new_issue_key: str,
         comment: Optional[str] = None,
         now: Optional[datetime] = None,
+        *,
+        expected_issue: Optional[str] = None,
     ) -> DailyState:
         """
         Troca a tarefa ativa em tempo real. Se o cronometro estiver rodando,
@@ -82,6 +84,14 @@ class BotEngine:
         self.refresh_state()
 
         old_issue = self.get_active_issue()
+        if expected_issue is not None:
+            interval = self.state.intervals[-1] if self.state.intervals else None
+            if (
+                old_issue != expected_issue or self.state.status != "RUNNING" or self.state.is_logged
+                or not interval or interval.end is not None or now < datetime.fromisoformat(interval.start)
+                or clean_jira_issue_key(interval.issue_key or old_issue) != old_issue
+            ):
+                raise ValueError("O intervalo ativo mudou. Confira o ticket antes de trocar.")
         new_issue = clean_jira_issue_key(new_issue_key) or old_issue
 
         if self.state.status == "RUNNING":

@@ -20,6 +20,7 @@ from config import BotConfig, get_default_config_dir
 from engine import BotEngine
 from jira_client import JiraClient
 from storage import StateManager
+from ticket_focus import focus_pilot
 from tray import SystemTrayIcon
 from watcher import SessionWatcher
 
@@ -131,6 +132,7 @@ class JiraBotService:
         self._start_mtime = get_source_files_mtime()
 
     def _on_session_lock(self):
+        focus_pilot.reset()
         from mascote_runtime.control import publish_event
         publish_event("Windows_Lock", self.state_manager.base_dir)
         self.engine.handle_lock()

@@ -77,6 +77,8 @@ def is_allowed_app_file(rel_path: Path) -> bool:
             return False
     if rel_path.name in FORBIDDEN_NAMES:
         return False
+    if rel_path.parts == ("assets", "notifications", "palmeiras-radio-globo.wav"):
+        return True
     if rel_path.parts[:2] == ("assets", "lofi") and len(rel_path.parts) == 3:
         return (
             rel_path.stem in {"dark", "light", "halloween", "natal", "ano_novo", "pascoa"}

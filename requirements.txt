@@ -30,3 +30,6 @@ msal>=1.28.0
 # Renderização e leitura das sheets PNG do mascote opcional
 Pillow>=10.0
 
+# Integração local com editores de IA (opcional, requer Python 3.10+)
+mcp>=1.28.1,<2; python_version >= "3.10"
+

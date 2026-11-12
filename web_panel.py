@@ -37,6 +37,7 @@ from history import WEEKDAYS_PT, generate_report
 from jira_client import JiraClient
 from review_dialog import get_fallback_description, show_pre_exit_popup
 from sharepoint_client import SharePointManager
+from ticket_focus import TICKET_KEY, focus_pilot, mcp_connections, rank_assigned_tickets
 from work_calendar import FIRST_YEAR, LAST_YEAR, calendar_events, load_calendar_absences, save_calendar_absence
 from web_assets import (
     ANALYTICS_JS,
@@ -207,6 +208,8 @@ def build_dashboard_payload() -> Dict[str, Any]:
     return {
         "version": APP_VERSION,
         "theme": config.theme or "dark",
+        "ticket_focus": focus_pilot.snapshot(),
+        "ai_agents": mcp_connections.snapshot(),
         "service": {
             "is_running": status["is_running"],
             "pid": status["pid"],
@@ -900,6 +903,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <button type="button" class="chapter-pill is-active" onclick="switchSubView('tab-dashboard', 'dash-pane-focus', this)"><span class="chapter-num">01</span> Cronômetro &amp; Foco</button>
         <button type="button" class="chapter-pill" onclick="switchSubView('tab-dashboard', 'dash-pane-timeline', this)"><span class="chapter-num">02</span> Linha do Tempo Hoje</button>
         <button type="button" class="chapter-pill" onclick="switchSubView('tab-dashboard', 'dash-pane-intervals', this)"><span class="chapter-num">03</span> Intervalos &amp; Transferência</button>
+        <button type="button" class="chapter-pill" onclick="switchSubView('tab-dashboard', 'dash-pane-ai-agents', this)"><span class="chapter-num">04</span> Agentes de IA</button>
       </nav>
 
       <!-- SUB-VISTA 1: HERO TIMER, TICKET ATIVO E FAIXA COMPACTA DE INDICADORES -->
@@ -1005,6 +1009,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
         </div>
 
         <!-- FAIXA COMPACTA DE INDICADORES DO DIA -->
+        <div class="card ticket-focus-content ticket-focus-suggestion" id="ticket-focus-suggestion" hidden aria-live="polite">
+          <div class="card-title">Sugestão de ticket</div>
+          <p id="ticket-focus-description"></p>
+          <div class="btn-group">
+            <button type="button" class="btn btn-primary btn-sm" onclick="answerTicketFocus('switch')">Trocar agora</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="answerTicketFocus('ignore')">Ignorar</button>
+          </div>
+        </div>
         <div class="bento-kpi-strip scroll-reveal" id="sec-dash-kpis">
           <div class="bento-kpi-item" data-idx="01">
             <div class="bento-kpi-head">
@@ -1153,6 +1165,44 @@ HTML_PAGE = r"""<!DOCTYPE html>
             </div>
           </div>
         </details>
+      </div>
+      <div class="subview-pane" id="dash-pane-ai-agents">
+        <div class="card ticket-focus-content">
+          <div class="ai-agents-header">
+            <div>
+              <h2 class="card-title">Agentes de IA</h2>
+              <small>Editores conectados ao JiraBot neste computador.</small>
+            </div>
+            <div class="btn-group">
+              <button type="button" class="btn btn-outline btn-sm" onclick="testTicketPrompt(this)">Testar popup e som</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="copyTicketMcpInstructions()">Copiar instruções</button>
+            </div>
+          </div>
+          <div id="ticket-mcp-connections"><small>Nenhum editor conectado nesta execução.</small></div>
+        </div>
+        <div class="card ticket-focus-content">
+          <div class="ai-agents-header">
+            <div>
+              <h2 class="card-title">Regra global</h2>
+              <small>Cole este texto nas instruções globais do seu editor.</small>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="copyTicketMcpGlobalRule()">Copiar regra global</button>
+          </div>
+          <div id="ticket-mcp-global-rule" class="ticket-mcp-global-rule">
+            <h3>Seleção de ticket no JiraBot</h3>
+            <p>A cada mensagem, verifique se o usuário está iniciando ou mudando de tarefa vinculada ao Jira. Considere o contexto da conversa, links de DDS, chaves Jira e referências a modelos, BIs ou subtarefas.</p>
+            <p>Ao identificar uma tarefa nova ou uma mudança de tarefa, use o MCP <code>jirabot_ticket_focus</code> antes de começar o trabalho:</p>
+            <ul>
+              <li>Se houver uma chave inequívoca, chame <code>sugerir_ticket</code> para que o JiraBot valide a atribuição.</li>
+              <li>Se houver apenas um título ou nome de modelo, use <code>buscar_tickets</code> com poucas palavras do título e chame <code>sugerir_ticket</code> somente quando houver uma correspondência clara.</li>
+              <li>Se houver dúvida, peça a chave ou a subtarefa.</li>
+            </ul>
+            <p>Envie uma única sugestão por início ou mudança de tarefa. A confirmação da troca cabe ao usuário no JiraBot. Se o MCP estiver indisponível, informe a limitação e prossiga com o trabalho que puder realizar.</p>
+          </div>
+          <div id="ticket-mcp-rule-fallback" hidden>
+            <textarea class="form-control" rows="11" readonly spellcheck="false" aria-label="Regra global em Markdown"></textarea>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -3818,6 +3868,8 @@ async function loadDashboard(forceScheduleFill = false) {
   try {
     const data = await apiCall('/api/status', 'GET', null, 1);
     appState = data;
+    renderAiAgents(data.ai_agents);
+    renderTicketFocus(data.ticket_focus);
 
     if (data.version) {
       document.getElementById('sidebar-version-label').textContent = `Gerenciador de Horas v${data.version}`;
@@ -4021,6 +4073,114 @@ function quickEditIssueToday(issueKey, currentComment) {
   document.getElementById('switch-issue-input').value = issueKey;
   document.getElementById('switch-comment-input').value = currentComment;
   document.getElementById('switch-comment-input').focus();
+}
+
+function renderAiAgents(connections) {
+  const clients = new Map();
+  for (const session of connections || []) {
+    const key = session.name.trim().toLowerCase();
+    const client = clients.get(key) || {
+      name: key === 'codex-mcp-client' ? 'Codex' : session.name,
+      online: false,
+      last_seen: session.last_seen,
+      last_tool: null,
+      last_use: null,
+    };
+    client.online ||= session.online;
+    if (Date.parse(session.last_seen) > Date.parse(client.last_seen)) {
+      client.last_seen = session.last_seen;
+    }
+    if (session.last_use && (!client.last_use || Date.parse(session.last_use) > Date.parse(client.last_use))) {
+      client.last_use = session.last_use;
+      client.last_tool = session.last_tool;
+    }
+    clients.set(key, client);
+  }
+  const dateLabel = value => new Date(value).toLocaleString('pt-BR');
+  document.getElementById('ticket-mcp-connections').innerHTML = clients.size
+    ? '<ul class="ticket-mcp-list">' + Array.from(clients.values(), client => `
+        <li>
+          <strong>${escapeHtml(client.name)}</strong>
+          <span class="ticket-mcp-status${client.online ? ' is-online' : ''}">${client.online ? 'Conectado' : 'Desconectado'}</span>
+          <small>Último contato ${dateLabel(client.last_seen)}</small>
+          <small>${client.last_tool ? `Última chamada: ${escapeHtml(client.last_tool)} · ${dateLabel(client.last_use)}` : 'Sem chamadas registradas'}</small>
+        </li>`).join('') + '</ul>'
+    : '<small>Nenhum editor conectado nesta execução.</small>';
+}
+
+function renderTicketFocus(data) {
+  const box = document.getElementById('ticket-focus-suggestion');
+  const suggestion = data?.suggestion;
+  box.hidden = !suggestion;
+  if (suggestion) {
+    document.getElementById('ticket-focus-description').textContent =
+      `${suggestion.issue} — ${suggestion.summary}. ${suggestion.reason}.`;
+  }
+}
+
+async function answerTicketFocus(action) {
+  const suggestion = appState?.ticket_focus?.suggestion;
+  if (!suggestion) return;
+  try {
+    const res = await apiCall('/api/ticket-focus', 'POST', { action, id: suggestion.id }, 0);
+    showToast(res.message, 'success');
+  } catch (err) { showToast(err.message, 'error'); }
+  await loadDashboard();
+}
+
+async function testTicketPrompt(button) {
+  button.disabled = true;
+  try {
+    const theme = document.documentElement.dataset.theme;
+    await apiCall('/api/ticket-focus/test-popup', 'POST', { theme }, 0);
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function copyTicketMcpInstructions() {
+  const [python, script] = __TICKET_MCP_COMMAND__;
+  const config = JSON.stringify({ mcpServers: { jirabot_ticket_focus: { command: python, args: ['-B', script] } } }, null, 2);
+  const instructions = [
+    'Conecte o MCP JiraBot como servidor local STDIO. No Codex, use Configurações → Servidores MCP.',
+    'Em editores que aceitam mcpServers em JSON, use a configuração abaixo. Recarregue o editor depois.',
+    'Ao iniciar ou mudar de tarefa, inclusive ao resumir uma DDS, use a chave do ticket ou busque pelo título do BI ou subtarefa com buscar_tickets.',
+    'Se a tarefa for inequívoca, chame sugerir_ticket uma vez e continue o trabalho. O usuário decide a troca no JiraBot.',
+    config
+  ].join('\n\n');
+  try {
+    await navigator.clipboard.writeText(instructions);
+    showToast('Instruções do MCP copiadas.', 'success');
+  } catch (err) { showToast('Não foi possível copiar as instruções.', 'error'); }
+}
+
+async function copyTicketMcpGlobalRule() {
+  const rule = document.getElementById('ticket-mcp-global-rule');
+  const inlineMarkdown = element => Array.from(element.childNodes, node =>
+    node.nodeName === 'CODE' ? '`' + node.textContent + '`' : node.textContent
+  ).join('').trim();
+  const markdown = Array.from(rule.children, block => {
+    if (block.tagName === 'H3') return '## ' + block.textContent;
+    if (block.tagName === 'UL') {
+      return Array.from(block.children, item => '- ' + inlineMarkdown(item)).join('\n');
+    }
+    return inlineMarkdown(block);
+  }).join('\n\n');
+  const fallback = document.getElementById('ticket-mcp-rule-fallback');
+  try {
+    await navigator.clipboard.writeText(markdown);
+    fallback.hidden = true;
+    showToast('Regra global copiada.', 'success');
+  } catch (err) {
+    fallback.hidden = false;
+    const field = fallback.querySelector('textarea');
+    field.value = markdown;
+    field.focus();
+    field.select();
+    showToast('Copie o texto selecionado com Ctrl+C.', 'error');
+  }
 }
 
 async function submitSwitchOrComment(action) {
@@ -8531,6 +8691,10 @@ HTML_PAGE = (
     .replace("__LOGO_SVG__", LOGO_SVG)
     .replace("__THEME_LOGOS__", THEME_LOGOS_HTML)
     .replace("__BRAND_TITLE__", BRAND_TITLE_HTML)
+    .replace("__TICKET_MCP_COMMAND__", json.dumps([
+        str(Path(sys.executable).with_name("python.exe")) if Path(sys.executable).name.lower() == "pythonw.exe" else sys.executable,
+        str(Path(__file__).with_name("jirabot_mcp.py").resolve()),
+    ]))
     .replace("__LOFI_SCENES__", LOFI_SCENES_HTML)
     .replace("__THEME_BADGES__", "")
     .replace("__LOFI_GIRL_AVATAR__", LOFI_GIRL_AVATAR_DATA_URI)
@@ -8601,6 +8765,10 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
 
         try:
+            if path == "/api/ticket-focus/pending":
+                self._send_json({"suggestion": focus_pilot.pending_assistant()})
+                return
+
             if path == "/api/calendar/absences":
                 self._send_json({"absences": load_calendar_absences(get_default_config_dir())})
                 return
@@ -8843,6 +9011,125 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
 
         try:
             body = self._read_json_body()
+
+            if path == "/api/ticket-focus/test-popup":
+                host = self.headers.get("Host", "").lower()
+                origin = self.headers.get("Origin")
+                if (
+                    host.partition(":")[0] not in {"localhost", "127.0.0.1"}
+                    or (origin and origin != f"http://{host}")
+                    or self.headers.get_content_type() != "application/json"
+                ):
+                    self._send_json({"error": "Abra o painel local para testar o aviso."}, status_code=403)
+                    return
+                from notifier import send_ticket_prompt
+
+                theme = body.get("theme")
+                if theme not in ("dark", "light", "halloween", "natal", "ano_novo", "pascoa", "auto"):
+                    theme = "auto"
+                if not send_ticket_prompt(self.server.server_port, "test", True, theme):
+                    self._send_json({"error": "Não foi possível abrir o aviso de teste."}, status_code=500)
+                    return
+                self._send_json({"status": "ok"})
+                return
+
+            if path in {"/api/ticket-focus/search", "/api/ticket-focus/suggest", "/api/ticket-focus/connection"}:
+                host = self.headers.get("Host", "").partition(":")[0].lower()
+                if host not in {"localhost", "127.0.0.1"} or self.headers.get("Origin"):
+                    self._send_json({"error": "Este endpoint aceita apenas o conector local."}, status_code=403)
+                    return
+                if path == "/api/ticket-focus/connection":
+                    session_id = body.get("id")
+                    event = body.get("event")
+                    name = body.get("name", "")
+                    tool = body.get("tool", "")
+                    if (
+                        not isinstance(session_id, str) or len(session_id) != 32
+                        or any(char not in "0123456789abcdef" for char in session_id)
+                        or event not in ("heartbeat", "tool", "closed")
+                        or not isinstance(name, str) or len(name) > 80
+                        or tool not in (("buscar_tickets", "sugerir_ticket") if event == "tool" else ("",))
+                    ):
+                        self._send_json({"error": "Evento de conexão inválido."}, status_code=400)
+                        return
+                    mcp_connections.record(session_id, event, name, tool)
+                    self._send_json({"status": "ok"})
+                    return
+                if path == "/api/ticket-focus/search":
+                    context = body.get("context")
+                    if not isinstance(context, str) or not 2 <= len(context.strip()) <= 120:
+                        self._send_json({"error": "Informe um título com 2 a 120 caracteres."}, status_code=400)
+                        return
+                    client = JiraClient(BotConfig.load().jira, StateManager())
+                    tickets = client.get_my_assigned_tickets(max_results=100)
+                    self._send_json({"status": "ok", "tickets": rank_assigned_tickets(context, tickets)})
+                    return
+                raw_issue = body.get("issue")
+                reason = body.get("reason", "")
+                issue = raw_issue.strip().upper() if isinstance(raw_issue, str) else ""
+                if len(issue) > 40 or not TICKET_KEY.fullmatch(issue) or not isinstance(reason, str) or len(reason) > 160:
+                    self._send_json({"error": "Informe uma chave válida e um motivo de até 160 caracteres."}, status_code=400)
+                    return
+                cfg = BotConfig.load()
+                state_mgr = StateManager()
+                state = state_mgr.load_state()
+                source = clean_jira_issue_key(state.target_issue or cfg.jira.default_issue) or "SEM_TICKET"
+                if state.status != "RUNNING" or state.is_logged:
+                    self._send_json({"status": "inactive", "message": "Inicie ou retome o cronômetro do JiraBot para receber a sugestão."})
+                    return
+                if source == issue:
+                    self._send_json({"status": "already_active", "message": f"{issue} já é o ticket ativo."})
+                    return
+                assigned = JiraClient(cfg.jira, state_mgr).get_my_assigned_tickets(query_text=issue)
+                match = next((ticket for ticket in assigned if ticket.get("key") == issue), None)
+                if not match:
+                    self._send_json({"status": "not_verified", "message": "Não foi possível confirmar um ticket aberto atribuído à conta do JiraBot."})
+                    return
+                current = state_mgr.load_state()
+                current_issue = clean_jira_issue_key(current.target_issue or cfg.jira.default_issue) or "SEM_TICKET"
+                if current.date_str != state.date_str or current_issue != source or current.status != "RUNNING" or current.is_logged:
+                    self._send_json({"status": "stale", "message": "O cronômetro ou o ticket ativo mudou durante a consulta."})
+                    return
+                suggestion_id = focus_pilot.offer_assistant(
+                    issue, match.get("summary") or "", source,
+                    reason.strip() or "ticket informado na conversa", datetime.now(),
+                )
+                if suggestion_id:
+                    from notifier import send_ticket_prompt
+
+                    send_ticket_prompt(self.server.server_port, suggestion_id, cfg.notifications_enabled, cfg.theme or "auto")
+                self._send_json({
+                    "status": "pending_confirmation",
+                    "message": f"Confirme a sugestão para {issue} no aviso do desktop ou no Painel do Dia, em Cronômetro & Foco.",
+                })
+                return
+
+            if path == "/api/ticket-focus":
+                action = body.get("action")
+                if action in ("configure", "bind", "backdate"):
+                    self._send_json({"error": "O piloto de foco por aplicativos está desativado."}, status_code=403)
+                    return
+                if action not in {"ignore", "switch"}:
+                    self._send_json({"error": "Ação inválida."}, status_code=400)
+                    return
+                suggestion = focus_pilot.take(body.get("id"))
+                if not suggestion:
+                    self._send_json({"error": "Esta sugestão expirou."}, status_code=409)
+                    return
+                if action == "ignore":
+                    self._send_json({"message": "Sugestão dispensada."})
+                    return
+                engine = BotEngine(config=BotConfig.load(), state_manager=StateManager())
+                try:
+                    engine.switch_ticket(
+                        suggestion["issue"],
+                        expected_issue=suggestion["source"],
+                    )
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status_code=409)
+                    return
+                self._send_json({"message": f"Ticket ativo alterado para {suggestion['issue']}."})
+                return
 
             if path == "/api/calendar/absences":
                 day_str = body.get("date", "")
