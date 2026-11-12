@@ -1195,7 +1195,8 @@ class TestThemeSelectorAndSeasonalThemes(unittest.TestCase):
         self.assertIn('NIP3fNueJMA', UI_FX_JS)
         self.assertIn('UgHKb_7884o', UI_FX_JS)
         self.assertIn('V6V080RVeAE', UI_FX_JS)
-        self.assertIn('XSXEaikz0Bc', UI_FX_JS)
+        self.assertIn("ytId: '4t4AQ15yj1M',\n      ytUrl: 'https://www.youtube.com/watch?v=4t4AQ15yj1M'", UI_FX_JS)
+        self.assertIn("ytId: 'S_MOd40zlYU',\n      ytUrl: 'https://www.youtube.com/watch?v=S_MOd40zlYU'", UI_FX_JS)
         self.assertIn('0sfDth4lMLc', UI_FX_JS)
         self.assertIn('window.LofiPlayer', UI_FX_JS)
 

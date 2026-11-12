@@ -5875,8 +5875,8 @@ const LofiAudioEngine = (function () {
     natal: {
       title: 'Lofi Girl - Christmas Cozy Radio',
       sub: 'Ao Vivo & Mix Natalino Oficial Lofi Girl',
-      ytId: 'XSXEaikz0Bc',
-      ytUrl: 'https://www.youtube.com/watch?v=XSXEaikz0Bc'
+      ytId: '4t4AQ15yj1M',
+      ytUrl: 'https://www.youtube.com/watch?v=4t4AQ15yj1M'
     },
     halloween: {
       title: 'Lofi Girl - Halloween Spooky Ambience',
@@ -5899,8 +5899,8 @@ const LofiAudioEngine = (function () {
     dark: {
       title: 'Lofi Girl - Beats to Relax / Study',
       sub: 'Lofi Hip Hop Mix Oficial Lofi Girl',
-      ytId: 'CFGLoQIhmow',
-      ytUrl: 'https://www.youtube.com/watch?v=CFGLoQIhmow'
+      ytId: 'S_MOd40zlYU',
+      ytUrl: 'https://www.youtube.com/watch?v=S_MOd40zlYU'
     }
   };
   TRACKS.light = TRACKS.dark;
