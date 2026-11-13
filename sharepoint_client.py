@@ -37,6 +37,31 @@ SHAREPOINT_SCOPES = [
     "https://graph.microsoft.com/User.Read",
 ]
 DEFAULT_AUTHORITY = "https://login.microsoftonline.com/organizations"
+SHAREPOINT_WRITE_SCOPES = ["https://graph.microsoft.com/Files.ReadWrite", "https://graph.microsoft.com/User.Read"]
+
+
+class DdsWriteAuthorizationRequired(ValueError):
+    """A conexão de leitura ainda não foi autorizada para edição."""
+
+
+def _dds_write_error(response, stage):
+    status = response.status_code
+    try:
+        code = response.json().get("error", {}).get("code", "")
+    except (ValueError, AttributeError):
+        code = ""
+    if status == 423 or code in ("resourceLocked", "lockMismatch", "fileLocked"):
+        detail = "A DDS está bloqueada no SharePoint. Feche o Word se estiver editando o arquivo ou aguarde a liberação do bloqueio."
+    elif status == 412 or code in ("preconditionFailed", "eTagMismatch"):
+        detail = "A DDS mudou depois da prévia. Atualize o documento e gere outra prévia."
+    elif status == 409:
+        detail = "O SharePoint informou um conflito de gravação. Confira a DDS e gere outra prévia."
+    elif status in (401, 403):
+        detail = "O SharePoint recusou a gravação. Confira se a conta conectada tem acesso de edição neste documento."
+    else:
+        detail = "O SharePoint recusou a operação."
+    suffix = f" · {code}" if isinstance(code, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", code) else ""
+    return ValueError(f"{detail} ({stage} · HTTP {status}{suffix})")
 
 # Template oficial do Checklist de Revisao Final de Codigo da Consisa (DDS)
 DEFAULT_DDS_CHECKLIST_TEMPLATE: List[Dict[str, str]] = [
@@ -246,7 +271,7 @@ class SharePointManager:
         app = msal.PublicClientApplication(cid, authority=auth, token_cache=cache)
         return app, cache, cid, auth
 
-    def _acquire_silent_token(self) -> Tuple[Optional[str], str]:
+    def _acquire_silent_token(self, scopes=None) -> Tuple[Optional[str], str]:
         """
         Tenta obter token valido silenciosamente via MSAL (usa Refresh Token automaticamente).
         Retorna (token_ou_None, email_da_conta). Nunca registra o valor do token em logs.
@@ -258,7 +283,7 @@ class SharePointManager:
                 if not accounts:
                     continue
                 for acc in accounts:
-                    res = app.acquire_token_silent(SHAREPOINT_SCOPES, account=acc)
+                    res = app.acquire_token_silent(scopes or SHAREPOINT_SCOPES, account=acc)
                     if res and "access_token" in res:
                         self._save_msal_cache(cache)
                         username = acc.get("username") or self._load_auth_meta().get("account") or "Conta Microsoft 365"
@@ -267,16 +292,16 @@ class SharePointManager:
             logger.warning("Falha ao renovar sessao silenciosa do SharePoint: %s", e)
         return None, ""
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self, allow_write: bool = False) -> Dict[str, Any]:
         """Retorna o status publico e seguro da conexao Microsoft 365 (sem jamais incluir tokens)."""
-        token, username = self._acquire_silent_token()
+        token, username = self._acquire_silent_token(SHAREPOINT_WRITE_SCOPES) if allow_write else self._acquire_silent_token()
         connected = bool(token)
         # Descarta referencia local imediatamente
         token = None
 
         with SharePointManager._lock:
             pending = None
-            if SharePointManager._pending_flow and SharePointManager._auth_in_progress and SharePointManager._pending_flow.get("client_id") == target_cid:
+            if SharePointManager._pending_flow and SharePointManager._auth_in_progress:
                 expires_at = SharePointManager._pending_flow.get("expires_at", 0)
                 if time.time() < expires_at:
                     pending = {
@@ -319,6 +344,7 @@ class SharePointManager:
         login_hint: str = "",
         profile: str = "graph_cli",
         custom_client_id: str = "",
+        allow_write: bool = False,
     ) -> Dict[str, Any]:
         """
         Inicia a autenticacao OAuth2 Microsoft 365 em background:
@@ -328,7 +354,8 @@ class SharePointManager:
         - mode='device': Device Code Flow (padrao).
         - mode='interactive': Loopback SSO no navegador padrao.
         """
-        token, username = self._acquire_silent_token()
+        scopes = SHAREPOINT_WRITE_SCOPES if allow_write else SHAREPOINT_SCOPES
+        token, username = self._acquire_silent_token(scopes)
         if token:
             token = None
             return {
@@ -360,7 +387,7 @@ class SharePointManager:
             def _run_interactive() -> None:
                 try:
                     app, cache, cid, auth = self._build_app(client_id=target_cid, authority=authority)
-                    kwargs: Dict[str, Any] = {"scopes": SHAREPOINT_SCOPES, "timeout": 180}
+                    kwargs: Dict[str, Any] = {"scopes": scopes, "timeout": 180}
                     if clean_hint and "@" in clean_hint:
                         kwargs["login_hint"] = clean_hint
                     res = app.acquire_token_interactive(**kwargs)
@@ -412,7 +439,7 @@ class SharePointManager:
 
         try:
             app, cache, cid, auth = self._build_app(client_id=target_cid, authority=authority)
-            flow = app.initiate_device_flow(scopes=SHAREPOINT_SCOPES)
+            flow = app.initiate_device_flow(scopes=scopes)
         except Exception as e:
             return {"success": False, "error": str(e)}
         if "user_code" not in flow:
@@ -975,6 +1002,9 @@ class SharePointManager:
                             best_docx_bytes = b_data
                             best_docx_meta = {
                                 "filename": item_name,
+                                "item_id": item_id,
+                                "drive_id": (item_json.get("parentReference") or {}).get("driveId"),
+                                "etag": item_json.get("eTag"),
                                 "lastModifiedDateTime": item_mod,
                                 "lastModifiedBy": mod_by,
                                 "webUrl": item_json.get("webUrl") or raw_url,
@@ -1021,6 +1051,9 @@ class SharePointManager:
                                     best_docx_bytes = b_data
                                     best_docx_meta = {
                                         "filename": str(d_ch.get("name") or "DDS.docx"),
+                                        "item_id": ch_id,
+                                        "drive_id": drive_id,
+                                        "etag": d_ch.get("eTag"),
                                         "lastModifiedDateTime": ch_mod,
                                         "lastModifiedBy": mod_by,
                                         "webUrl": d_ch.get("webUrl") or raw_url,
@@ -1091,3 +1124,63 @@ class SharePointManager:
             "folder_files": folder_files,
             "errors": errors,
         }
+
+    def publish_dds_version(self, document, content):
+        """Grava a versão preparada somente se o arquivo ainda tiver o eTag da prévia."""
+        from urllib.parse import quote
+        import requests
+
+        credential, _ = self._acquire_silent_token(SHAREPOINT_WRITE_SCOPES)
+        if not credential:
+            raise DdsWriteAuthorizationRequired("Autorize a edição no Microsoft 365 e gere outra prévia.")
+        drive = quote(document["drive_id"], safe="")
+        item = quote(document["item_id"], safe="")
+        endpoint = f"https://graph.microsoft.com/v1.0/drives/{drive}/items/{item}"
+        authorization = {"Authorization": f"Bearer {credential}"}
+        conditional = {**authorization, "If-Match": document["etag"]}
+
+        def verify_version():
+            current = requests.get(endpoint, headers=authorization, params={"$select": "eTag"}, timeout=20)
+            if current.status_code != 200:
+                raise _dds_write_error(current, "verificação da versão")
+            if current.json().get("eTag") != document["etag"]:
+                raise ValueError("A DDS mudou depois da prévia. Atualize o documento e gere outra prévia.")
+
+        try:
+            if len(content) <= 250_000_000:
+                verify_version()
+                response = requests.put(
+                    f"{endpoint}/content", data=content, timeout=120, allow_redirects=False,
+                    headers={**conditional, "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+                )
+                if response.status_code != 200:
+                    raise _dds_write_error(response, "atualização do documento")
+                return
+
+            response = requests.post(
+                f"{endpoint}/createUploadSession", headers=conditional,
+                timeout=20,
+            )
+            if response.status_code not in (200, 201):
+                raise _dds_write_error(response, "início da gravação")
+            upload_url = response.json().get("uploadUrl")
+            if not upload_url or not upload_url.startswith("https://"):
+                raise ValueError("O SharePoint não disponibilizou o endereço seguro de gravação.")
+            total = len(content)
+            chunk_size = 10 * 1024 * 1024
+            for start in range(0, total, chunk_size):
+                end = min(start + chunk_size, total)
+                if end == total:
+                    verify_version()
+                response = requests.put(
+                    upload_url, data=content[start:end],
+                    headers={"Content-Range": f"bytes {start}-{end - 1}/{total}"}, timeout=60,
+                    allow_redirects=False,
+                )
+                if end == total and response.status_code in (200, 201):
+                    return
+                if end < total and response.status_code == 202:
+                    continue
+                raise _dds_write_error(response, "envio do documento")
+        except requests.RequestException:
+            raise ValueError("Não foi possível confirmar a gravação. Confira a DDS oficial antes de tentar novamente.") from None

@@ -21,6 +21,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import re
 import sys
 import threading
 import time
@@ -34,9 +35,18 @@ from config import BotConfig, ShiftProfile, get_default_config_dir
 from daemon import get_status, restart_background, start_background, stop_background
 from engine import BotEngine, format_duration
 from history import WEEKDAYS_PT, generate_report
-from jira_client import JiraClient
+from jira_client import JiraClient, extrair_documento_docx_completo
 from review_dialog import get_fallback_description, show_pre_exit_popup
-from sharepoint_client import SharePointManager
+from sharepoint_client import DdsWriteAuthorizationRequired, SharePointManager
+from time import monotonic
+from uuid import uuid4
+from dds_append import append_development, prepare_entry
+
+_dds_previews = {}
+_dds_preview_lock = threading.Lock()
+_dds_publish_lock = threading.Lock()
+_dds_agent_reviews = {}
+_dds_approved_examples = {}
 from ticket_focus import TICKET_KEY, focus_pilot, mcp_connections, rank_assigned_tickets
 from work_calendar import FIRST_YEAR, LAST_YEAR, calendar_events, load_calendar_absences, save_calendar_absence
 from web_assets import (
@@ -1175,6 +1185,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             </div>
             <div class="btn-group">
               <button type="button" class="btn btn-outline btn-sm" onclick="testTicketPrompt(this)">Testar popup e som</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="window.open('/dds/revisao?tema=' + encodeURIComponent(document.documentElement.dataset.theme) + '#demo', '_blank', 'popup,width=1100,height=850,noopener')">Testar popup da DDS</button>
               <button type="button" class="btn btn-outline btn-sm" onclick="copyTicketMcpInstructions()">Copiar instruções</button>
             </div>
           </div>
@@ -1198,9 +1209,31 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <li>Se houver dúvida, peça a chave ou a subtarefa.</li>
             </ul>
             <p>Envie uma única sugestão por início ou mudança de tarefa. A confirmação da troca cabe ao usuário no JiraBot. Se o MCP estiver indisponível, informe a limitação e prossiga com o trabalho que puder realizar.</p>
+            <h3>Acréscimo na DDS pelo JiraBot</h3>
+            <p>Quando o usuário pedir para registrar uma atualização na DDS, identifique o ticket e use <code>preparar_acrescimo_dds</code> com o texto proposto para Desenvolvimento. Use o JiraBot para qualquer leitura da DDS.</p>
+            <p>Informe que a proposta está pendente de revisão. A pessoa confere o texto e seu contexto na DDS e decide se confirma a gravação no JiraBot.</p>
+            <p>Antes de escrever, use <code>consultar_revisao_dds</code> com a chave do ticket para buscar um exemplo aprovado de estilo. Após preparar a proposta, chame a mesma ferramenta com o identificador para aguardar o feedback. Se a espera acabar, consulte novamente quando o usuário pedir. Use <code>preparar_acrescimo_dds</code> com <code>revisao_anterior</code> para responder à revisão. Em uma revisão parcial, envie somente o texto substituto. Ao refazer tudo, siga o feedback e apresente uma versão diferente.</p>
           </div>
-          <div id="ticket-mcp-rule-fallback" hidden>
+          <div id="ticket-mcp-global-rule-fallback" hidden>
             <textarea class="form-control" rows="11" readonly spellcheck="false" aria-label="Regra global em Markdown"></textarea>
+          </div>
+        </div>
+        <div class="card ticket-focus-content">
+          <div class="ai-agents-header">
+            <h2 class="card-title">Regra global de consulta de DDS</h2>
+            <button type="button" class="btn btn-outline btn-sm" onclick="copyTicketMcpGlobalRule('ticket-mcp-dds-read-rule')">Copiar regra de consulta</button>
+          </div>
+          <div id="ticket-mcp-dds-read-rule" class="ticket-mcp-global-rule">
+            <h3>Consulta de DDS via JiraBot (Obrigatório)</h3>
+            <p>Ao ler ou analisar um ticket do Jira, use exclusivamente o JiraBot para consultar, ler ou extrair o conteúdo da DDS (Documento de Detalhamento de Solicitação), incluindo tabelas, imagens e conteúdo herdado do ticket pai.</p>
+            <ul>
+              <li>Use a API local do JiraBot em <code>http://127.0.0.1:8765</code>. Consulte <code>GET /api/jira/ticket-details?key=&lt;CHAVE_DO_TICKET&gt;</code> para obter os dados e a estrutura da DDS e <code>GET /api/jira/dds/images/list?key=&lt;CHAVE_DO_TICKET&gt;</code> para as imagens. Se houver uma ferramenta de leitura de DDS no MCP do JiraBot, ela também pode ser usada.</li>
+              <li>Se o painel local estiver indisponível, informe a limitação e peça ao usuário para iniciar o JiraBot. Mantenha a consulta da DDS pendente até que o painel volte.</li>
+              <li>Durante a consulta, mantenha a proibição de ler arquivos <code>.env</code> e de acessar ou exibir tokens e credenciais.</li>
+            </ul>
+          </div>
+          <div id="ticket-mcp-dds-read-rule-fallback" hidden>
+            <textarea class="form-control" rows="11" readonly spellcheck="false" aria-label="Regra de consulta de DDS em Markdown"></textarea>
           </div>
         </div>
       </div>
@@ -2797,6 +2830,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <button type="button" class="btn btn-outline btn-sm" onclick="startSharepointLogin('interactive')" title="Tentar autenticacao direta no navegador local">
               Login Direto (SSO)
             </button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="startSharepointLogin('interactive', null, null, true)">
+            Autorizar edição de DDS
+          </button>
           </div>
         </div>
         <div id="sp-device-flow-status" style="font-size:11.5px; color:var(--text-muted);">Aguardando confirmacao do codigo no navegador...</div>
@@ -3296,8 +3332,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
 <!-- ==================== MODAL: COLAR TEXTO DA DDS ==================== -->
 <!-- ==================== MODAL: PREENCHIMENTO ESTRUTURADO DA DDS (OPCAO 1) ==================== -->
-<div class="modal-backdrop" id="modal-fill-dds" style="display:none; z-index:10002; background:rgba(0, 0, 0, 0.75);" onclick="closeFillDdsModal()">
-  <div class="modal-container" style="max-width:920px; width:95vw; max-height:92vh; display:flex; flex-direction:column; background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius, 12px); box-shadow:0 25px 60px rgba(0,0,0,0.6);" onclick="event.stopPropagation();">
+<div class="modal-backdrop" id="modal-fill-dds" style="display:none; z-index:10002; background:rgba(0, 0, 0, 0.75);" oninput="invalidateDdsAppendPreview()">
+  <div class="modal-container dds-fill-window" onclick="event.stopPropagation();">
     <div class="modal-header" style="flex-shrink:0; background:var(--bg-card); border-bottom:1px solid var(--border-color); padding:16px 22px; display:flex; align-items:center; justify-content:space-between;">
       <div style="display:flex; align-items:center; gap:10px;">
         <div style="width:32px; height:32px; border-radius:8px; background:rgba(139,92,246,0.15); display:flex; align-items:center; justify-content:center;">
@@ -3308,10 +3344,17 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <div style="font-size:11.5px; color:var(--text-muted);">Edição estruturada oficial de desenvolvimento, testes e evidências</div>
         </div>
       </div>
-      <button type="button" class="modal-close-btn" onclick="closeFillDdsModal()">&times;</button>
+      <div class="dds-fill-header-actions">
+        <div id="fill-dds-live-width-controls" class="dds-fill-width-controls" hidden>
+          <label for="fill-dds-live-width">Largura da prévia</label>
+          <input id="fill-dds-live-width" type="range" min="30" max="65" value="48" oninput="this.closest('.dds-fill-window').style.setProperty('--dds-live-width', this.value + '%')">
+        </div>
+        <button type="button" class="modal-close-btn" onclick="closeFillDdsModal()">&times;</button>
+      </div>
     </div>
 
-    <div class="modal-body" style="padding:18px 22px; overflow-y:auto; flex:1; background:var(--bg-card);">
+    <div class="dds-fill-workspace">
+    <div class="modal-body" style="padding:18px 22px; overflow-y:auto; overscroll-behavior:contain; min-height:0; flex:1; background:var(--bg-card);">
       <!-- Seletor de Papel -->
       <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border-color);">
         <div style="display:flex; align-items:center; gap:14px;">
@@ -3330,24 +3373,68 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
       <!-- Bloco 1: Campos do Desenvolvimento -->
       <div id="fill-section-dev" style="display:block;">
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-bottom:14px;">
-          <div>
-            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Nome do Desenvolvedor *</label>
+        <div class="dds-completion-grid">
+          <div class="dds-completion-field">
+            <label for="fill-dev-nome">Nome do Desenvolvedor *</label>
             <input type="text" id="fill-dev-nome" class="form-control" style="font-size:13px; height:38px;" placeholder="ex: João Moura">
           </div>
-          <div>
-            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Data de Conclusão *</label>
+          <div class="dds-completion-field">
+            <label for="fill-dev-data">Data de Conclusão *</label>
             <input type="text" id="fill-dev-data" class="form-control" style="font-size:13px; height:38px;" placeholder="DD/MM/AAAA">
+            <label class="dds-completion-check"><input type="checkbox" id="fill-dev-include-time"> Incluir hora automática</label>
           </div>
-          <div>
-            <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Pacote / Cartão / Branch</label>
+          <div class="dds-completion-field dds-completion-wide">
+            <label for="fill-dev-pacote">Pacote / Cartão / Branch</label>
             <input type="text" id="fill-dev-pacote" class="form-control" style="font-size:13px; height:38px;" placeholder="ex: CNET-2026.01 / Pacote 45">
           </div>
         </div>
 
+        <details class="ui-drawer" style="margin-bottom:14px;">
+          <summary class="ui-drawer-header">Formato do nome e da data na DDS</summary>
+          <div class="ui-drawer-body dds-completion-grid dds-format-grid">
+            <div class="dds-completion-field">
+              <label class="dds-completion-field">Disposição do nome e da data
+                <select id="fill-dev-header-layout" class="form-control">
+                  <option value="date_first">Data acima do nome</option>
+                  <option value="author_first">Nome acima da data</option>
+                  <option value="same_line">Data e nome na mesma linha</option>
+                </select>
+              </label>
+              <label class="dds-completion-field">Tamanho do nome (pt) <input id="fill-dev-author-size" class="form-control" type="number" min="8" max="36" value="11"></label>
+              <label class="dds-completion-field">Rótulo do nome
+                <input id="fill-dev-author-label" class="form-control" value="Responsável:" maxlength="60">
+              </label>
+              <label class="dds-completion-check"><input id="fill-dev-author-bold" type="checkbox"> Nome em negrito</label>
+            </div>
+            <div class="dds-completion-field">
+              <label class="dds-completion-field">Disposição da data e da hora
+                <select id="fill-dev-time-layout" class="form-control" disabled>
+                  <option value="inline">Hora ao lado da data</option>
+                  <option value="below">Hora na linha de baixo</option>
+                </select>
+              </label>
+              <div class="dds-format-sizes">
+                <label class="dds-completion-field">Tamanho da data (pt) <input id="fill-dev-date-size" class="form-control" type="number" min="8" max="36" value="11"></label>
+                <label class="dds-completion-field">Tamanho da hora (pt) <input id="fill-dev-time-size" class="form-control" type="number" min="8" max="36" value="11" disabled></label>
+              </div>
+              <label class="dds-completion-field">Prefixo da data e da hora
+                <input id="fill-dev-date-label" class="form-control" value="-" maxlength="60">
+              </label>
+              <label class="dds-completion-check"><input id="fill-dev-date-bold" type="checkbox"> Data em negrito</label>
+              <label class="dds-completion-check"><input id="fill-dev-time-bold" type="checkbox" disabled> Hora em negrito</label>
+            </div>
+          </div>
+        </details>
         <div style="margin-bottom:14px;">
           <label style="font-size:12px; font-weight:600; color:var(--text-main); display:block; margin-bottom:5px;">Detalhamento da Implementação *</label>
-          <textarea id="fill-dev-detalhes" class="form-control" rows="5" style="font-size:13px; line-height:1.5; min-height:120px;" placeholder="Descreva claramente o que foi alterado no código ou banco de dados..."></textarea>
+          <div class="btn-group" style="align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+            <label for="fill-dev-font-size">Tamanho da letra</label>
+            <select id="fill-dev-font-size" class="form-control" style="width:auto;">
+              <option value="" disabled>Tamanhos mistos</option>
+            </select>
+            <button id="fill-dev-bold" type="button" class="btn btn-outline btn-sm" onmousedown="event.preventDefault()" onclick="toggleDdsBold()" aria-label="Negrito (Ctrl+B)"><strong>B</strong></button>
+          </div>
+          <div id="fill-dev-detalhes" class="form-control" contenteditable="true" role="textbox" aria-label="Detalhamento da implementação" aria-multiline="true" style="font-size:11pt; line-height:1.5; min-height:120px; white-space:pre-wrap; overflow-wrap:anywhere;"></div>
         </div>
 
         <div style="margin-bottom:16px;">
@@ -3387,7 +3474,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
             <div>
               <label style="display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:700; color:var(--text-main); user-select:none;">
-                <input type="checkbox" id="fill-include-checklist" checked onchange="toggleFillChecklist(this.checked)" style="width:17px; height:17px; accent-color:var(--accent-primary, #8b5cf6); cursor:pointer;">
+                <input type="checkbox" id="fill-include-checklist" onchange="toggleFillChecklist(this.checked)" style="width:17px; height:17px; accent-color:var(--accent-primary, #8b5cf6); cursor:pointer;">
                 Preencher Revisão Final de Código (Checklist Oficial)
               </label>
               <div style="font-size:11.5px; color:var(--text-muted); margin-left:25px;">Marque para incluir a verificação de código ou desmarque para dispensar nesta entrega</div>
@@ -3447,12 +3534,25 @@ HTML_PAGE = r"""<!DOCTYPE html>
           Publicar também comentário formal de entrega no chamado do Jira Cloud
         </label>
       </div>
+      <div id="fill-dds-preview" class="card" hidden></div>
     </div>
-
+    <section id="fill-dds-live" class="dds-fill-live" hidden aria-label="Prévia ao vivo da DDS">
+      <header>
+        <strong>Prévia ao vivo da DDS</strong>
+        <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('fill-dds-live-draft')?.scrollIntoView({block:'center'})">Ir para o acréscimo</button>
+      </header>
+      <p id="fill-dds-live-status" role="status"></p>
+      <div id="fill-dds-live-document" class="dds-append-document"></div>
+    </section>
+    </div>
+    <div id="fill-dds-save-status" hidden>
+      <span id="fill-dds-save-message" role="status" aria-live="polite"></span>
+      <button id="fill-dds-authorize" type="button" class="btn btn-outline btn-sm" hidden onclick="authorizeDdsEditing()">Autorizar edição de DDS</button>
+    </div>
     <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:14px 22px; border-top:1px solid var(--border-color); flex-shrink:0; background:var(--bg-card);">
       <button type="button" class="btn btn-outline btn-sm" onclick="closeFillDdsModal()">Cancelar</button>
       <button type="button" class="btn btn-primary btn-sm" id="btn-submit-dds-fill" onclick="submitDdsFill()" style="background:var(--accent-primary, #8b5cf6); border-color:var(--accent-primary, #7c3aed); font-size:12.5px; padding:6px 14px;">
-        Salvar Preenchimento da DDS
+        Gerar prévia
       </button>
     </div>
   </div>
@@ -3480,6 +3580,32 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<dialog id="dds-agent-review" class="card dds-agent-review" aria-labelledby="dds-agent-title">
+  <header><h2 id="dds-agent-title">Revisar acréscimo na DDS</h2>
+    <p id="dds-agent-status" role="status"></p></header>
+  <div class="dds-agent-review-body">
+    <section class="dds-agent-context">
+      <h3>Prévia do acréscimo</h3>
+      <p id="dds-agent-before"></p>
+      <pre id="dds-agent-entry"></pre>
+      <p id="dds-agent-after"></p>
+    </section>
+    <label for="dds-agent-draft">Rascunho de Desenvolvimento</label>
+    <textarea id="dds-agent-draft" class="form-control" rows="5" readonly></textarea>
+    <button id="dds-agent-select" type="button" class="btn btn-outline btn-sm">Selecionar trecho</button>
+    <p id="dds-agent-selected" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></p>
+    <label for="dds-agent-feedback">Orientação para a IA (opcional)</label>
+    <textarea id="dds-agent-feedback" class="form-control" rows="2" maxlength="2000"></textarea>
+    <div class="btn-group">
+      <button id="dds-agent-revise-part" type="button" class="btn btn-outline">Modificar selecionado</button>
+      <button id="dds-agent-revise-all" type="button" class="btn btn-outline">Refazer a DDS</button>
+    </div>
+  </div>
+  <footer class="btn-group">
+    <button id="dds-agent-dismiss" type="button" class="btn btn-outline">Descartar proposta</button>
+    <button id="dds-agent-confirm" type="button" class="btn btn-primary">Confirmar e gravar na DDS oficial</button>
+  </footer>
+</dialog>
 <div id="toast-container"></div>
 
 <script>
@@ -3617,6 +3743,210 @@ window.addEventListener('click', function (e) {
   applyThemePreference(saved);
 })();
 
+let activeDdsAgentReview;
+
+function closeDdsAgentReview(popup) {
+  popup.close();
+  if (location.pathname !== '/dds/revisao') return;
+  const reviewId = /^#revisar-dds=([a-f0-9]{32})$/.exec(location.hash)?.[1];
+  if (reviewId) void apiCall('/api/jira/dds/close-review-window', 'POST', {review_id: reviewId}, 0).catch(() => {});
+  window.close();
+  const fallback = document.getElementById('dds-review-closed');
+  fallback.hidden = false;
+}
+
+function openDdsAgentReview() {
+  if (location.hash === '#demo') {
+    void showDdsAgentReview(null);
+    return;
+  }
+  const match = /^#revisar-dds=([a-f0-9]{32})$/.exec(location.hash);
+  if (!match) return;
+  void showDdsAgentReview(match[1]);
+}
+
+async function showDdsAgentReview(reviewId) {
+  const demo = reviewId === null;
+  if (!demo && location.pathname === '/dds/revisao') document.title = 'JiraBot | Revisão da DDS ' + reviewId;
+  const session = {};
+  activeDdsAgentReview = session;
+  const popup = document.getElementById('dds-agent-review');
+  if (popup.open) popup.close();
+  const closed = document.getElementById('dds-review-closed');
+  if (closed) closed.hidden = true;
+  const status = document.getElementById('dds-agent-status');
+  const confirm = document.getElementById('dds-agent-confirm');
+  const dismiss = document.getElementById('dds-agent-dismiss');
+  const entry = document.getElementById('dds-agent-entry');
+  const before = document.getElementById('dds-agent-before');
+  const after = document.getElementById('dds-agent-after');
+  const draft = document.getElementById('dds-agent-draft');
+  const select = document.getElementById('dds-agent-select');
+  const selected = document.getElementById('dds-agent-selected');
+  let savedSelection = null;
+  selected.hidden = true;
+  selected.textContent = '';
+  select.disabled = true;
+  const feedback = document.getElementById('dds-agent-feedback');
+  const partial = document.getElementById('dds-agent-revise-part');
+  const full = document.getElementById('dds-agent-revise-all');
+  draft.value = feedback.value = '';
+  partial.disabled = full.disabled = true;
+  confirm.disabled = true;
+  confirm.textContent = demo ? 'Simular confirmação' : 'Confirmar e gravar na DDS oficial';
+  dismiss.disabled = false;
+  popup.oncancel = event => {
+    event.preventDefault();
+    if (!dismiss.disabled) closeDdsAgentReview(popup);
+  };
+  dismiss.textContent = 'Descartar proposta';
+  entry.textContent = '';
+  before.textContent = after.textContent = '';
+  document.getElementById('dds-agent-title').textContent = 'Revisar acréscimo na DDS';
+  status.textContent = 'Carregando a proposta…';
+  popup.showModal();
+  dismiss.onclick = async () => {
+    dismiss.disabled = true;
+    try {
+      if (!demo) await apiCall('/api/jira/dds/append-dismiss', 'POST', {review_id: reviewId}, 0);
+    } catch (err) {
+      status.textContent = err.message;
+      dismiss.disabled = false;
+      return;
+    }
+    if (activeDdsAgentReview === session) closeDdsAgentReview(popup);
+  };
+  try {
+    const proposal = 'Ajustado o filtro de período. Validar a seleção de datas e a atualização dos resultados.';
+    const data = demo ? {
+      key: 'TESTE-123',
+      filename: 'DDS de demonstração',
+      draft: proposal,
+      entry: [{runs: [{text: proposal}]}],
+      before: 'Criada a consulta inicial.',
+      after: 'Revisão final',
+    } : await apiCall('/api/jira/dds/append-review', 'POST', {review_id: reviewId}, 0);
+    if (activeDdsAgentReview !== session || !popup.open) return;
+    document.getElementById('dds-agent-title').textContent = data.key + ' · ' + data.filename;
+    before.textContent = data.before ? 'Antes: ' + data.before : '';
+    after.textContent = data.after ? 'Depois: ' + data.after : '';
+    entry.replaceChildren(...data.entry.map(line => {
+      const row = document.createElement('div');
+      if (line.image) {
+        const image = document.createElement('img');
+        image.src = line.image;
+        image.alt = line.name;
+        row.append(image);
+      } else {
+        for (const run of line.runs) {
+          const span = document.createElement(run.bold ? 'strong' : 'span');
+          span.textContent = run.text;
+          if (run.font_size) span.style.fontSize = run.font_size + 'pt';
+          row.append(span);
+        }
+        if (!line.runs.length) row.textContent = '\u00a0';
+      }
+      return row;
+    }));
+    draft.value = data.draft;
+    const awaitRevision = async () => {
+      while (popup.open && activeDdsAgentReview === session) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        if (!popup.open || activeDdsAgentReview !== session) return;
+        try {
+          const updated = await apiCall('/api/jira/dds/append-review', 'POST', {review_id: reviewId}, 0);
+          if (updated.approval !== data.approval && popup.open && activeDdsAgentReview === session) {
+            void showDdsAgentReview(reviewId);
+            return;
+          }
+        } catch (err) {
+          status.textContent = err.message;
+          return;
+        }
+      }
+    };
+    status.textContent = demo ? 'Demonstração. Nenhum documento será alterado.' : 'Confira o acréscimo e o contexto antes de gravar.';
+    confirm.disabled = false;
+    full.disabled = select.disabled = false;
+    select.onmousedown = event => event.preventDefault();
+    select.onclick = () => {
+      const start = draft.selectionStart;
+      const end = draft.selectionEnd;
+      if (start === end) {
+        status.textContent = 'Marque um trecho no rascunho com o mouse ou o teclado.';
+        draft.focus();
+        return;
+      }
+      savedSelection = {start, end};
+      selected.textContent = 'Trecho selecionado: ' + draft.value.slice(start, end);
+      selected.hidden = false;
+      partial.disabled = false;
+    };
+    async function requestRevision(scope) {
+      if (scope === 'selection' && !savedSelection) return;
+      const {start, end} = savedSelection || {};
+      select.disabled = partial.disabled = full.disabled = confirm.disabled = dismiss.disabled = true;
+      try {
+        if (!demo) {
+          await apiCall('/api/jira/dds/append-feedback', 'POST',
+            {review_id: reviewId, approval: data.approval, scope, start, end, feedback: feedback.value}, 0);
+        }
+        status.textContent = demo ? 'Pedido de revisão simulado.' :
+          'Revisão enviada. Se a IA já encerrou a espera, peça que consulte o feedback na conversa original.';
+        dismiss.textContent = 'Fechar';
+        dismiss.onclick = () => closeDdsAgentReview(popup);
+        if (!demo) void awaitRevision();
+      } catch (err) {
+        status.textContent = err.message;
+        partial.disabled = !savedSelection;
+        select.disabled = full.disabled = confirm.disabled = false;
+      } finally {
+        dismiss.disabled = false;
+      }
+    }
+    partial.onmousedown = event => event.preventDefault();
+    partial.onclick = () => requestRevision('selection');
+    full.onclick = () => requestRevision('full');
+    if (data.feedback) {
+      status.textContent = 'Esta proposta foi devolvida à IA. Aguarde uma nova versão.';
+      select.disabled = partial.disabled = full.disabled = confirm.disabled = true;
+      void awaitRevision();
+    }
+    confirm.onclick = async () => {
+      select.disabled = partial.disabled = full.disabled = true;
+      if (demo) {
+        status.textContent = 'Confirmação simulada. Nenhum documento foi alterado.';
+        confirm.disabled = true;
+        dismiss.textContent = 'Fechar';
+        dismiss.onclick = () => closeDdsAgentReview(popup);
+        return;
+      }
+      confirm.disabled = dismiss.disabled = true;
+      status.textContent = 'Aguardando sua confirmação na janela do JiraBot…';
+      try {
+        const result = await apiCall('/api/jira/dds/append-confirm', 'POST',
+          {key: data.key, preview_id: reviewId, approval: data.approval}, 0);
+        if (activeDdsAgentReview !== session) return;
+        status.textContent = result.message;
+        dismiss.textContent = 'Fechar';
+        dismiss.onclick = () => closeDdsAgentReview(popup);
+      } catch (err) {
+        if (activeDdsAgentReview === session) status.textContent = err.message;
+      } finally {
+        if (activeDdsAgentReview === session) dismiss.disabled = false;
+      }
+    };
+  } catch (err) {
+    if (activeDdsAgentReview !== session) return;
+    status.textContent = err.message;
+    dismiss.textContent = 'Fechar';
+    dismiss.onclick = () => closeDdsAgentReview(popup);
+  }
+}
+
+window.addEventListener('DOMContentLoaded', openDdsAgentReview);
+window.addEventListener('hashchange', openDdsAgentReview);
+
 function showToast(msg, type = 'info') {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
@@ -3641,7 +3971,9 @@ async function apiCall(path, method = 'GET', body = null, retries = 2) {
       const resp = await fetch(path, opts);
       const data = await resp.json();
       if (!resp.ok || data.error) {
-        throw new Error(data.error || data.message || `Erro HTTP ${resp.status}`);
+        const error = new Error(data.error || data.message || `Erro HTTP ${resp.status}`);
+        error.code = data.code;
+        throw error;
       }
       return data;
     } catch (err) {
@@ -4156,8 +4488,8 @@ async function copyTicketMcpInstructions() {
   } catch (err) { showToast('Não foi possível copiar as instruções.', 'error'); }
 }
 
-async function copyTicketMcpGlobalRule() {
-  const rule = document.getElementById('ticket-mcp-global-rule');
+async function copyTicketMcpGlobalRule(ruleId = 'ticket-mcp-global-rule') {
+  const rule = document.getElementById(ruleId);
   const inlineMarkdown = element => Array.from(element.childNodes, node =>
     node.nodeName === 'CODE' ? '`' + node.textContent + '`' : node.textContent
   ).join('').trim();
@@ -4168,7 +4500,7 @@ async function copyTicketMcpGlobalRule() {
     }
     return inlineMarkdown(block);
   }).join('\n\n');
-  const fallback = document.getElementById('ticket-mcp-rule-fallback');
+  const fallback = document.getElementById(ruleId + '-fallback');
   try {
     await navigator.clipboard.writeText(markdown);
     fallback.hidden = true;
@@ -5357,19 +5689,24 @@ function stopSharepointPoll() {
   }
 }
 
-async function startSharepointLogin(mode = 'device', profile = null, customClientId = null) {
+async function startSharepointLogin(mode = 'device', profile = null, customClientId = null, allowWrite = false) {
   try {
     const selProfile = profile || getSelectedSpProfile();
     const selCustomCid = customClientId !== null ? customClientId : getSpCustomClientId();
     const payload = {
       mode: mode || 'device',
       profile: selProfile,
-      custom_client_id: selCustomCid
+      custom_client_id: selCustomCid,
+      allow_write: allowWrite
     };
     const res = await apiCall('/api/sharepoint/connect', 'POST', payload);
     if (res.error) throw new Error(res.error);
 
     if (res.already_connected || res.connected) {
+      if (allowWrite) {
+        showDdsSaveStatus('Edição autorizada. Gere outra prévia para continuar.');
+        return;
+      }
       const box = document.getElementById('sp-device-flow-box');
       if (box) box.style.display = 'none';
       showToast(res.message || 'Conta Microsoft 365 ja conectada! Sincronizando...', 'success');
@@ -5379,6 +5716,12 @@ async function startSharepointLogin(mode = 'device', profile = null, customClien
       return;
     }
 
+    if (allowWrite) {
+      stopSharepointPoll();
+      showDdsSaveStatus('Conclua a autorização na janela da Microsoft.');
+      spPollTimer = setInterval(() => pollSharepointAuthStatus(true), 3000);
+      return;
+    }
     const box = document.getElementById('sp-device-flow-box');
     const statusEl = document.getElementById('sp-device-flow-status');
     const codeEl = document.getElementById('sp-device-user-code');
@@ -5399,7 +5742,8 @@ async function startSharepointLogin(mode = 'device', profile = null, customClien
     stopSharepointPoll();
     spPollTimer = setInterval(pollSharepointAuthStatus, 3000);
   } catch (err) {
-    showToast('Falha ao iniciar conexao Microsoft 365: ' + err.message, 'error');
+    if (allowWrite) showDdsSaveStatus(err.message, true, true);
+    else showToast('Falha ao iniciar conexao Microsoft 365: ' + err.message, 'error');
   }
 }
 
@@ -5414,9 +5758,16 @@ function copyAndOpenMicrosoftDeviceLogin() {
   }
 }
 
-async function pollSharepointAuthStatus() {
+async function pollSharepointAuthStatus(allowWrite = false) {
   try {
-    const st = await apiCall('/api/sharepoint/status');
+    const st = await apiCall('/api/sharepoint/status' + (allowWrite ? '?write=1' : ''));
+    if (allowWrite) {
+      if (st.auth_in_progress) return;
+      stopSharepointPoll();
+      if (st.connected) showDdsSaveStatus('Edição autorizada. Gere outra prévia para continuar.');
+      else showDdsSaveStatus(st.last_error || 'A edição não foi autorizada pelo Microsoft 365.', true, true);
+      return;
+    }
     const box = document.getElementById('sp-device-flow-box');
     const statusEl = document.getElementById('sp-device-flow-status');
 
@@ -5550,6 +5901,257 @@ async function detectDdsFromDownloads(explicitFilename = '') {
 
 let currentFillDdsTemplate = [];
 let currentDdsLocalImages = [];
+let ddsAppendRevision = 0;
+let ddsAppendSaving = false;
+let ddsFillSavedKey = null;
+let ddsLiveRequest = 0;
+
+function showDdsSaveStatus(message = '', failed = false, needsAuthorization = false) {
+  const status = document.getElementById('fill-dds-save-status');
+  document.getElementById('fill-dds-save-message').textContent = message;
+  document.getElementById('fill-dds-authorize').hidden = !needsAuthorization;
+  status.hidden = !message;
+  status.classList.toggle('is-error', failed);
+}
+
+async function authorizeDdsEditing() {
+  showDdsSaveStatus('Conclua a autorização no navegador da Microsoft e gere outra prévia.');
+  await startSharepointLogin('interactive', null, null, true);
+}
+
+function invalidateDdsAppendPreview(event) {
+  if (event?.target.id === 'fill-dds-live-width') return;
+  ddsAppendRevision += 1;
+  document.getElementById('fill-dds-preview').hidden = true;
+  renderLiveDdsDraft();
+}
+
+async function loadLiveDds() {
+  const request = ++ddsLiveRequest;
+  const pane = document.getElementById('fill-dds-live');
+  const view = document.getElementById('fill-dds-live-document');
+  const status = document.getElementById('fill-dds-live-status');
+  view.replaceChildren();
+  pane.hidden = document.querySelector('input[name="fill_role_radio"]:checked')?.value !== 'desenvolvimento';
+  document.getElementById('fill-dds-live-width-controls').hidden = pane.hidden;
+  if (pane.hidden) return;
+  status.textContent = 'Carregando a DDS oficial…';
+  try {
+    const result = await apiCall('/api/jira/dds/append-preview', 'POST', {key: currentModalTicketKey, live_document: true}, 0);
+    if (request !== ddsLiveRequest) return;
+    const parsed = new DOMParser().parseFromString(result.document_html, 'text/html');
+    const marker = Array.from(parsed.querySelectorAll('span, .docx-p')).find(node => node.textContent === result.marker);
+    if (!marker) throw new Error('O ponto de inserção não apareceu na visualização.');
+    const draft = parsed.createElement('div');
+    draft.id = 'fill-dds-live-draft';
+    (marker.closest('.docx-p') || marker).replaceWith(draft);
+    parsed.querySelectorAll('a').forEach(link => link.removeAttribute('href'));
+    view.replaceChildren(...parsed.body.childNodes);
+    status.textContent = result.filename + ' · rascunho local';
+    renderLiveDdsDraft();
+    draft.scrollIntoView({block: 'center'});
+  } catch (err) {
+    if (request === ddsLiveRequest) status.textContent = err.message;
+  }
+}
+
+function syncDdsHourControls() {
+  const enabled = document.getElementById('fill-dev-include-time').checked;
+  for (const id of ['layout', 'size', 'bold']) {
+    document.getElementById('fill-dev-time-' + id).disabled = !enabled;
+  }
+}
+
+document.getElementById('fill-dev-include-time').addEventListener('change', syncDdsHourControls);
+
+function readDdsHeader(timestamp = new Date()) {
+  const field = id => document.getElementById('fill-dev-' + id);
+  const date = field('data').value.trim();
+  return {
+    date: date && field('include-time').checked
+      ? date + ' - ' + timestamp.toLocaleTimeString('pt-BR', {hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit'})
+      : date,
+    layout: field('header-layout').value,
+    date_label: field('date-label').value.trim(),
+    author_label: field('author-label').value.trim(),
+    author_size: Number(field('author-size').value),
+    date_size: Number(field('date-size').value),
+    time_size: Number(field('time-size').value),
+    time_layout: field('time-layout').value,
+    time_bold: field('time-bold').checked,
+    date_bold: field('date-bold').checked,
+    author_bold: field('author-bold').checked,
+  };
+}
+
+function renderLiveDdsDraft(header = readDdsHeader()) {
+  const draft = document.getElementById('fill-dds-live-draft');
+  if (!draft) return;
+  const value = id => document.getElementById(id).value.trim();
+  draft.style.fontSize = '11pt';
+  const author = value('fill-dev-nome');
+  const packet = value('fill-dev-pacote');
+  const recommendations = value('fill-dev-rec');
+  const plain = text => [{text, bold: false}];
+  const lines = readDdsDraft();
+  while (lines.length && !lines[0].some(run => run.text.trim())) lines.shift();
+  while (lines.length && !lines.at(-1).some(run => run.text.trim())) lines.pop();
+  if (header.date && lines[0]?.map(run => run.text).join('').trim() === '- ' + header.date) lines.shift();
+  if (packet) lines.unshift(plain('Pacote / cartão / branch: ' + packet));
+  const headerRun = (label, text, bold, size) => ({
+    text: text ? [label, text].filter(Boolean).join(' ') : '', bold,
+    font_size: Number.isInteger(size) && size >= 8 && size <= 36 ? size : 11,
+  });
+  const [date, time] = header.date.split(' - ');
+  const dateLines = date ? [[headerRun(header.date_label, date, header.date_bold, header.date_size)]] : [];
+  if (time) {
+    const timeRun = headerRun('', time, header.time_bold, header.time_size);
+    if (header.time_layout === 'below') dateLines.push([timeRun]);
+    else dateLines[0].push(headerRun('', ' - ', false, header.date_size), timeRun);
+  }
+  const authorLine = author ? [headerRun(header.author_label, author, header.author_bold, header.author_size)] : [];
+  if (header.layout === 'same_line' && dateLines.length && authorLine.length) {
+    dateLines[0].push(headerRun('', ' | ', false, header.date_size), ...authorLine);
+    lines.unshift(...dateLines);
+  } else {
+    const authorLines = authorLine.length ? [authorLine] : [];
+    lines.unshift(...(header.layout === 'author_first' ? [...authorLines, ...dateLines] : [...dateLines, ...authorLines]));
+  }
+  if (recommendations) lines.push(plain('Instruções de teste desta entrega:'), ...recommendations.split('\n').map(plain));
+  if (document.getElementById('fill-include-checklist').checked && currentFillDdsTemplate.length) {
+    lines.push(plain('Revisão de código desta entrega:'));
+    currentFillDdsTemplate.forEach((item, index) => {
+      const answer = document.querySelector(`input[name="chk_resp_${index}"]:checked`)?.value || item.padrao || 'Sim';
+      lines.push(plain(item.pergunta + ' — ' + answer));
+    });
+  }
+  draft.replaceChildren(...lines.map(line => {
+    const row = document.createElement('div');
+    const marker = line.map(run => run.text).join('').trim().match(/^!(.+)!$/);
+    const images = marker ? currentDdsLocalImages.filter(image => image.filename === marker[1]) : [];
+    if (marker && !images.length) images.push(...currentDdsLocalImages.filter(image => image.name === marker[1]));
+    if (images.length === 1) {
+      const img = document.createElement('img');
+      img.src = images[0].url;
+      img.alt = images[0].name;
+      row.append(img);
+    } else {
+      for (const run of line) {
+        const span = document.createElement(run.bold ? 'strong' : 'span');
+        span.textContent = run.text;
+        if (run.font_size) span.style.fontSize = run.font_size + 'pt';
+        row.append(span);
+      }
+      if (!line.length) row.append(document.createElement('br'));
+    }
+    return row;
+  }));
+}
+
+const ddsDetailsEditor = document.getElementById('fill-dev-detalhes');
+const ddsFontSizeInput = document.getElementById('fill-dev-font-size');
+let ddsTextRange = null;
+let ddsTypingSize = 11;
+
+for (let size = 8; size <= 36; size++) {
+  ddsFontSizeInput.add(new Option(String(size), String(size), size === 11, size === 11));
+}
+
+document.addEventListener('selectionchange', () => {
+  const selection = window.getSelection();
+  if (selection.rangeCount && ddsDetailsEditor.contains(selection.getRangeAt(0).commonAncestorContainer)) {
+    ddsTextRange = selection.getRangeAt(0).cloneRange();
+    updateDdsCurrentSize(ddsTextRange);
+  }
+});
+
+function updateDdsCurrentSize(range) {
+  const sizeOf = node => {
+    const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    return Math.round(parseFloat(getComputedStyle(element).fontSize) * 0.75);
+  };
+  const sizes = new Set();
+  if (!range.collapsed) {
+    const walker = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT);
+    let node = walker.currentNode.nodeType === Node.TEXT_NODE ? walker.currentNode : walker.nextNode();
+    for (; node; node = walker.nextNode()) {
+      if (node.length && range.intersectsNode(node) &&
+          !(node === range.startContainer && range.startOffset === node.length) &&
+          !(node === range.endContainer && range.endOffset === 0)) sizes.add(sizeOf(node));
+    }
+  }
+  ddsFontSizeInput.value = sizes.size > 1 ? '' : String(sizes.values().next().value ?? sizeOf(range.startContainer));
+}
+
+function normalizeDdsFontSizes() {
+  ddsDetailsEditor.querySelectorAll('font[size="7"]').forEach(font => {
+    font.style.fontSize = ddsTypingSize + 'pt';
+    font.removeAttribute('size');
+  });
+}
+
+function applyDdsFontSize() {
+  if (!ddsFontSizeInput.reportValidity() || !ddsFontSizeInput.value) return;
+  const range = ddsTextRange;
+  ddsDetailsEditor.focus();
+  if (range && ddsDetailsEditor.contains(range.commonAncestorContainer)) {
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  normalizeDdsFontSizes();
+  ddsTypingSize = Number(ddsFontSizeInput.value);
+  document.execCommand('styleWithCSS', false, 'false');
+  document.execCommand('fontSize', false, '7');
+  normalizeDdsFontSizes();
+  ddsFontSizeInput.value = String(ddsTypingSize);
+  invalidateDdsAppendPreview();
+}
+
+ddsDetailsEditor.addEventListener('input', normalizeDdsFontSizes);
+ddsFontSizeInput.addEventListener('change', applyDdsFontSize);
+
+function toggleDdsBold() {
+  ddsDetailsEditor.focus();
+  document.execCommand('bold');
+  invalidateDdsAppendPreview();
+}
+
+ddsDetailsEditor.addEventListener('paste', event => {
+  if (Array.from(event.clipboardData.items).some(item => item.type.startsWith('image/'))) return;
+  event.preventDefault();
+  document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
+});
+
+function readDdsDraft() {
+  const lines = [[]];
+  const newline = () => lines.push([]);
+  function walk(node, bold, fontSize) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      node.textContent.split('\n').forEach((text, index) => {
+        if (index) newline();
+        if (text) lines.at(-1).push({text, bold, font_size: fontSize});
+      });
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    if (node.tagName === 'BR') {
+      if (node.parentNode.childNodes.length > 1) newline();
+      return;
+    }
+    const block = ['DIV', 'P'].includes(node.tagName);
+    if (block && lines.at(-1).length) newline();
+    const weight = node.style.fontWeight;
+    const active = weight ? (weight === 'bold' || Number(weight) >= 600)
+      : (bold || ['B', 'STRONG'].includes(node.tagName));
+    const size = /^(\d+)pt$/.exec(node.style.fontSize);
+    const activeSize = size ? Number(size[1]) : node.matches('font[size="7"]') ? ddsTypingSize : fontSize;
+    node.childNodes.forEach(child => walk(child, active, activeSize));
+    if (block && node.nextSibling) newline();
+  }
+  ddsDetailsEditor.childNodes.forEach(node => walk(node, false, 11));
+  return lines;
+}
 
 async function openFillDdsModal(preferredRole = 'desenvolvimento') {
   if (!currentModalTicketKey) {
@@ -5577,10 +6179,13 @@ async function openFillDdsModal(preferredRole = 'desenvolvimento') {
     const devRecInp = document.getElementById('fill-dev-rec');
 
     if (devNomeInp) devNomeInp.value = saved.autor_nome || res.default_autor || '';
-    if (devDataInp) devDataInp.value = saved.data_preenchimento || res.default_data || '';
-    if (devPctInp) devPctInp.value = saved.pacote || '';
-    if (devDetInp) devDetInp.value = saved.implementacao_texto || '';
-    if (devRecInp) devRecInp.value = saved.recomendacoes || '';
+    if (devDataInp) devDataInp.value = res.default_data || '';
+    if (devPctInp) devPctInp.value = '';
+    if (devDetInp) devDetInp.replaceChildren();
+    ddsTextRange = null;
+    ddsTypingSize = 11;
+    ddsFontSizeInput.value = '11';
+    if (devRecInp) devRecInp.value = '';
 
     const testNomeInp = document.getElementById('fill-test-nome');
     const testDataInp = document.getElementById('fill-test-data');
@@ -5598,9 +6203,10 @@ async function openFillDdsModal(preferredRole = 'desenvolvimento') {
     }
 
     const chkMaster = document.getElementById('fill-include-checklist');
-    const shouldInclude = saved.incluir_checklist !== undefined ? !!saved.incluir_checklist : true;
-    if (chkMaster) chkMaster.checked = shouldInclude;
-    toggleFillChecklist(shouldInclude);
+    if (chkMaster) chkMaster.checked = false;
+    toggleFillChecklist(false);
+    document.getElementById('fill-dev-include-time').checked = false;
+    syncDdsHourControls();
 
     renderFillChecklist(saved.checklist || []);
 
@@ -5608,15 +6214,32 @@ async function openFillDdsModal(preferredRole = 'desenvolvimento') {
     setupFillImageDropZone();
     loadDdsImages(currentModalTicketKey);
 
-    if (modal) modal.style.display = 'flex';
+    if (modal) {
+      showDdsSaveStatus();
+      document.documentElement.classList.add('dds-fill-open');
+      modal.style.display = 'flex';
+      void loadLiveDds();
+    }
   } catch (err) {
     showToast('Falha ao abrir formulário de preenchimento: ' + err.message, 'error');
   }
 }
 
 function closeFillDdsModal() {
+  if (ddsAppendSaving) return;
+  ddsLiveRequest += 1;
+  document.getElementById('fill-dds-live-document').replaceChildren();
+  document.documentElement.classList.remove('dds-fill-open');
   const modal = document.getElementById('modal-fill-dds');
-  if (modal) modal.style.display = 'none';
+    if (modal) modal.style.display = 'none';
+  const preview = document.getElementById('fill-dds-preview');
+  invalidateDdsAppendPreview();
+  preview.replaceChildren();
+  const savedKey = ddsFillSavedKey;
+  ddsFillSavedKey = null;
+  if (savedKey && currentModalTicketKey === savedKey) {
+    void openTicketDdsModal(savedKey, true, true);
+  }
 }
 
 function toggleFillChecklist(checked) {
@@ -5631,6 +6254,10 @@ function onFillRoleChange(role) {
   const homSec = document.getElementById('fill-section-hom');
   if (devSec) devSec.style.display = (role === 'desenvolvimento') ? 'block' : 'none';
   if (homSec) homSec.style.display = (role === 'homologacao') ? 'block' : 'none';
+  invalidateDdsAppendPreview();
+  if (document.getElementById('modal-fill-dds').style.display === 'flex') void loadLiveDds();
+  document.getElementById('btn-submit-dds-fill').textContent = role === 'homologacao'
+    ? 'Salvar homologação local' : 'Gerar prévia';
 }
 
 async function loadDdsImages(ticketKey) {
@@ -5640,6 +6267,7 @@ async function loadDdsImages(ticketKey) {
     const res = await apiCall('/api/jira/dds/images/list?key=' + encodeURIComponent(ticketKey));
     currentDdsLocalImages = (res && res.images) || [];
     renderDdsImagesPreview();
+    renderLiveDdsDraft();
   } catch (err) {
     console.error('Erro ao carregar imagens da DDS:', err);
   }
@@ -5649,6 +6277,12 @@ function insertImageTagIntoText(imageName, targetId = 'fill-dev-detalhes') {
   const ta = document.getElementById(targetId) || document.getElementById('fill-dev-detalhes');
   if (!ta) return;
   const tag = `\n!${imageName}!\n`;
+  if (ta.isContentEditable) {
+    ta.focus();
+    document.execCommand('insertText', false, tag);
+    invalidateDdsAppendPreview();
+    return;
+  }
   const start = ta.selectionStart;
   const end = ta.selectionEnd;
   if (start !== undefined && end !== undefined) {
@@ -5659,6 +6293,7 @@ function insertImageTagIntoText(imageName, targetId = 'fill-dev-detalhes') {
     ta.value += tag;
   }
   ta.focus();
+  invalidateDdsAppendPreview();
   showToast(`Marcador !${imageName}! inserido na posição do texto.`, 'success');
 }
 
@@ -5672,7 +6307,7 @@ function renderDdsImagesPreview() {
   }
   grid.style.display = 'grid';
   grid.innerHTML = currentDdsLocalImages.map(img => {
-    const safeArg = escapeHtml(img.name).replace(/'/g, "\\'");
+    const safeArg = escapeHtml(img.filename || img.name).replace(/'/g, "\\'");
     return `
       <div class="dds-image-thumb-card" title="${escapeHtml(img.name)}">
         <button type="button" class="thumb-del-btn" onclick="deleteDdsImage('${escapeHtml(img.id)}')" title="Excluir imagem">&times;</button>
@@ -5866,9 +6501,10 @@ async function submitDdsFill() {
   const role = roleRadio ? roleRadio.value : 'desenvolvimento';
 
   const devNome = (document.getElementById('fill-dev-nome').value || '').trim();
-  const devData = (document.getElementById('fill-dev-data').value || '').trim();
+  const header = readDdsHeader();
   const devPacote = (document.getElementById('fill-dev-pacote').value || '').trim();
-  const devDet = (document.getElementById('fill-dev-detalhes').value || '').trim();
+  const devRuns = readDdsDraft();
+  const devDet = devRuns.map(line => line.map(run => run.text).join('')).join('\n').trim();
   const devRec = (document.getElementById('fill-dev-rec').value || '').trim();
 
   const testNome = (document.getElementById('fill-test-nome').value || '').trim();
@@ -5886,7 +6522,7 @@ async function submitDdsFill() {
     return;
   }
 
-  const includeChecklist = document.getElementById('fill-include-checklist') ? document.getElementById('fill-include-checklist').checked : true;
+  const includeChecklist = document.getElementById('fill-include-checklist').checked;
 
   // Coleta o checklist apenas se o usuario manteve a opcao marcada
   const checklistPayload = [];
@@ -5906,9 +6542,11 @@ async function submitDdsFill() {
     key: currentModalTicketKey,
     role: role,
     autor_nome: devNome,
-    data_preenchimento: devData,
+    data_preenchimento: header.date,
+    development_header: header,
     pacote: devPacote,
     implementacao_texto: devDet,
+    implementacao_runs: devRuns,
     recomendacoes: devRec,
     incluir_checklist: includeChecklist,
     checklist: includeChecklist ? checklistPayload : [],
@@ -5926,20 +6564,79 @@ async function submitDdsFill() {
   }
 
   try {
-    const res = await apiCall('/api/jira/dds/fill', 'POST', payload);
+    if (role === 'desenvolvimento') {
+      const preview = document.getElementById('fill-dds-preview');
+      invalidateDdsAppendPreview();
+      renderLiveDdsDraft(header);
+      const revision = ddsAppendRevision;
+      const result = await apiCall('/api/jira/dds/append-preview', 'POST', payload, 0);
+      if (currentModalTicketKey !== payload.key || revision !== ddsAppendRevision) return;
+      preview.innerHTML = `<h3>Prévia do acréscimo em ${escapeHtml(result.filename)}</h3>
+        <p><strong>Último texto anterior:</strong> ${escapeHtml(result.before)}</p>
+        <p><strong>Próximo bloco:</strong> ${escapeHtml(result.after)}</p>
+        <button type="button" class="btn btn-primary btn-sm">Confirmar e gravar na DDS oficial</button>
+        <div class="dds-append-document" aria-label="Prévia do acréscimo" style="white-space:pre-wrap"></div>`;
+      const entry = preview.querySelector('.dds-append-document');
+      for (const line of result.entry) {
+        const row = document.createElement('div');
+        if (line.image) {
+          const image = document.createElement('img');
+          image.src = line.image;
+          image.alt = line.name;
+          row.append(image);
+        } else {
+          for (const run of line.runs) {
+            const text = document.createElement((run.bold ?? result.bold) ? 'strong' : 'span');
+            text.style.fontSize = (run.font_size ?? result.font_size) + 'pt';
+            text.textContent = run.text;
+            row.append(text);
+          }
+          if (!line.runs.length) row.append(document.createElement('br'));
+        }
+        entry.append(row);
+      }
+      const confirmButton = preview.querySelector('button');
+      confirmButton.onclick = async () => {
+        if (ddsAppendSaving || revision !== ddsAppendRevision) return;
+        ddsAppendSaving = true;
+        confirmButton.disabled = true;
+        btn.disabled = true;
+        confirmButton.textContent = 'Gravando…';
+        showDdsSaveStatus('Gravando na DDS oficial do SharePoint. Aguarde…');
+        try {
+          const saved = await apiCall('/api/jira/dds/append-confirm', 'POST', { key: payload.key, preview_id: result.preview_id }, 0);
+          showDdsSaveStatus(saved.message);
+          confirmButton.textContent = 'Gravação concluída';
+          ddsFillSavedKey = payload.key;
+          if (revision === ddsAppendRevision) {
+            ddsDetailsEditor.replaceChildren();
+            document.getElementById('fill-dev-rec').value = '';
+          }
+          void loadLiveDds();
+        } catch (err) {
+          confirmButton.textContent = 'Gere outra prévia para tentar novamente';
+          showDdsSaveStatus(err.message, true, err.code === 'dds_write_authorization');
+        } finally {
+          ddsAppendSaving = false;
+          btn.disabled = false;
+        }
+      };
+      preview.hidden = false;
+      preview.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    const res = await apiCall('/api/jira/dds/fill', 'POST', payload, 0);
     if (res.error) throw new Error(res.error);
 
-    showToast(res.message || 'Preenchimento da DDS salvo com sucesso!', 'success');
-    closeFillDdsModal();
-
-    // Recarrega o modal para exibir os dados preenchidos imediatamente
-    await openTicketDdsModal(currentModalTicketKey, true, true);
+    ddsFillSavedKey = payload.key;
+    showDdsSaveStatus(res.message || 'Preenchimento da DDS salvo com sucesso!');
   } catch (err) {
-    showToast('Falha ao salvar preenchimento da DDS: ' + err.message, 'error');
+    showDdsSaveStatus(err.message, true);
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = 'Salvar Preenchimento da DDS';
+      btn.textContent = document.querySelector('input[name="fill_role_radio"]:checked')?.value === 'homologacao'
+        ? 'Salvar homologação local' : 'Gerar prévia';
     }
   }
 }
@@ -8769,6 +9466,32 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 self._send_json({"suggestion": focus_pilot.pending_assistant()})
                 return
 
+            if path == "/dds/revisao":
+                from mini_window import get_effective_theme
+
+                requested_theme = query.get("tema", [""])[0]
+                theme = get_effective_theme(
+                    requested_theme if requested_theme in ("dark", "light", "halloween", "natal", "ano_novo", "pascoa")
+                    else BotConfig.load().theme
+                )
+                dialog = HTML_PAGE.split('<dialog id="dds-agent-review"', 1)[1].split("</dialog>", 1)[0]
+                script = HTML_PAGE.split("let activeDdsAgentReview;", 1)[1].split("function showToast", 1)[0]
+                api = HTML_PAGE.split("async function apiCall(", 1)[1]
+                # O diálogo independente precisa apenas da função de transporte.
+                api = api.split("\n}\n", 1)[0] + "\n}"
+                self._send_html(
+                    f'<!doctype html><html lang="pt-BR" data-theme="{theme}"><meta charset="utf-8">'
+                    '<meta name="viewport" content="width=device-width, initial-scale=1">'
+                    '<title>JiraBot | Revisão da DDS</title><style>' + THEME_CSS +
+                    '</style><body class="dds-review-window"><p id="dds-review-closed" hidden style="padding:24px">'
+                    'Revisão encerrada. Você pode fechar esta aba pelo navegador.</p>'
+                    '<dialog id="dds-agent-review"' + dialog + '</dialog><script>'
+                    'let activeDdsAgentReview;\n' + script + '\nasync function apiCall(' + api +
+                    '\nfunction showToast(message) { document.getElementById("dds-agent-status").textContent = message; }'
+                    '</script></body></html>'
+                )
+                return
+
             if path == "/api/calendar/absences":
                 self._send_json({"absences": load_calendar_absences(get_default_config_dir())})
                 return
@@ -8956,7 +9679,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
             if path == "/api/sharepoint/status":
                 state_mgr = StateManager()
                 sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
-                self._send_json(sp_mgr.get_status())
+                self._send_json(sp_mgr.get_status(allow_write=True) if query.get("write") == ["1"] else sp_mgr.get_status())
                 return
 
             if path == "/api/jira/attachment":
@@ -9048,7 +9771,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         or any(char not in "0123456789abcdef" for char in session_id)
                         or event not in ("heartbeat", "tool", "closed")
                         or not isinstance(name, str) or len(name) > 80
-                        or tool not in (("buscar_tickets", "sugerir_ticket") if event == "tool" else ("",))
+                        or tool not in (("buscar_tickets", "sugerir_ticket", "preparar_acrescimo_dds", "consultar_revisao_dds") if event == "tool" else ("",))
                     ):
                         self._send_json({"error": "Evento de conexão inválido."}, status_code=400)
                         return
@@ -9187,6 +9910,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     login_hint=cfg.jira.get_clean_email(),
                     profile=profile,
                     custom_client_id=custom_client_id,
+                    allow_write=body.get("allow_write") is True,
                 )
                 if not res.get("success"):
                     self._send_json({"error": res.get("error", "Falha ao iniciar autenticação Microsoft 365.")}, status_code=400)
@@ -9279,6 +10003,230 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     "default_autor": user_name,
                     "default_data": datetime.now().strftime("%d/%m/%Y"),
                 })
+                return
+
+            if path == "/api/jira/dds/append-feedback-status":
+                host = self.headers.get("Host", "").lower()
+                if host.partition(":")[0] not in ("localhost", "127.0.0.1") or self.headers.get("Origin"):
+                    self._send_json({"error": "Use o conector local."}, status_code=403)
+                    return
+                review_id = body.get("review_id")
+                with _dds_preview_lock:
+                    review = _dds_agent_reviews.get(review_id) if isinstance(review_id, str) else None
+                    if review and review["expires"] > monotonic():
+                        result = {"status": "revision_requested" if review.get("feedback") else "pending_confirmation",
+                                  "key": review["key"], "draft": review["draft"], "feedback": review.get("feedback")}
+                        result["approved_example"] = _dds_approved_examples.get(review["key"])
+                    elif review_id in _dds_approved_examples:
+                        result = {"status": "approved", "approved_example": _dds_approved_examples[review_id]}
+                    else:
+                        result = {"status": "closed", "message": "A proposta foi resolvida ou expirou."}
+                self._send_json(result)
+                return
+
+            if path in ("/api/jira/dds/append-review", "/api/jira/dds/append-dismiss", "/api/jira/dds/append-feedback", "/api/jira/dds/close-review-window"):
+                host = self.headers.get("Host", "").lower()
+                if (host.partition(":")[0] not in ("localhost", "127.0.0.1")
+                        or self.headers.get("Origin") != f"http://{host}"
+                        or self.headers.get_content_type() != "application/json"):
+                    self._send_json({"error": "Abra a revisão no painel local."}, status_code=403)
+                    return
+                review_id = body.get("review_id")
+                if path.endswith("close-review-window"):
+                    from notifier import close_dds_review_window
+                    closed = isinstance(review_id, str) and re.fullmatch(r"[a-f0-9]{32}", review_id) and close_dds_review_window(review_id)
+                    self._send_json({"closed": bool(closed)})
+                    return
+                with _dds_preview_lock:
+                    review = _dds_agent_reviews.get(review_id) if isinstance(review_id, str) else None
+                    if review and review["expires"] <= monotonic():
+                        del _dds_agent_reviews[review_id]
+                        review = None
+                    if review and path.endswith("append-dismiss"):
+                        del _dds_agent_reviews[review_id]
+                    if review and path.endswith("append-feedback"):
+                        try:
+                            if body.get("approval") != review["approval"] or review.get("feedback"):
+                                raise ValueError("Esta proposta já foi devolvida ou perdeu a validade.")
+                            scope = body.get("scope")
+                            guidance = body.get("feedback", "")
+                            if scope not in ("selection", "full") or not isinstance(guidance, str) or len(guidance) > 2000:
+                                raise ValueError("Informe uma revisão válida.")
+                            selected = ""
+                            start, end = body.get("start"), body.get("end")
+                            if scope == "selection":
+                                encoded = review["draft"].encode("utf-16-le")
+                                if type(start) is not int or type(end) is not int or not 0 <= start < end <= len(encoded) // 2:
+                                    raise ValueError("Selecione um trecho válido.")
+                                start = len(encoded[:start * 2].decode("utf-16-le"))
+                                end = len(encoded[:end * 2].decode("utf-16-le"))
+                                selected = review["draft"][start:end]
+                            review["feedback"] = {"scope": scope, "start": start, "end": end,
+                                                  "selected": selected, "guidance": guidance.strip()}
+                        except ValueError as exc:
+                            self._send_json({"error": str(exc)}, status_code=409)
+                            return
+                if not review:
+                    self._send_json({"error": "A proposta expirou ou já foi resolvida."}, status_code=409)
+                elif path.endswith(("append-dismiss", "append-feedback")):
+                    self._send_json({"success": True})
+                else:
+                    self._send_json({k: review[k] for k in ("key", "filename", "before", "after", "entry", "approval", "draft", "feedback")})
+                return
+
+            if path in ("/api/jira/dds/append-preview", "/api/jira/dds/append-propose", "/api/jira/dds/append-confirm"):
+                host = self.headers.get("Host", "").lower()
+                origin = self.headers.get("Origin")
+                if (
+                    host.partition(":")[0] not in ("localhost", "127.0.0.1")
+                    or (origin and origin != f"http://{host}")
+                    or self.headers.get_content_type() != "application/json"
+                ):
+                    self._send_json({"error": "Use o painel local para editar a DDS."}, status_code=403)
+                    return
+                issue_key = clean_jira_issue_key(body.get("key") or "")
+                if not issue_key:
+                    self._send_json({"error": "Chave do ticket inválida."}, status_code=400)
+                    return
+                state_mgr = StateManager()
+                sp_mgr = SharePointManager(base_dir=state_mgr.base_dir)
+                try:
+                    proposal = path.endswith("append-propose")
+                    if proposal:
+                        if origin:
+                            self._send_json({"error": "Use o conector MCP para enviar propostas."}, status_code=403)
+                            return
+                        text = body.get("implementacao_texto")
+                        recommendations = body.get("recomendacoes", "")
+                        previous_id = body.get("revisao_anterior")
+                        if not isinstance(text, str) or len(text) > 20000 or (not previous_id and not text.strip()) or not isinstance(recommendations, str) or len(recommendations) > 10000:
+                            raise ValueError("Informe o detalhamento e recomendações válidos.")
+                        previous = None
+                        if previous_id:
+                            with _dds_preview_lock:
+                                previous = _dds_agent_reviews.get(previous_id) if isinstance(previous_id, str) else None
+                                if not previous or previous["expires"] <= monotonic() or previous["key"] != issue_key or not previous.get("feedback"):
+                                    raise ValueError("A revisão anterior não está disponível para este ticket.")
+                            feedback = previous["feedback"]
+                            if feedback["scope"] == "selection":
+                                start, end = feedback["start"], feedback["end"]
+                                text = previous["draft"][:start] + text + previous["draft"][end:]
+                            if not text.strip() or text.strip() == previous["draft"].strip() or len(text) > 20000:
+                                raise ValueError("A revisão precisa alterar o trecho solicitado e respeitar o limite de texto.")
+                            recommendations = previous["recommendations"]
+                        email = BotConfig.load().jira.email or ""
+                        body = {
+                            "autor_nome": email.split("@")[0].replace(".", " ").title() or "Desenvolvedor",
+                            "data_preenchimento": datetime.now().strftime("%d/%m/%Y"),
+                            "implementacao_texto": text,
+                            "recomendacoes": recommendations,
+                        }
+                    if proposal or path.endswith("append-preview"):
+                        client = JiraClient(BotConfig.load().jira, state_mgr)
+                        details = client.get_ticket_dds_details(issue_key, force_refresh=True)
+                        if details.get("dds_source") != "sharepoint_live":
+                            raise ValueError("Abra um ticket com uma DDS oficial própria disponível no SharePoint.")
+                        expected = details["sharepoint_status"]["docx_meta"]
+                        live = sp_mgr.fetch_dds_from_sharepoint_links(details["dds_links"], force_refresh=True)
+                        document = live["docx_meta"]
+                        identity = ("drive_id", "item_id", "etag")
+                        if not live.get("docx_bytes") or not all(document.get(k) and document[k] == expected.get(k) for k in identity):
+                            raise ValueError("A DDS mudou durante a leitura. Atualize o ticket e gere outra prévia.")
+                        if body.get("live_document") is True:
+                            marker = f"JIRABOT_DRAFT_{uuid4().hex}"
+                            content, _, _ = append_development(live["docx_bytes"], [marker], {})
+                            html = extrair_documento_docx_completo(content).get("document_html")
+                            if not html or marker not in html:
+                                raise ValueError("Não foi possível renderizar o ponto de inserção da DDS.")
+                            self._send_json({"filename": document["filename"], "document_html": html, "marker": marker})
+                            return
+                        lines, images, entry = prepare_entry(body, sp_mgr.list_dds_images(issue_key))
+                        content, before, after = append_development(
+                            live["docx_bytes"], lines, images,
+                            font_size=body.get("font_size", 11), bold=body.get("bold", False),
+                        )
+                        preview_id = previous_id if proposal and previous else uuid4().hex
+                        if proposal:
+                            with _dds_preview_lock:
+                                now = monotonic()
+                                for key, review in list(_dds_agent_reviews.items()):
+                                    if review["expires"] <= now:
+                                        del _dds_agent_reviews[key]
+                                if previous:
+                                    if _dds_agent_reviews.get(previous_id) is not previous:
+                                        raise ValueError("Já existe outra versão desta proposta.")
+                                    del _dds_agent_reviews[previous_id]
+                                if len(_dds_agent_reviews) >= 4:
+                                    raise ValueError("Há quatro propostas pendentes. Revise uma delas antes de criar outra.")
+                                _dds_agent_reviews[preview_id] = {
+                                    "expires": now + 600, "key": issue_key, "document": document,
+                                    "content": content, "filename": document["filename"],
+                                    "before": before, "after": after[:300], "entry": entry, "approval": uuid4().hex,
+                                    "draft": body["implementacao_texto"].replace("\r\n", "\n").replace("\r", "\n"),
+                                    "recommendations": body["recomendacoes"],
+                                    "feedback": None,
+                                }
+                            self._send_json({"review_id": preview_id, "reused_review": bool(previous), "approved_example": _dds_approved_examples.get(issue_key)})
+                            return
+                        with _dds_preview_lock:
+                            now = monotonic()
+                            for key in list(_dds_previews):
+                                if _dds_previews[key][0] <= now:
+                                    del _dds_previews[key]
+                            if len(_dds_previews) >= 4:
+                                del _dds_previews[next(iter(_dds_previews))]
+                            _dds_previews[preview_id] = (now + 600, issue_key, document, content, body)
+                        self._send_json({
+                            "preview_id": preview_id, "filename": document["filename"],
+                            "before": before, "after": after[:300], "entry": entry,
+                            "font_size": body.get("font_size", 11), "bold": body.get("bold", False),
+                        })
+                        return
+                    with _dds_preview_lock:
+                        preview_id = body.get("preview_id")
+                        review = _dds_agent_reviews.get(preview_id) if isinstance(preview_id, str) else None
+                        if review:
+                            if origin != f"http://{host}" or body.get("approval") != review["approval"]:
+                                self._send_json({"error": "Confirme a proposta no popup do JiraBot."}, status_code=403)
+                                return
+                            if review.get("feedback"):
+                                raise ValueError("Esta proposta foi devolvida à IA. Confirme a nova versão.")
+                            if review["expires"] <= monotonic() or review["key"] != issue_key:
+                                raise ValueError("A proposta expirou ou pertence a outro ticket.")
+                            document, content, fill = review["document"], review["content"], {}
+                            del _dds_agent_reviews[preview_id]
+                        else:
+                            pending = _dds_previews.get(preview_id) if isinstance(preview_id, str) else None
+                            if not pending or pending[0] <= monotonic() or pending[1] != issue_key:
+                                raise ValueError("A prévia expirou ou pertence a outro ticket. Gere outra prévia.")
+                            _, _, document, content, fill = _dds_previews.pop(preview_id)
+                    if review:
+                        from notifier import confirm_dds_publication
+                        if not confirm_dds_publication(issue_key, review["filename"]):
+                            raise ValueError("A publicação não foi confirmada. A DDS não foi alterada.")
+                    with _dds_publish_lock:
+                        if review and review["expires"] <= monotonic():
+                            raise ValueError("A proposta expirou durante a revisão. Prepare outra proposta.")
+                        sp_mgr.publish_dds_version(document, content)
+                    if review:
+                        with _dds_preview_lock:
+                            if len(_dds_approved_examples) >= 40:
+                                del _dds_approved_examples[next(iter(_dds_approved_examples))]
+                            _dds_approved_examples[issue_key] = review["draft"]
+                            _dds_approved_examples[preview_id] = review["draft"]
+                    JiraClient.invalidate_ticket_cache(issue_key)
+                    message = "Acréscimo gravado na DDS oficial."
+                    if fill.get("post_jira_comment"):
+                        try:
+                            client = JiraClient(BotConfig.load().jira, state_mgr)
+                            client.add_comment(issue_key, f"[DDS - Desenvolvimento]\n{fill['data_preenchimento']}\n\n{fill['implementacao_texto']}")
+                        except Exception:
+                            message += " O comentário no Jira não pôde ser confirmado."
+                    self._send_json({"success": True, "message": message})
+                except DdsWriteAuthorizationRequired as exc:
+                    self._send_json({"error": str(exc), "code": "dds_write_authorization"}, status_code=403)
+                except (ValueError, OSError, KeyError) as exc:
+                    self._send_json({"error": str(exc)}, status_code=409)
                 return
 
             if path == "/api/jira/dds/fill":

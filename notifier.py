@@ -5,11 +5,97 @@ Modulo de notificacoes locais para o Windows (JiraBot).
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import subprocess
 import sys
 
 logger = logging.getLogger("JiraBot.Notifier")
+
+
+def close_dds_review_window(review_id: str) -> bool:
+    """Fecha apenas a janela de revisão com o título correspondente no Windows."""
+    if sys.platform != "win32":
+        return False
+    from ctypes import WINFUNCTYPE, create_unicode_buffer, windll, wintypes
+
+    user32 = windll.user32
+    title = f"JiraBot | Revisão da DDS {review_id}"
+    handles = []
+    callback = WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    @callback
+    def find_window(hwnd, _):
+        name = create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, name, len(name))
+        if name.value in (title, title + " - Microsoft Edge", title + " - Google Chrome"):
+            handles.append(hwnd)
+        return True
+
+    user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, wintypes.INT)
+    user32.PostMessageW.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+    user32.EnumWindows(find_window, 0)
+    return any(user32.PostMessageW(hwnd, 0x0010, 0, 0) for hwnd in handles)
+
+
+def open_dds_review_window(url: str) -> bool:
+    """Abre a revisão em modo aplicativo, em uma janela do navegador sem abas."""
+    directories = []
+    for variable in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+        directory = os.environ.get(variable)
+        if directory:
+            directories.append(Path(directory))
+    if sys.platform == "win32":
+        from ctypes import create_unicode_buffer, windll
+
+        windows = create_unicode_buffer(260)
+        if 0 < windll.kernel32.GetWindowsDirectoryW(windows, len(windows)) < len(windows):
+            drive = Path(Path(windows.value).anchor)
+            directories.extend([drive / "Program Files (x86)", drive / "Program Files"])
+    for directory in dict.fromkeys(directories):
+        for relative in ("Microsoft/Edge/Application/msedge.exe", "Google/Chrome/Application/chrome.exe"):
+            browser = directory / relative
+            if browser.is_file():
+                try:
+                    subprocess.Popen([str(browser), f"--app={url}", "--window-size=1100,850"])
+                    return True
+                except OSError:
+                    continue
+    return False
+
+
+def confirm_dds_publication(issue: str, filename: str) -> bool:
+    """Exige uma decisão no desktop antes de publicar uma proposta MCP."""
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    try:
+        result = subprocess.run(
+            [str(pythonw if pythonw.exists() else sys.executable), str(Path(__file__).resolve()),
+             "--confirm-dds", issue, filename],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=90,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _confirm_dds_on_desktop(issue: str, filename: str) -> bool:
+    import tkinter as tk
+    from tkinter import messagebox
+    from mini_window import _attach_to_interactive_desktop
+
+    _attach_to_interactive_desktop()
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        return messagebox.askyesno(
+            "JiraBot | Confirmar gravação da DDS",
+            f"Você revisou a prévia no painel e quer gravar o acréscimo em {filename} ({issue})?",
+            default=messagebox.NO, parent=root,
+        )
+    finally:
+        root.destroy()
 
 
 def send_ticket_prompt(port: int, suggestion_id: str, enabled: bool, theme: str = "auto") -> bool:
@@ -261,4 +347,6 @@ def send_notification(title: str, message: str, enabled: bool = True) -> None:
 
 
 if __name__ == "__main__":
+    if sys.argv[1] == "--confirm-dds":
+        sys.exit(0 if _confirm_dds_on_desktop(sys.argv[2], sys.argv[3]) else 1)
     show_ticket_prompt(int(sys.argv[1]), sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "auto")

@@ -438,6 +438,9 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
                             rpr = ch.find(f"{{{W_NS}}}rPr")
                             is_b = _is_prop_on(rpr, "b")
                             is_i = _is_prop_on(rpr, "i")
+                            size_node = rpr.find(f"{{{W_NS}}}sz") if rpr is not None else None
+                            size_raw = size_node.get(f"{{{W_NS}}}val", "") if size_node is not None else ""
+                            size = int(size_raw) / 2 if re.fullmatch(r"[0-9]{1,3}", size_raw) else None
                             run_txt_parts: List[str] = []
                             for rch in ch:
                                 if rch.tag == f"{{{W_NS}}}t" and rch.text:
@@ -452,6 +455,7 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
                                             "text": "".join(run_txt_parts),
                                             "bold": is_b,
                                             "italic": is_i,
+                                            "size": size,
                                             "link": active_link,
                                             "img": None,
                                         })
@@ -466,6 +470,7 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
                                     "text": "".join(run_txt_parts),
                                     "bold": is_b,
                                     "italic": is_i,
+                                    "size": size,
                                     "link": active_link,
                                     "img": None,
                                 })
@@ -483,6 +488,7 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
                         and merged[-1]["img"] is None
                         and merged[-1]["bold"] == seg["bold"]
                         and merged[-1]["italic"] == seg["italic"]
+                        and merged[-1].get("size") == seg.get("size")
                         and merged[-1]["link"] == seg["link"]
                     ):
                         merged[-1]["text"] += seg["text"]
@@ -526,6 +532,9 @@ def extrair_documento_docx_completo(conteudo_binario: bytes) -> Dict[str, Any]:
 
                     if seg["italic"] and not seg["bold"] and txt.strip():
                         esc_html = f"<em>{esc_html}</em>"
+
+                    if seg.get("size"):
+                        esc_html = f'<span style="font-size:{seg["size"]:g}pt">{esc_html}</span>'
 
                     if seg["link"]:
                         safe_href = html_lib.escape(seg["link"], quote=True)
@@ -2465,7 +2474,7 @@ class JiraClient:
 
         # Mescla preenchimento estruturado local caso exista para o ticket
         local_fill = sp_mgr.load_filled_dds(clean)
-        if local_fill:
+        if local_fill and dds_source not in ("sharepoint_live", "parent_sharepoint_live"):
             if not structured_dds:
                 structured_dds = estruturar_conteudo_dds("")
             structured_dds["has_structured_data"] = True

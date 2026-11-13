@@ -4339,6 +4339,190 @@ details.ui-drawer[open] .ui-drawer-caret {
   gap: 12px 20px;
 }
 .ticket-focus-content .btn-group { flex-wrap: wrap; }
+html.dds-fill-open,
+html.dds-fill-open body,
+html.dds-fill-open .content,
+html.dds-fill-open #modal-fill-dds {
+  overflow: hidden;
+}
+
+#fill-dds-save-status {
+  padding: 10px 22px;
+  flex-shrink: 0;
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  overflow-wrap: anywhere;
+}
+
+#fill-dds-save-status.is-error {
+  border-left: 3px solid var(--danger);
+}
+
+#fill-dds-authorize[hidden] { display: none; }
+
+#fill-dds-preview { margin-top: 16px; }
+
+.dds-fill-window {
+  display: flex;
+  flex-direction: column;
+  width: min(95vw, 1500px);
+  max-height: 92vh;
+}
+
+.dds-fill-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.dds-fill-workspace > .modal-body { min-width: 0; }
+
+.dds-completion-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 14px;
+}
+
+.dds-completion-grid:not(.ui-drawer-body) { margin-bottom: 14px; }
+.dds-completion-wide { grid-column: 1 / -1; }
+
+.dds-completion-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dds-completion-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.dds-completion-check input { margin: 0; accent-color: var(--primary); }
+
+.dds-format-grid > .dds-completion-field { gap: 12px; }
+
+.dds-format-sizes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dds-format-grid :disabled { opacity: 0.55; cursor: not-allowed; }
+
+#fill-section-dev { container-type: inline-size; }
+
+@container (max-width: 420px) {
+  .dds-completion-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.dds-fill-live {
+  flex: 0 0 var(--dds-live-width, 48%);
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 16px 16px;
+  border-left: 1px solid var(--border-color);
+}
+
+.dds-fill-live header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 0;
+  background: var(--bg-card);
+}
+
+.dds-fill-header-actions,
+.dds-fill-width-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.dds-fill-width-controls input[type="range"] {
+  width: 120px;
+  margin: 0;
+}
+
+.dds-fill-width-controls[hidden] { display: none; }
+
+#fill-dds-live-draft {
+  padding: 10px;
+  border-left: 3px solid var(--primary);
+  background: var(--bg-subtle);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 760px) {
+  .dds-fill-workspace { flex-direction: column; }
+  .dds-fill-live { flex-basis: 38vh; border-left: 0; border-top: 1px solid var(--border-color); }
+  .dds-fill-width-controls { display: none; }
+}
+
+.dds-append-document {
+  margin-top: 16px;
+  padding: clamp(10px, 3vw, 28px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  overflow-wrap: anywhere;
+}
+
+.dds-append-document img { max-width: 100%; height: auto; }
+
+.dds-agent-review {
+  width: min(94vw, 1080px);
+  max-height: 92vh;
+  overflow: auto;
+  background: var(--bg-card);
+  color: var(--text-main);
+}
+
+.dds-agent-review::backdrop { background: rgba(0, 0, 0, 0.72); }
+.dds-review-window .dds-agent-review {
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.dds-review-window .dds-agent-review::backdrop { background: var(--bg-card); }
+.dds-agent-review-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
+.dds-agent-context {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+.dds-agent-context p { color: var(--text-muted); overflow-wrap: anywhere; }
+.dds-agent-context p:empty { display: none; }
+.dds-agent-context pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.dds-agent-context img { display: block; max-width: 100%; height: auto; }
+.dds-agent-review-body .btn-group { flex-wrap: wrap; }
+.dds-agent-review-body > label { margin-top: 6px; font-weight: 600; }
+.dds-agent-review footer { justify-content: flex-end; margin-top: 20px; }
+
 .ticket-mcp-global-rule {
   min-width: 0;
   overflow-wrap: anywhere;

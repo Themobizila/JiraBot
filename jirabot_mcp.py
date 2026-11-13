@@ -1,4 +1,4 @@
-"""Servidor MCP local para solicitar confirmação de troca de ticket."""
+"""Servidor MCP local para sugerir trocas de ticket e preparar acréscimos na DDS."""
 
 import argparse
 import asyncio
@@ -7,9 +7,11 @@ from http.client import HTTPException
 import re
 from typing import Any
 from uuid import uuid4
+from time import monotonic, sleep
 
 from mcp.server.fastmcp import Context, FastMCP
 from ticket_focus import local_focus_request
+from notifier import open_dds_review_window
 
 
 panel_port = 8765
@@ -75,7 +77,10 @@ server = JiraBotMCP(
         "mudar de BI ou subtarefa sem informar a chave, use buscar_tickets com poucas palavras do título "
         "ou nome do BI, sem enviar a DDS, código ou a conversa. Escolha uma chave apenas se o contexto "
         "identificar claramente a tarefa. Em caso de ambiguidade, continue o trabalho e peça a chave. "
-        "Use sugerir_ticket uma vez por mudança de tarefa. A decisão fica com o usuário no JiraBot."
+        "Use sugerir_ticket uma vez por mudança de tarefa. A decisão fica com o usuário no JiraBot. "
+        "Quando o usuário pedir um lançamento na DDS, use preparar_acrescimo_dds. "
+        "Informe que a proposta está pendente e chame consultar_revisao_dds com o ID para aguardar a decisão. "
+        "Em revisão parcial, envie somente a substituição e o identificador em revisao_anterior."
     ),
 )
 
@@ -100,6 +105,45 @@ def buscar_tickets(contexto: str, ctx: Context) -> dict[str, Any]:
     if not 2 <= len(query) <= 120:
         return {"status": "invalid", "message": "Informe de 2 a 120 caracteres do título da tarefa."}
     return request_panel("/api/ticket-focus/search", {"context": query})
+
+
+@server.tool()
+def preparar_acrescimo_dds(chave: str, detalhamento: str, ctx: Context, recomendacoes: str = "",
+                           revisao_anterior: str = "") -> dict[str, Any]:
+    """Prepara um acréscimo em Desenvolvimento e abre a revisão com o contexto para aprovação humana."""
+    report_client(ctx, "preparar_acrescimo_dds")
+    try:
+        status, result = local_focus_request(
+            "/api/jira/dds/append-propose",
+            {"key": chave.strip().upper(), "implementacao_texto": detalhamento,
+             "recomendacoes": recomendacoes, "revisao_anterior": revisao_anterior},
+            port=panel_port, timeout=90,
+        )
+    except (OSError, HTTPException, ValueError):
+        return {"status": "unavailable", "message": "Não foi possível consultar o painel local do JiraBot."}
+    if status != 200:
+        return {"status": "rejected", "message": result.get("error", "O painel recusou a proposta.")}
+    url = f"http://127.0.0.1:{panel_port}/dds/revisao#revisar-dds={result['review_id']}"
+    reused = result.get("reused_review", False)
+    opened = not reused and open_dds_review_window(url)
+    message = ("A nova versão está disponível na janela de revisão existente." if reused else
+               "Revise e confirme no JiraBot." if opened else "Abra o endereço da revisão para conferir a proposta.")
+    return {"status": "pending_confirmation", "message": message, "review_url": url, "window_launched": opened,
+            "review_id": result["review_id"], "approved_example": result.get("approved_example")}
+
+
+@server.tool()
+def consultar_revisao_dds(identificador: str, ctx: Context, aguardar_segundos: int = 40) -> dict[str, Any]:
+    """Aguarda feedback humano por até 45 segundos ou consulta exemplo aprovado pela chave do ticket."""
+    report_client(ctx, "consultar_revisao_dds")
+    deadline = monotonic() + min(45, max(0, aguardar_segundos))
+    payload = {"review_id": identificador.strip()}
+    while True:
+        result = request_panel("/api/jira/dds/append-feedback-status", payload)
+        remaining = deadline - monotonic()
+        if result.get("status") != "pending_confirmation" or remaining <= 0:
+            return result
+        sleep(min(1, remaining))
 
 
 @server.tool()
