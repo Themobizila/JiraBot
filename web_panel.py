@@ -40,12 +40,13 @@ from review_dialog import get_fallback_description, show_pre_exit_popup
 from sharepoint_client import DdsWriteAuthorizationRequired, SharePointManager
 from time import monotonic
 from uuid import uuid4
-from dds_append import append_development, prepare_entry
+from dds_append import append_development, prepare_entry, prepare_mcp_evidence
 
 _dds_previews = {}
 _dds_preview_lock = threading.Lock()
 _dds_publish_lock = threading.Lock()
 _dds_agent_reviews = {}
+_DDS_AGENT_REVIEW_TTL = 1800
 _dds_approved_examples = {}
 from ticket_focus import TICKET_KEY, focus_pilot, mcp_connections, rank_assigned_tickets
 from work_calendar import FIRST_YEAR, LAST_YEAR, calendar_events, load_calendar_absences, save_calendar_absence
@@ -1266,7 +1267,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <li>Se houver dúvida, peça a chave ou a subtarefa.</li>
             </ul>
             <p>Envie uma única sugestão por início ou mudança de tarefa. A confirmação da troca cabe ao usuário no JiraBot. Se o MCP estiver indisponível, informe a limitação e prossiga com o trabalho que puder realizar.</p>
+            <h3>Consulta e edição de lançamentos</h3>
+            <p>Use <code>consultar_worklogs</code> para localizar um lançamento por período e ticket. Quando o usuário pedir uma edição, identifique o lançamento pelo ticket e ID e use <code>editar_worklog</code> somente com os campos solicitados. Se houver mais de um lançamento possível, peça ao usuário para identificar qual deve ser alterado.</p>
             <h3>Acréscimo na DDS pelo JiraBot</h3>
+            <p>Inclua evidências reais da entrega em <code>evidencias</code> ao chamar <code>preparar_acrescimo_dds</code>. Cada imagem PNG ou JPEG usa <code>nome</code> e <code>conteudo_base64</code>. Para posicionar um print, use <code>!evidencia-1!</code> em uma linha própria, seguindo a ordem das imagens. Se faltarem prints, solicite-os ao usuário.</p>
             <p>Quando o usuário pedir para registrar uma atualização na DDS, identifique o ticket e use <code>preparar_acrescimo_dds</code> com o texto proposto para Desenvolvimento. Use o JiraBot para qualquer leitura da DDS.</p>
             <p>Informe que a proposta está pendente de revisão. A pessoa confere o texto e seu contexto na DDS e decide se confirma a gravação no JiraBot.</p>
             <p>Antes de escrever, use <code>consultar_revisao_dds</code> com a chave do ticket para buscar um exemplo aprovado de estilo. Após preparar a proposta, chame a mesma ferramenta com o identificador para aguardar o feedback. Se a espera acabar, consulte novamente quando o usuário pedir. Use <code>preparar_acrescimo_dds</code> com <code>revisao_anterior</code> para responder à revisão. Em uma revisão parcial, envie somente o texto substituto. Ao refazer tudo, siga o feedback e apresente uma versão diferente.</p>
@@ -3841,6 +3845,7 @@ async function showDdsAgentReview(reviewId) {
   const select = document.getElementById('dds-agent-select');
   const selected = document.getElementById('dds-agent-selected');
   let savedSelection = null;
+  let currentApproval;
   selected.hidden = true;
   selected.textContent = '';
   select.disabled = true;
@@ -3865,7 +3870,9 @@ async function showDdsAgentReview(reviewId) {
   dismiss.onclick = async () => {
     dismiss.disabled = true;
     try {
-      if (!demo) await apiCall('/api/jira/dds/append-dismiss', 'POST', {review_id: reviewId}, 0);
+      if (!demo && currentApproval) {
+        await apiCall('/api/jira/dds/append-dismiss', 'POST', {review_id: reviewId, approval: currentApproval}, 0);
+      }
     } catch (err) {
       status.textContent = err.message;
       dismiss.disabled = false;
@@ -3884,6 +3891,7 @@ async function showDdsAgentReview(reviewId) {
       after: 'Revisão final',
     } : await apiCall('/api/jira/dds/append-review', 'POST', {review_id: reviewId}, 0);
     if (activeDdsAgentReview !== session || !popup.open) return;
+    currentApproval = data.approval;
     document.getElementById('dds-agent-title').textContent = data.key + ' · ' + data.filename;
     before.textContent = data.before ? 'Antes: ' + data.before : '';
     after.textContent = data.after ? 'Depois: ' + data.after : '';
@@ -3945,8 +3953,11 @@ async function showDdsAgentReview(reviewId) {
       select.disabled = partial.disabled = full.disabled = confirm.disabled = dismiss.disabled = true;
       try {
         if (!demo) {
-          await apiCall('/api/jira/dds/append-feedback', 'POST',
+          const receipt = await apiCall('/api/jira/dds/append-feedback', 'POST',
             {review_id: reviewId, approval: data.approval, scope, start, end, feedback: feedback.value}, 0);
+          if (receipt.feedback?.guidance !== feedback.value.trim()) {
+            throw new Error('O painel não confirmou o recebimento da orientação. Atualize o JiraBot e confira a proposta.');
+          }
         }
         status.textContent = demo ? 'Pedido de revisão simulado.' :
           'Revisão enviada. Se a IA já encerrou a espera, peça que consulte o feedback na conversa original.';
@@ -9851,7 +9862,8 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         or any(char not in "0123456789abcdef" for char in session_id)
                         or event not in ("heartbeat", "tool", "closed")
                         or not isinstance(name, str) or len(name) > 80
-                        or tool not in (("buscar_tickets", "sugerir_ticket", "preparar_acrescimo_dds", "consultar_revisao_dds") if event == "tool" else ("",))
+                        or tool not in (("buscar_tickets", "sugerir_ticket", "preparar_acrescimo_dds", "consultar_revisao_dds",
+                                         "consultar_worklogs", "editar_worklog") if event == "tool" else ("",))
                     ):
                         self._send_json({"error": "Evento de conexão inválido."}, status_code=400)
                         return
@@ -10099,10 +10111,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         result = {"status": "revision_requested" if review.get("feedback") else "pending_confirmation",
                                   "key": review["key"], "draft": review["draft"], "feedback": review.get("feedback")}
                         result["approved_example"] = _dds_approved_examples.get(review["key"])
-                    elif review_id in _dds_approved_examples:
+                    elif review:
+                        result = {"status": "expired", "message": "O prazo da proposta terminou. Prepare uma nova proposta."}
+                    elif isinstance(review_id, str) and review_id in _dds_approved_examples:
                         result = {"status": "approved", "approved_example": _dds_approved_examples[review_id]}
                     else:
-                        result = {"status": "closed", "message": "A proposta foi resolvida ou expirou."}
+                        result = {"status": "closed", "message": "Proposta não encontrada. Confira o identificador. Propostas descartadas ou anteriores ao reinício do painel ficam indisponíveis."}
                 self._send_json(result)
                 return
 
@@ -10125,6 +10139,9 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         del _dds_agent_reviews[review_id]
                         review = None
                     if review and path.endswith("append-dismiss"):
+                        if body.get("approval") != review["approval"] or review.get("feedback"):
+                            self._send_json({"error": "Esta versão foi devolvida ou substituída. Atualize a janela."}, status_code=409)
+                            return
                         del _dds_agent_reviews[review_id]
                     if review and path.endswith("append-feedback"):
                         try:
@@ -10145,12 +10162,15 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                                 selected = review["draft"][start:end]
                             review["feedback"] = {"scope": scope, "start": start, "end": end,
                                                   "selected": selected, "guidance": guidance.strip()}
+                            review["expires"] = monotonic() + _DDS_AGENT_REVIEW_TTL
                         except ValueError as exc:
                             self._send_json({"error": str(exc)}, status_code=409)
                             return
                 if not review:
                     self._send_json({"error": "A proposta expirou ou já foi resolvida."}, status_code=409)
-                elif path.endswith(("append-dismiss", "append-feedback")):
+                elif path.endswith("append-feedback"):
+                    self._send_json({"success": True, "feedback": review["feedback"]})
+                elif path.endswith("append-dismiss"):
                     self._send_json({"success": True})
                 else:
                     self._send_json({k: review[k] for k in ("key", "filename", "before", "after", "entry", "approval", "draft", "feedback")})
@@ -10197,11 +10217,13 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                                 raise ValueError("A revisão precisa alterar o trecho solicitado e respeitar o limite de texto.")
                             recommendations = previous["recommendations"]
                         email = BotConfig.load().jira.email or ""
+                        evidence = prepare_mcp_evidence(body.get("evidencias", []), previous.get("evidence", ()) if previous else ())
                         body = {
                             "autor_nome": email.split("@")[0].replace(".", " ").title() or "Desenvolvedor",
                             "data_preenchimento": datetime.now().strftime("%d/%m/%Y"),
                             "implementacao_texto": text,
                             "recomendacoes": recommendations,
+                            "mcp_evidence": evidence,
                         }
                     if proposal or path.endswith("append-preview"):
                         client = JiraClient(BotConfig.load().jira, state_mgr)
@@ -10222,7 +10244,10 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                                 raise ValueError("Não foi possível renderizar o ponto de inserção da DDS.")
                             self._send_json({"filename": document["filename"], "document_html": html, "marker": marker})
                             return
-                        lines, images, entry = prepare_entry(body, sp_mgr.list_dds_images(issue_key))
+                        local_images = sp_mgr.list_dds_images(issue_key)
+                        if proposal:
+                            local_images = evidence + local_images
+                        lines, images, entry = prepare_entry(body, local_images)
                         content, before, after = append_development(
                             live["docx_bytes"], lines, images,
                             font_size=body.get("font_size", 11), bold=body.get("bold", False),
@@ -10241,11 +10266,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                                 if len(_dds_agent_reviews) >= 4:
                                     raise ValueError("Há quatro propostas pendentes. Revise uma delas antes de criar outra.")
                                 _dds_agent_reviews[preview_id] = {
-                                    "expires": now + 600, "key": issue_key, "document": document,
+                                    "expires": now + _DDS_AGENT_REVIEW_TTL, "key": issue_key, "document": document,
                                     "content": content, "filename": document["filename"],
                                     "before": before, "after": after[:300], "entry": entry, "approval": uuid4().hex,
                                     "draft": body["implementacao_texto"].replace("\r\n", "\n").replace("\r", "\n"),
                                     "recommendations": body["recomendacoes"],
+                                    "evidence": evidence,
                                     "feedback": None,
                                 }
                             self._send_json({"review_id": preview_id, "reused_review": bool(previous), "approved_example": _dds_approved_examples.get(issue_key)})
@@ -11003,6 +11029,58 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     "deleted_count": deleted_count,
                     "message": f"{deleted_count} de {len(items)} lançamento(s) excluído(s) do Jira com sucesso.",
                 })
+                return
+
+            if path in ("/api/worklogs/mcp-query", "/api/worklogs/mcp-edit"):
+                host = self.headers.get("Host", "").partition(":")[0].lower()
+                if host not in ("localhost", "127.0.0.1") or self.headers.get("Origin") or self.headers.get_content_type() != "application/json":
+                    self._send_json({"error": "Use o conector MCP local."}, status_code=403)
+                    return
+                try:
+                    raw_key = body.get("key", "")
+                    key = raw_key.strip().upper() if isinstance(raw_key, str) else None
+                    if key is None or (key and (len(key) > 40 or not TICKET_KEY.fullmatch(key))):
+                        raise ValueError("Informe uma chave Jira válida.")
+                    state_mgr = StateManager()
+                    client = JiraClient(BotConfig.load().jira, state_mgr)
+                    if path.endswith("mcp-query"):
+                        start, end = date.fromisoformat(body.get("start")), date.fromisoformat(body.get("end"))
+                        if not 0 <= (end - start).days <= 30:
+                            raise ValueError("Informe um período de até 31 dias, inclusive.")
+                        rows = client.get_user_worklogs_by_date_range(start.isoformat(), end.isoformat(), strict_owner=True)
+                        self._send_json({"status": "ok", "worklogs": [row for row in rows if not key or row["issue_key"] == key]})
+                        return
+                    worklog_id = body.get("id")
+                    if not key or not isinstance(worklog_id, str) or not re.fullmatch(r"[0-9]{1,24}", worklog_id):
+                        raise ValueError("Informe a chave e o ID numérico do lançamento.")
+                    seconds, started, comment = (body.get(field) for field in ("seconds", "started", "comment"))
+                    if seconds is started is comment is None:
+                        raise ValueError("Informe pelo menos um campo para editar.")
+                    if seconds is not None and (type(seconds) is not int or seconds <= 0):
+                        raise ValueError("A duração deve ser um inteiro positivo em segundos.")
+                    if started is not None:
+                        parsed_start = datetime.fromisoformat(started)
+                        if parsed_start.utcoffset() is None:
+                            raise ValueError("Informe o início em ISO 8601 com fuso horário.")
+                        started = parsed_start.isoformat()
+                    if comment is not None and (not isinstance(comment, str) or len(comment) > 32767):
+                        raise ValueError("Informe uma descrição de até 32767 caracteres.")
+                    if not client.is_own_worklog(key, worklog_id):
+                        self._send_json({"error": "O lançamento não pertence à conta Jira conectada."}, status_code=403)
+                        return
+                    result = client.update_worklog_full(key, worklog_id, time_spent_seconds=seconds, started_iso=started, comment=comment)
+                    if not result.get("success"):
+                        self._send_json({"error": "O Jira não confirmou a edição. Consulte o lançamento antes de tentar novamente."}, status_code=502)
+                        return
+                    message = "Lançamento atualizado no Jira."
+                    if seconds is not None or started is not None:
+                        try:
+                            state_mgr.delete_worklog_schedule(worklog_id)
+                        except OSError:
+                            message += " Os horários auxiliares locais não puderam ser limpos."
+                    self._send_json({"status": "updated", "key": key, "worklog_id": worklog_id, "message": message})
+                except (TypeError, ValueError) as exc:
+                    self._send_json({"error": str(exc)}, status_code=400)
                 return
 
             if path in ["/api/worklogs/create", "/api/worklogs/update"]:

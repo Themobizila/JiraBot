@@ -3145,7 +3145,24 @@ class JiraClient:
         results.sort(key=lambda x: x.get("started", ""), reverse=True)
         return results
 
-    def get_user_worklogs_by_date_range(self, start_date_str: str, end_date_str: str) -> List[Dict[str, Any]]:
+    def is_own_worklog(self, issue_key: str, worklog_id: str) -> bool:
+        base_url = self.config.get_clean_base_url()
+        headers = self._get_auth_headers()
+        try:
+            def read(path):
+                request = urllib.request.Request(f"{base_url}/rest/api/2/{path}", headers=headers)
+                with urllib.request.urlopen(request, timeout=12) as response:
+                    return json.loads(response.read().decode("utf-8"))
+
+            account = read("myself").get("accountId")
+            if not account:
+                return False
+            worklog = read(f"issue/{issue_key}/worklog/{worklog_id}")
+            return (worklog.get("author") or {}).get("accountId") == account
+        except (OSError, ValueError) as exc:
+            raise ValueError("Não foi possível verificar a autoria do lançamento no Jira.") from exc
+
+    def get_user_worklogs_by_date_range(self, start_date_str: str, end_date_str: str, *, strict_owner: bool = False) -> List[Dict[str, Any]]:
         """
         Busca todos os worklogs lancados pelo usuario logado dentro de um intervalo de datas especifico
         (start_date_str ate end_date_str no formato YYYY-MM-DD).
@@ -3167,6 +3184,9 @@ class JiraClient:
         except Exception as e:
             logger.warning(f"Nao foi possivel obter perfil do usuario: {e}")
 
+        if strict_owner and not my_account_id:
+            raise ValueError("Não foi possível identificar a conta Jira conectada.")
+
         jql = f'worklogAuthor = currentUser() AND worklogDate >= "{s_clean}" AND worklogDate <= "{e_clean}"'
         search_url = f"{base_url}/rest/api/2/search/jql?jql={urllib.parse.quote(jql)}&maxResults=60&fields=key,summary"
 
@@ -3178,6 +3198,8 @@ class JiraClient:
                 issues_found = data.get("issues", [])
         except Exception as e:
             logger.warning(f"Erro ao buscar chamados por intervalo de datas via JQL: {e}")
+            if strict_owner:
+                raise ValueError("Não foi possível consultar os lançamentos no Jira.") from e
             return []
 
         results: List[Dict[str, Any]] = []
@@ -3216,6 +3238,8 @@ class JiraClient:
                         })
             except Exception as e:
                 logger.warning(f"Erro ao obter worklogs de {key}: {e}")
+                if strict_owner:
+                    raise ValueError(f"Não foi possível consultar os lançamentos de {key}.") from e
 
         results.sort(key=lambda x: x.get("started", ""), reverse=True)
         return results

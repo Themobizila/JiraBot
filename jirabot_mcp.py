@@ -79,22 +79,44 @@ server = JiraBotMCP(
         "identificar claramente a tarefa. Em caso de ambiguidade, continue o trabalho e peça a chave. "
         "Use sugerir_ticket uma vez por mudança de tarefa. A decisão fica com o usuário no JiraBot. "
         "Quando o usuário pedir um lançamento na DDS, use preparar_acrescimo_dds. "
+        "Inclua prints reais disponíveis em evidencias. Se faltarem comprovações, peça os arquivos ao usuário. "
         "Informe que a proposta está pendente e chame consultar_revisao_dds com o ID para aguardar a decisão. "
         "Em revisão parcial, envie somente a substituição e o identificador em revisao_anterior."
     ),
 )
 
 
-def request_panel(path: str, payload: dict[str, str]) -> dict[str, Any]:
+def request_panel(path: str, payload: dict[str, Any], *, timeout: int = 20) -> dict[str, Any]:
     try:
-        status, result = local_focus_request(path, payload, port=panel_port)
+        status, result = local_focus_request(path, payload, port=panel_port, timeout=timeout)
         if status == 200:
             return result
-        if status in (400, 403):
+        if status in (400, 403, 404, 409, 502):
             return {"status": "rejected", "message": result.get("error", "O painel recusou a solicitação.")}
     except (OSError, HTTPException, ValueError):
         pass
     return {"status": "unavailable", "message": "A integração não está disponível no painel local do JiraBot."}
+
+
+@server.tool()
+def consultar_worklogs(data_inicio: str, data_fim: str, ctx: Context, chave: str = "") -> dict[str, Any]:
+    """Consulta seus lançamentos em datas AAAA-MM-DD, até 31 dias inclusive. A chave é um filtro opcional."""
+    report_client(ctx, "consultar_worklogs")
+    return request_panel("/api/worklogs/mcp-query", {"start": data_inicio, "end": data_fim, "key": chave}, timeout=90)
+
+
+@server.tool()
+def editar_worklog(chave: str, worklog_id: str, ctx: Context, duracao_segundos: int | None = None,
+                   inicio_iso: str | None = None, descricao: str | None = None) -> dict[str, Any]:
+    """Edita um lançamento seu após pedido explícito. Use o ID da consulta; omita campos a manter.
+
+    Informe início em ISO 8601 com fuso (ex.: 2026-11-17T09:00:00-03:00).
+    Descrição vazia limpa o campo. A edição mantém o ticket e não cria lançamento.
+    """
+    report_client(ctx, "editar_worklog")
+    return request_panel("/api/worklogs/mcp-edit", {
+        "key": chave, "id": worklog_id, "seconds": duracao_segundos, "started": inicio_iso, "comment": descricao,
+    }, timeout=50)
 
 
 @server.tool()
@@ -109,14 +131,18 @@ def buscar_tickets(contexto: str, ctx: Context) -> dict[str, Any]:
 
 @server.tool()
 def preparar_acrescimo_dds(chave: str, detalhamento: str, ctx: Context, recomendacoes: str = "",
-                           revisao_anterior: str = "") -> dict[str, Any]:
-    """Prepara um acréscimo em Desenvolvimento e abre a revisão com o contexto para aprovação humana."""
+                           revisao_anterior: str = "", evidencias: list[dict[str, str]] | None = None) -> dict[str, Any]:
+    """Prepara um acréscimo para revisão humana. Evidências PNG/JPEG usam nome e conteudo_base64.
+
+    Use !evidencia-1!, !evidencia-2! etc. em linhas próprias para posicionar
+    imagens na ordem enviada. Sem marcador, a imagem aparece ao fim da entrada.
+    """
     report_client(ctx, "preparar_acrescimo_dds")
     try:
         status, result = local_focus_request(
             "/api/jira/dds/append-propose",
             {"key": chave.strip().upper(), "implementacao_texto": detalhamento,
-             "recomendacoes": recomendacoes, "revisao_anterior": revisao_anterior},
+             "recomendacoes": recomendacoes, "revisao_anterior": revisao_anterior, "evidencias": evidencias or []},
             port=panel_port, timeout=90,
         )
     except (OSError, HTTPException, ValueError):

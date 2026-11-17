@@ -21,6 +21,41 @@ RELS = "http://schemas.openxmlformats.org/package/2006/relationships"
 TYPES = "http://schemas.openxmlformats.org/package/2006/content-types"
 
 
+def prepare_mcp_evidence(items, previous=()):
+    """Valida imagens da proposta sem ler arquivos por caminho nem persistir anexos."""
+    if not isinstance(items, list) or len(items) + len(previous) > 5:
+        raise ValueError("Envie até cinco imagens por proposta.")
+    evidence = list(previous)
+    total = sum(len(image["url"].split(",", 1)[1]) for image in evidence)
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("Informe o nome e o conteúdo Base64 de cada imagem.")
+        name, encoded = item.get("nome"), item.get("conteudo_base64")
+        if (not isinstance(name, str) or not re.fullmatch(r"[^/\\<>\x00-\x1f]{1,120}", name)
+                or not isinstance(encoded, str) or not encoded or len(encoded) > 7_000_000):
+            raise ValueError("Informe um nome de imagem simples e até 5 MB por arquivo.")
+        total += len(encoded)
+        if total > 20_000_000:
+            raise ValueError("As evidências excedem o limite total de 15 MB.")
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+            if len(raw) > 5_000_000:
+                raise ValueError
+            with Image.open(io.BytesIO(raw), formats=["PNG", "JPEG"]) as image:
+                if image.width * image.height > 20_000_000:
+                    raise ValueError
+                mime = "image/png" if image.format == "PNG" else "image/jpeg"
+                image.load()
+        except (ValueError, OSError, Image.DecompressionBombError) as exc:
+            raise ValueError(f"Evidência inválida: {name}. Envie um PNG ou JPEG válido de até 5 MB.") from exc
+        evidence.append({
+            "name": name,
+            "filename": f"evidencia-{len(evidence) + 1}",
+            "url": f"data:{mime};base64,{encoded}",
+        })
+    return evidence
+
+
 def prepare_entry(payload, local_images):
     date = (payload.get("data_preenchimento") or "").strip()
     try:
@@ -99,6 +134,12 @@ def prepare_entry(payload, local_images):
     lines.extend(formatted[1:] if details[0].strip() == f"- {date}" else formatted)
     if payload.get("recomendacoes"):
         lines.extend(["Instruções de teste desta entrega:", *payload["recomendacoes"].splitlines()])
+    positioned = {line.strip() for line in text.splitlines()}
+    positioned.update(line.strip() for line in (payload.get("recomendacoes") or "").splitlines())
+    for image in payload.get("mcp_evidence", []):
+        marker = f'!{image["filename"]}!'
+        if marker not in positioned:
+            lines.append(marker)
     if payload.get("incluir_checklist") and payload.get("checklist"):
         lines.append("Revisão de código desta entrega:")
         lines.extend(f'{row["pergunta"]} — {row["resposta"]}' for row in payload["checklist"])
