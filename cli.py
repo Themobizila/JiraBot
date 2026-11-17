@@ -11,7 +11,7 @@ import sys
 import winreg
 from datetime import datetime, date
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from config import (
     BotConfig,
@@ -742,7 +742,7 @@ def cmd_log_now(args: Optional[argparse.Namespace] = None, no_comment: bool = Fa
     state_mgr = StateManager()
     client = JiraClient(config.jira, state_mgr)
 
-    def _cli_worklog_trigger(issue: str, sec: int, start_iso: str, comment: Optional[str] = None) -> bool:
+    def _cli_worklog_trigger(issue: str, sec: int, start_iso: str, comment: Optional[str] = None) -> Dict[str, Any]:
         res = client.submit_worklog(
             issue,
             sec,
@@ -755,16 +755,32 @@ def cmd_log_now(args: Optional[argparse.Namespace] = None, no_comment: bool = Fa
         if ok and wid:
             if wid not in engine.state.jira_worklog_ids:
                 engine.state.jira_worklog_ids.append(wid)
-            shift_times = engine.state.get_shift_times_summary()
-            if shift_times.get("start_hm"):
-                state_mgr.save_worklog_schedule(wid, shift_times)
-                state_mgr.save_day_shift_schedule(engine.state.date_str, shift_times)
-        return ok
+            issue_sch = engine.state.get_issue_schedule_summary(issue, default_issue=config.jira.default_issue)
+            if issue_sch.get("start_hm"):
+                state_mgr.save_worklog_schedule(wid, issue_sch)
+            day_sch = engine.state.get_shift_times_summary()
+            if day_sch.get("start_hm"):
+                state_mgr.save_day_shift_schedule(engine.state.date_str, day_sch)
+        return {"status": "success" if ok else "error", "worklog_id": wid}
+
+    def _cli_worklog_update(
+        issue: str, worklog_id: str, sec: int, start_iso: str, comment: Optional[str] = None
+    ) -> Dict[str, Any]:
+        upd_res = client.update_worklog_full(
+            issue_key=issue,
+            worklog_id=worklog_id,
+            time_spent_seconds=sec,
+            started_iso=start_iso,
+            comment="" if comment == "__EMPTY__" else (comment or ""),
+        )
+        return upd_res if isinstance(upd_res, dict) else {"success": bool(upd_res)}
 
     engine = BotEngine(
         config=config,
         state_manager=state_mgr,
         on_worklog_trigger=_cli_worklog_trigger,
+        on_worklog_update=_cli_worklog_update,
+        auto_reload_config=True,
     )
 
     issue = getattr(args, "issue", None) or config.jira.default_issue

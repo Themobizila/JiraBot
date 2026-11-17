@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from config import BotConfig, ShiftProfile
 from notifier import send_notification
@@ -45,12 +45,23 @@ class BotEngine:
         state_manager: Optional[StateManager] = None,
         on_worklog_trigger: Optional[Callable[[str, int, str, str], Any]] = None,
         on_worklog_update: Optional[Callable[[str, str, int, str, str], bool]] = None,
+        auto_reload_config: Optional[bool] = None,
     ):
+        self.auto_reload_config = (config is None) if auto_reload_config is None else bool(auto_reload_config)
         self.config = config or BotConfig.load()
         self.state_manager = state_manager or StateManager()
         self.on_worklog_trigger = on_worklog_trigger
         self.on_worklog_update = on_worklog_update
         self.state: DailyState = self.state_manager.load_state()
+
+    def refresh_config(self) -> BotConfig:
+        """Recarrega config.json do disco quando habilitado, evitando uso de preferencias em memoria obsoletas."""
+        if self.auto_reload_config:
+            try:
+                self.config = BotConfig.load()
+            except Exception:
+                pass
+        return self.config
 
     def refresh_state(self) -> DailyState:
         """Recarrega o estado mais recente do disco."""
@@ -81,6 +92,7 @@ class BotEngine:
         """
         now = now or datetime.now()
         now_iso = now.isoformat()
+        self.refresh_config()
         self.refresh_state()
 
         old_issue = self.get_active_issue()
@@ -94,14 +106,23 @@ class BotEngine:
                 raise ValueError("O intervalo ativo mudou. Confira o ticket antes de trocar.")
         new_issue = clean_jira_issue_key(new_issue_key) or old_issue
 
-        if self.state.status == "RUNNING":
-            if self.state.intervals and self.state.intervals[-1].end is None:
-                self.state.intervals[-1].end = now_iso
-                if not self.state.intervals[-1].issue_key:
-                    self.state.intervals[-1].issue_key = old_issue
+        # Fixa a chave nos intervalos preexistentes sem ticket antes de trocar target_issue
+        for inter in self.state.intervals:
+            if not inter.issue_key or clean_jira_issue_key(inter.issue_key) == "SEM_TICKET":
+                inter.issue_key = old_issue
 
-            # Inicia novo intervalo para o novo ticket
-            self.state.intervals.append(TimeInterval(start=now_iso, issue_key=new_issue, comment=comment))
+        if self.state.status == "RUNNING":
+            open_inter = self.state.intervals[-1] if (self.state.intervals and self.state.intervals[-1].end is None) else None
+            if open_inter and clean_jira_issue_key(open_inter.issue_key or old_issue) == new_issue:
+                if comment:
+                    open_inter.comment = comment.strip()
+            else:
+                if open_inter:
+                    open_inter.end = now_iso
+                    if not open_inter.issue_key:
+                        open_inter.issue_key = old_issue
+                # Inicia novo intervalo para o novo ticket exatamente no instante da troca
+                self.state.intervals.append(TimeInterval(start=now_iso, issue_key=new_issue, comment=comment))
 
         self.state.target_issue = new_issue
         if comment:
@@ -161,10 +182,11 @@ class BotEngine:
         """Processa o evento de desbloqueio de tela (WTS_SESSION_UNLOCK)."""
         now = now or datetime.now()
         now_iso = now.isoformat()
+
+        self.refresh_config()
+        self.refresh_state()
         profile = self.get_profile()
         active_issue = self.get_active_issue()
-
-        self.refresh_state()
         logger.info(f"Processando UNLOCK as {now.strftime('%H:%M:%S')}. Estado atual: {self.state.status}")
 
         if self.state.status == "IDLE":
@@ -256,9 +278,10 @@ class BotEngine:
         now = now or datetime.now()
         current_time = now.time()
         now_iso = now.isoformat()
-        profile = self.get_profile()
 
+        self.refresh_config()
         self.refresh_state()
+        profile = self.get_profile()
         logger.info(f"Processando LOCK as {now.strftime('%H:%M:%S')}. Estado atual: {self.state.status}")
 
         if self.state.status == "PAUSED_LUNCH":
@@ -313,7 +336,7 @@ class BotEngine:
                 send_notification("JiraBot - Expediente Finalizado", msg, self.config.notifications_enabled)
 
                 if self.config.auto_log_on_exit and not self.state.is_logged:
-                    self._trigger_worklog_all_issues()
+                    self._trigger_worklog_all_issues(auto_triggered=True)
 
             else:
                 # Bloqueio intermediario fora das janelas planejadas (ex: banheiro, cafe)
@@ -344,9 +367,10 @@ class BotEngine:
         now = now or datetime.now()
         current_time = now.time()
         now_iso = now.isoformat()
-        profile = self.get_profile()
 
+        self.refresh_config()
         self.refresh_state()
+        profile = self.get_profile()
         logger.info(f"Processando SHUTDOWN/LOGOFF as {now.strftime('%H:%M:%S')}. Estado atual: {self.state.status}")
 
         was_running = (self.state.status == "RUNNING")
@@ -377,7 +401,7 @@ class BotEngine:
             logger.info(f"Fim de expediente por desligamento do PC as {now.strftime('%H:%M')}. Total: {total_str}")
 
             if self.config.auto_log_on_exit and not self.state.is_logged:
-                self._trigger_worklog_all_issues()
+                self._trigger_worklog_all_issues(auto_triggered=True)
 
         elif was_running:
             is_lunch_window = profile.lunch_start_window.contains(current_time) or (
@@ -410,6 +434,7 @@ class BotEngine:
         2. Alerta de revisao de descricao configuravel antes do horario nominal de saida.
         """
         now = now or datetime.now()
+        self.refresh_config()
         self.refresh_state()
         profile = self.get_profile()
 
@@ -472,54 +497,67 @@ class BotEngine:
             pass
 
     def _acquire_cross_process_lock(self, timeout_sec: float = 15.0):
-        """Context manager simples baseado em arquivo para sincronizar envio de worklog entre processos."""
-        from contextlib import contextmanager
+        """Delega para o lock reentrante multi-processo centralizado no StateManager."""
+        return self.state_manager.worklog_sync_lock(timeout_sec=timeout_sec)
 
-        @contextmanager
-        def _lock_ctx():
-            lock_path = self.state_manager.base_dir / "worklog_sync.lock"
-            self.state_manager.base_dir.mkdir(parents=True, exist_ok=True)
-            deadline = time.time() + timeout_sec
-            acquired = False
-            while time.time() < deadline:
-                try:
-                    if lock_path.exists():
-                        age = time.time() - lock_path.stat().st_mtime
-                        if age > 30.0:
-                            try:
-                                lock_path.unlink()
-                            except Exception:
-                                pass
-                    fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                    os.write(fd, str(os.getpid()).encode("utf-8"))
-                    os.close(fd)
-                    acquired = True
-                    break
-                except FileExistsError:
-                    time.sleep(0.1)
-                except Exception:
-                    break
-            try:
-                yield
-            finally:
-                if acquired:
-                    try:
-                        if lock_path.exists():
-                            lock_path.unlink()
-                    except Exception:
-                        pass
+    def _fetch_existing_jira_worklogs_for_date(self, date_str: str) -> Dict[str, List[Dict[str, Any]]]:
+        """Consulta worklogs ja existentes no Jira para a data informada, agrupados por ticket."""
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        try:
+            jira_cfg = self.config.jira
+            if not (
+                getattr(jira_cfg, "base_url", "").strip()
+                and getattr(jira_cfg, "email", "").strip()
+                and getattr(jira_cfg, "api_token", "").strip()
+            ):
+                return grouped
 
-        return _lock_ctx()
+            from jira_client import JiraClient
+            client = JiraClient(jira_cfg, self.state_manager)
+            items = client.get_user_worklogs_by_date_range(date_str, date_str)
+            if not isinstance(items, list):
+                return grouped
+            for w in items:
+                if not isinstance(w, dict):
+                    continue
+                k = clean_jira_issue_key(str(w.get("issue_key") or ""))
+                if not k or k == "SEM_TICKET":
+                    continue
+                grouped.setdefault(k, []).append(w)
+        except Exception as e:
+            logger.warning(f"Falha ao reconciliar worklogs existentes no Jira para {date_str}: {e}")
+        return grouped
 
-    def _trigger_worklog_all_issues(self) -> None:
+    def _clear_queued_worklogs_for_date(self, date_str: str, issue_key: Optional[str] = None) -> None:
+        """Remove da fila offline apontamentos ja confirmados para a data (e ticket opcional)."""
+        try:
+            target_issue = clean_jira_issue_key(issue_key) if issue_key else None
+            for q_item in self.state_manager.load_queue():
+                q_date = q_item.started_iso[:10] if len(q_item.started_iso) >= 10 else ""
+                if q_date != date_str:
+                    continue
+                if target_issue and clean_jira_issue_key(q_item.issue_key) != target_issue:
+                    continue
+                self.state_manager.remove_from_queue(q_item.id)
+        except Exception:
+            pass
+
+    def _trigger_worklog_all_issues(self, auto_triggered: bool = False) -> None:
         """
         Aciona o lancamento (ou atualizacao idempotente) do worklog para cada ticket trabalhado no dia.
-        Garante exclusao mutua entre threads/processos e evita duplicacao caso um ticket ja tenha sido
-        lancado hoje (ignorando se o tempo nao mudou ou atualizando via PUT se houve acrescimo de horas).
+        Garante exclusao mutua entre threads/processos, envia o horario de inicio real de cada ticket
+        e reconcilia com o Jira antes de enviar para evitar duplicacoes.
         """
         with _WORKLOG_SYNC_LOCK:
             with self._acquire_cross_process_lock():
+                self.refresh_config()
                 self.refresh_state()
+
+                if auto_triggered and not getattr(self.config, "auto_log_on_exit", True):
+                    logger.info(
+                        "Auto-lancamento no encerramento desabilitado na configuracao atual; envio automatico ignorado."
+                    )
+                    return
 
                 # Garante que nenhum intervalo fique em aberto no momento do envio
                 if self.state.intervals and self.state.intervals[-1].end is None:
@@ -531,9 +569,56 @@ class BotEngine:
                 self._mascot_event("worklog_start")
                 default_issue = self.config.jira.default_issue
                 by_issue = self.state.get_seconds_by_issue(default_issue=default_issue)
-                first_start = self.state.get_first_start_time()
-                started_iso = first_start.isoformat() if first_start else datetime.now().isoformat()
-                shift_summary = self.state.get_shift_times_summary()
+                day_shift_summary = self.state.get_shift_times_summary()
+                if day_shift_summary.get("start_hm"):
+                    self.state_manager.save_day_shift_schedule(self.state.date_str, day_shift_summary)
+
+                if not any(seconds > 0 for seconds in by_issue.values()):
+                    return
+
+                # Reconciliacao preventiva com worklogs ja gravados no Jira para a data
+                existing_jira = self._fetch_existing_jira_worklogs_for_date(self.state.date_str)
+                jira_total_all_seconds = sum(
+                    sum(max(0, int(w.get("time_spent_seconds", 0) or 0)) for w in lst)
+                    for lst in existing_jira.values()
+                )
+                local_total_all_seconds = sum(max(0, int(s or 0)) for s in by_issue.values())
+                jira_has_any_for_date = any(len(lst) > 0 for lst in existing_jira.values())
+                day_already_covered = (
+                    jira_has_any_for_date
+                    and local_total_all_seconds > 0
+                    and jira_total_all_seconds >= max(60, local_total_all_seconds - 180)
+                )
+
+                # Caso o dia nao tenha registros no state local (ex: lancamento manual QE-6668 4h + ATIVDIV-32 2h
+                # diretamente no Jira/Painel), mas o total no Jira ja cubra o tempo local, reconcilia sem duplicar.
+                if not self.state.logged_worklogs_by_issue and day_already_covered:
+                    for r_key, r_list in existing_jira.items():
+                        for rw in r_list:
+                            r_wid = str(rw.get("id") or "").strip()
+                            if r_wid and r_wid not in self.state.jira_worklog_ids:
+                                self.state.jira_worklog_ids.append(r_wid)
+                        if r_list:
+                            last_rw = r_list[-1]
+                            last_rwid = str(last_rw.get("id") or "").strip()
+                            r_sum_sec = sum(max(0, int(x.get("time_spent_seconds", 0) or 0)) for x in r_list)
+                            if last_rwid:
+                                self.state.logged_worklogs_by_issue[r_key] = {
+                                    "worklog_id": last_rwid,
+                                    "seconds": r_sum_sec,
+                                    "started_iso": str(last_rw.get("started") or ""),
+                                    "comment": str(last_rw.get("comment") or ""),
+                                    "updated_at": datetime.now().isoformat(),
+                                }
+                    self._clear_queued_worklogs_for_date(self.state.date_str)
+                    self.state.is_logged = True
+                    self.state_manager.save_state(self.state)
+                    self.state_manager.save_day_to_history(self.state)
+                    logger.info(
+                        f"Dia {self.state.date_str} ja possui {jira_total_all_seconds}s lancados no Jira "
+                        f"(local={local_total_all_seconds}s). Reconciliado sem criar worklog duplicado."
+                    )
+                    return
 
                 all_success = True
                 for raw_issue_key, seconds in by_issue.items():
@@ -547,6 +632,12 @@ class BotEngine:
                         logger.warning(f"Horas contabilizadas ({seconds}s) sem nenhum ticket associado ou padrao.")
                         all_success = False
                         continue
+
+                    issue_first_start = self.state.get_issue_first_start_time(issue_key, default_issue=default_issue)
+                    if not issue_first_start:
+                        issue_first_start = self.state.get_first_start_time()
+                    started_iso = issue_first_start.isoformat() if issue_first_start else datetime.now().isoformat()
+                    issue_schedule = self.state.get_issue_schedule_summary(issue_key, default_issue=default_issue)
 
                     # Obtem a descricao personalizada daquele ticket ou fallback (a menos que no_comment esteja ativo)
                     if self.state.no_comment:
@@ -572,8 +663,38 @@ class BotEngine:
                             if not prev_wid.startswith("local_"):
                                 if prev_wid not in self.state.jira_worklog_ids:
                                     self.state.jira_worklog_ids.append(prev_wid)
-                                if shift_summary.get("start_hm"):
-                                    self.state_manager.save_worklog_schedule(prev_wid, shift_summary)
+                                if issue_schedule.get("start_hm"):
+                                    self.state_manager.save_worklog_schedule(prev_wid, issue_schedule)
+                            self._clear_queued_worklogs_for_date(self.state.date_str, issue_key=issue_key)
+                            continue
+
+                        # Se o ticket foi registrado manualmente pelo usuario (ex: Novo Lancamento ou divisao)
+                        # ou se o Jira ja difere durante gatilho automatico, preserva os registros sem sobrescrever
+                        if (auto_triggered and (prev_entry.get("manual") or day_already_covered)) or (
+                            bool(prev_entry.get("manual")) and day_already_covered
+                        ):
+                            logger.info(
+                                f"Ticket {issue_key} possui apontamento manual ({prev_wid}) ou dia ja coberto no Jira. "
+                                f"Sobrescrita automatica ignorada para preservar os valores lancados."
+                            )
+                            self._clear_queued_worklogs_for_date(self.state.date_str, issue_key=issue_key)
+                            continue
+
+                        # Se houver divergencia remota num disparo automatico (ex: usuario editou/dividiu no Jira),
+                        # preserva os registros existentes no Jira em vez de sobrescrever ou recriar
+                        remote_list = existing_jira.get(issue_key, [])
+                        remote_ids = {str(rw.get("id") or "").strip() for rw in remote_list if rw.get("id")}
+                        if auto_triggered and remote_list and prev_wid not in remote_ids:
+                            logger.info(
+                                f"Worklog local {prev_wid} ({issue_key}) difere do Jira atual ({sorted(remote_ids)}) "
+                                f"durante gatilho automatico. Preservando registros existentes sem duplicar."
+                            )
+                            for rw in remote_list:
+                                r_wid = str(rw.get("id") or "").strip()
+                                if r_wid and r_wid not in self.state.jira_worklog_ids:
+                                    self.state.jira_worklog_ids.append(r_wid)
+                            self._clear_queued_worklogs_for_date(self.state.date_str, issue_key=issue_key)
+                            self.state_manager.save_state(self.state)
                             continue
 
                         # 2. Se houve alteracao de tempo/comentario (ex: retomada apos expediente), atualiza via PUT
@@ -582,9 +703,17 @@ class BotEngine:
                             is_not_found = False
                             if self.on_worklog_update:
                                 try:
-                                    updated_ok = bool(
-                                        self.on_worklog_update(issue_key, prev_wid, seconds, started_iso, custom_comment)
+                                    raw_upd = self.on_worklog_update(
+                                        issue_key, prev_wid, seconds, started_iso, custom_comment
                                     )
+                                    if isinstance(raw_upd, dict):
+                                        updated_ok = bool(
+                                            raw_upd.get("success") or raw_upd.get("status") == "success"
+                                        )
+                                        if not updated_ok and "404" in str(raw_upd.get("message", "")):
+                                            is_not_found = True
+                                    else:
+                                        updated_ok = bool(raw_upd)
                                 except Exception as e:
                                     logger.error(f"Erro ao atualizar worklog {prev_wid} ({issue_key}): {e}")
                                     updated_ok = False
@@ -620,8 +749,9 @@ class BotEngine:
                                 }
                                 if prev_wid not in self.state.jira_worklog_ids:
                                     self.state.jira_worklog_ids.append(prev_wid)
-                                if shift_summary.get("start_hm"):
-                                    self.state_manager.save_worklog_schedule(prev_wid, shift_summary)
+                                if issue_schedule.get("start_hm"):
+                                    self.state_manager.save_worklog_schedule(prev_wid, issue_schedule)
+                                self._clear_queued_worklogs_for_date(self.state.date_str, issue_key=issue_key)
                                 self.state_manager.save_state(self.state)
                                 continue
 
@@ -633,6 +763,35 @@ class BotEngine:
                                 # Worklog 404 (foi excluido manualmente no Jira): permite recriar via POST
                                 if prev_wid in self.state.jira_worklog_ids:
                                     self.state.jira_worklog_ids.remove(prev_wid)
+                    else:
+                        # Ainda nao ha prev_entry no state.json: confere se este ticket ja tem worklog no Jira hoje
+                        remote_list = existing_jira.get(issue_key, [])
+                        if remote_list:
+                            remote_sec = sum(
+                                max(0, int(rw.get("time_spent_seconds", 0) or 0)) for rw in remote_list
+                            )
+                            last_rw = remote_list[-1]
+                            last_rwid = str(last_rw.get("id") or "").strip()
+                            if auto_triggered or abs(remote_sec - seconds) < 120 or day_already_covered:
+                                logger.info(
+                                    f"Ticket {issue_key} ja possui worklog no Jira para {self.state.date_str} "
+                                    f"(ID {last_rwid}, {remote_sec}s remoto vs {seconds}s local). Reconciliado sem duplicar."
+                                )
+                                for rw in remote_list:
+                                    r_wid = str(rw.get("id") or "").strip()
+                                    if r_wid and r_wid not in self.state.jira_worklog_ids:
+                                        self.state.jira_worklog_ids.append(r_wid)
+                                if last_rwid:
+                                    self.state.logged_worklogs_by_issue[issue_key] = {
+                                        "worklog_id": last_rwid,
+                                        "seconds": remote_sec,
+                                        "started_iso": str(last_rw.get("started") or started_iso),
+                                        "comment": str(last_rw.get("comment") or custom_comment),
+                                        "updated_at": datetime.now().isoformat(),
+                                    }
+                                self._clear_queued_worklogs_for_date(self.state.date_str, issue_key=issue_key)
+                                self.state_manager.save_state(self.state)
+                                continue
 
                     # 3. Criacao do worklog para ticket ainda nao lancado hoje
                     success = False
@@ -670,17 +829,10 @@ class BotEngine:
                             "comment": custom_comment,
                             "updated_at": datetime.now().isoformat(),
                         }
-                        if new_wid and shift_summary.get("start_hm"):
-                            self.state_manager.save_worklog_schedule(new_wid, shift_summary)
+                        if new_wid and issue_schedule.get("start_hm"):
+                            self.state_manager.save_worklog_schedule(new_wid, issue_schedule)
 
-                        # Remove eventual item pendente da mesma tarefa/data na fila offline para evitar reenvio
-                        try:
-                            for q_item in self.state_manager.load_queue():
-                                q_date = q_item.started_iso[:10] if len(q_item.started_iso) >= 10 else ""
-                                if clean_jira_issue_key(q_item.issue_key) == issue_key and q_date == self.state.date_str:
-                                    self.state_manager.remove_from_queue(q_item.id)
-                        except Exception:
-                            pass
+                        self._clear_queued_worklogs_for_date(self.state.date_str, issue_key=issue_key)
 
                         # Persiste imediatamente apos cada ticket enviado para evitar corrida
                         self.state_manager.save_state(self.state)
@@ -691,17 +843,16 @@ class BotEngine:
                             started_iso=started_iso,
                             time_spent_seconds=seconds,
                             comment="" if self.state.no_comment else custom_comment,
+                            schedule=issue_schedule if issue_schedule.get("start_hm") else None,
                         )
 
                 if all_success:
                     self.state.is_logged = True
                     self.state_manager.save_state(self.state)
                     self.state_manager.save_day_to_history(self.state)
-                    shift_summary = self.state.get_shift_times_summary()
-                    if shift_summary.get("start_hm"):
-                        self.state_manager.save_day_shift_schedule(self.state.date_str, shift_summary)
-                        for wid in self.state.jira_worklog_ids:
-                            self.state_manager.save_worklog_schedule(wid, shift_summary)
+                    day_shift_summary = self.state.get_shift_times_summary()
+                    if day_shift_summary.get("start_hm"):
+                        self.state_manager.save_day_shift_schedule(self.state.date_str, day_shift_summary)
                     logger.info("Todos os apontamentos de hoje foram transmitidos ao Jira com sucesso.")
                     if any(seconds > 0 for seconds in by_issue.values()):
                         self._mascot_event("worklog_success")
@@ -712,6 +863,7 @@ class BotEngine:
         """Inicia manualmente a contagem."""
         now = now or datetime.now()
         now_iso = now.isoformat()
+        self.refresh_config()
         self.refresh_state()
 
         active_issue = self.get_active_issue()
@@ -727,6 +879,7 @@ class BotEngine:
         """Pausa manualmente o cronometro."""
         now = now or datetime.now()
         now_iso = now.isoformat()
+        self.refresh_config()
         self.refresh_state()
 
         if self.state.status == "RUNNING":
@@ -770,6 +923,7 @@ class BotEngine:
         with _WORKLOG_SYNC_LOCK:
             now = now or datetime.now()
             now_iso = now.isoformat()
+            self.refresh_config()
             self.refresh_state()
 
             if self.state.status == "RUNNING":
@@ -792,5 +946,5 @@ class BotEngine:
             self.state_manager.create_snapshot(self.state, reason="pre_log_now")
 
             total_seconds = self.state.get_total_seconds()
-            self._trigger_worklog_all_issues()
+            self._trigger_worklog_all_issues(auto_triggered=False)
             return total_seconds

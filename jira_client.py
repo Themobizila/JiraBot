@@ -2834,34 +2834,163 @@ class JiraClient:
     def flush_queue(self) -> int:
         """
         Tenta enviar todos os itens pendentes na fila offline.
-        Retorna o numero de itens sincronizados com sucesso.
+        Executa sob lock multi-processo, reconcilia com o Jira para evitar duplicidades
+        e atualiza o state.json do dia corrente apos envio/reconciliacao.
         """
-        queue = self.state_manager.load_queue()
-        if not queue:
-            return 0
+        with self.state_manager.worklog_sync_lock():
+            self.state_manager.deduplicate_queue()
+            queue = self.state_manager.load_queue()
+            if not queue:
+                return 0
 
-        logger.info(f"Processando fila de contingencia ({len(queue)} itens pendentes)...")
-        success_count = 0
+            logger.info(f"Processando fila de contingencia ({len(queue)} itens pendentes)...")
+            success_count = 0
+            today_str = date.today().isoformat()
 
-        for item in list(queue):
+            # Le o state.json bruto sem disparar rollover dentro do flush
+            raw_today_state: Optional[Dict[str, Any]] = None
             try:
-                self.submit_worklog(
-                    issue_key=item.issue_key,
-                    time_spent_seconds=item.time_spent_seconds,
-                    started_iso=item.started_iso,
-                    comment=item.comment,
-                )
-                self.state_manager.remove_from_queue(item.id)
-                success_count += 1
-                logger.info(f"Item {item.id} sincronizado e removido da fila.")
-            except Exception as e:
-                item.retry_count += 1
-                item.last_error = str(e)
-                logger.warning(f"Tentativa {item.retry_count} falhou para item {item.id}: {e}")
+                if self.state_manager.state_file.exists():
+                    with open(self.state_manager.state_file, "r", encoding="utf-8") as f:
+                        candidate = json.load(f)
+                    if isinstance(candidate, dict) and str(candidate.get("date_str") or "")[:10] == today_str:
+                        raw_today_state = candidate
+            except Exception:
+                raw_today_state = None
 
-        remaining = [q for q in queue if q.id in [x.id for x in self.state_manager.load_queue()]]
-        self.state_manager.save_queue(remaining)
-        return success_count
+            # Reconciliacao preventiva com worklogs ja gravados no Jira por data
+            has_jira_creds = bool(
+                self.config.get_clean_base_url()
+                and getattr(self.config, "email", "").strip()
+                and getattr(self.config, "api_token", "").strip()
+            )
+            jira_by_date: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+            if has_jira_creds:
+                unique_dates = sorted({
+                    q.started_iso[:10] for q in queue if isinstance(q.started_iso, str) and len(q.started_iso) >= 10
+                })
+                for d_str in unique_dates:
+                    grouped_d: Dict[str, List[Dict[str, Any]]] = {}
+                    try:
+                        remote_rows = self.get_user_worklogs_by_date_range(d_str, d_str)
+                        if isinstance(remote_rows, list):
+                            for w in remote_rows:
+                                if not isinstance(w, dict):
+                                    continue
+                                k = clean_jira_issue_key(str(w.get("issue_key") or ""))
+                                if k and k != "SEM_TICKET":
+                                    grouped_d.setdefault(k, []).append(w)
+                    except Exception as e:
+                        logger.warning(f"Falha ao consultar Jira para reconciliar fila de {d_str}: {e}")
+                    jira_by_date[d_str] = grouped_d
+
+            synced_today: Dict[str, Dict[str, Any]] = {}
+            failed_ids: set[str] = set()
+            today_had_activity = False
+
+            for item in list(queue):
+                norm_issue = clean_jira_issue_key(item.issue_key)
+                w_date = item.started_iso[:10] if isinstance(item.started_iso, str) and len(item.started_iso) >= 10 else ""
+
+                # 1. Evita reenvio se o state.json de hoje ja registra worklog real para este ticket
+                if w_date == today_str and raw_today_state:
+                    logged_map = raw_today_state.get("logged_worklogs_by_issue", {}) or {}
+                    prev_local = logged_map.get(norm_issue) if isinstance(logged_map, dict) else None
+                    prev_wid = str((prev_local or {}).get("worklog_id") or "").strip()
+                    if prev_wid and not prev_wid.startswith("local_"):
+                        logger.info(
+                            f"Item {item.id} ({norm_issue} em {w_date}) ja possui worklog local {prev_wid}; removido da fila."
+                        )
+                        self.state_manager.remove_from_queue(item.id)
+                        if getattr(item, "schedule", None):
+                            self.state_manager.save_worklog_schedule(prev_wid, item.schedule)
+                        success_count += 1
+                        today_had_activity = True
+                        continue
+
+                # 2. Evita reenvio se o ticket ja possui worklog no Jira para a mesma data
+                remote_for_issue = jira_by_date.get(w_date, {}).get(norm_issue, []) if w_date else []
+                if remote_for_issue:
+                    last_rw = remote_for_issue[-1]
+                    last_rwid = str(last_rw.get("id") or "").strip()
+                    r_sum = sum(max(0, int(x.get("time_spent_seconds", 0) or 0)) for x in remote_for_issue)
+                    logger.info(
+                        f"Item {item.id} ({norm_issue} em {w_date}) ja existe no Jira (ID {last_rwid}, {r_sum}s); "
+                        f"removido da fila sem duplicar."
+                    )
+                    self.state_manager.remove_from_queue(item.id)
+                    if last_rwid and getattr(item, "schedule", None):
+                        self.state_manager.save_worklog_schedule(last_rwid, item.schedule)
+                    if w_date == today_str and last_rwid:
+                        synced_today[norm_issue] = {
+                            "worklog_id": last_rwid,
+                            "seconds": r_sum or int(item.time_spent_seconds or 0),
+                            "started_iso": str(last_rw.get("started") or item.started_iso),
+                            "comment": str(last_rw.get("comment") or item.comment or ""),
+                            "updated_at": datetime.now().isoformat(),
+                            "all_ids": [str(x.get("id") or "").strip() for x in remote_for_issue if x.get("id")],
+                        }
+                        today_had_activity = True
+                    success_count += 1
+                    continue
+
+                # 3. Envio efetivo para o Jira
+                try:
+                    raw_res = self.submit_worklog(
+                        issue_key=norm_issue or item.issue_key,
+                        time_spent_seconds=item.time_spent_seconds,
+                        started_iso=item.started_iso,
+                        comment=item.comment,
+                    )
+                    if isinstance(raw_res, dict) and raw_res.get("status") not in (None, "success") and not raw_res.get("success"):
+                        raise RuntimeError(str(raw_res.get("message") or "Falha no envio do worklog"))
+
+                    wid = str(raw_res.get("worklog_id") or "").strip() if isinstance(raw_res, dict) else ""
+                    self.state_manager.remove_from_queue(item.id)
+                    if wid and getattr(item, "schedule", None):
+                        self.state_manager.save_worklog_schedule(wid, item.schedule)
+                    if w_date == today_str:
+                        synced_today[norm_issue] = {
+                            "worklog_id": wid or f"local_{norm_issue}_{today_str}",
+                            "seconds": int(item.time_spent_seconds or 0),
+                            "started_iso": item.started_iso,
+                            "comment": item.comment or "",
+                            "updated_at": datetime.now().isoformat(),
+                            "all_ids": [wid] if wid else [],
+                        }
+                        today_had_activity = True
+                    success_count += 1
+                    logger.info(f"Item {item.id} sincronizado e removido da fila.")
+                except Exception as e:
+                    item.retry_count += 1
+                    item.last_error = str(e)
+                    failed_ids.add(item.id)
+                    logger.warning(f"Tentativa {item.retry_count} falhou para item {item.id}: {e}")
+
+            remaining_items = [q for q in queue if q.id in failed_ids]
+            self.state_manager.save_queue(remaining_items)
+
+            # Reconcilia o state.json do dia corrente para impedir novo auto-envio no encerramento
+            if raw_today_state and (synced_today or today_had_activity):
+                try:
+                    from storage import DailyState
+                    daily = DailyState.from_dict(raw_today_state)
+                    for norm_k, entry in synced_today.items():
+                        all_ids = entry.pop("all_ids", [])
+                        daily.logged_worklogs_by_issue[norm_k] = entry
+                        for wid in all_ids:
+                            if wid and wid not in daily.jira_worklog_ids:
+                                daily.jira_worklog_ids.append(wid)
+                    still_pending_today = any(
+                        isinstance(q.started_iso, str) and q.started_iso[:10] == today_str for q in remaining_items
+                    )
+                    if not still_pending_today and daily.logged_worklogs_by_issue:
+                        daily.is_logged = True
+                    self.state_manager.save_state(daily)
+                except Exception as e:
+                    logger.warning(f"Nao foi possivel atualizar state.json apos flush da fila: {e}")
+
+            return success_count
 
     @worklog_activity
     def update_worklog_full(

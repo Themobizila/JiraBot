@@ -329,7 +329,13 @@ class MiniWidgetApp:
         self.root = root
         self.state_mgr = state_manager or StateManager()
         self.config = BotConfig.load()
-        self.engine = BotEngine(config=self.config, state_manager=self.state_mgr)
+        self.engine = BotEngine(
+            config=self.config,
+            state_manager=self.state_mgr,
+            on_worklog_trigger=self._handle_worklog_trigger,
+            on_worklog_update=self._handle_worklog_update,
+            auto_reload_config=True,
+        )
 
         self.always_on_top = True
         self.is_compact = False
@@ -868,6 +874,8 @@ class MiniWidgetApp:
 
         def do_finish():
             dlg.destroy()
+            self.engine.refresh_config()
+            self.config = self.engine.config
             self.engine.manual_log()
             self.update_state()
 
@@ -899,6 +907,71 @@ class MiniWidgetApp:
         )
         btn_no.pack(side="right")
         dlg.bind("<Escape>", lambda e: dlg.destroy())
+
+    def _handle_worklog_trigger(
+        self,
+        issue_key: str,
+        total_seconds: int,
+        started_iso: str,
+        comment: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Envia o apontamento diretamente para o Jira ao finalizar pela mini janela."""
+        try:
+            self.engine.refresh_config()
+            self.config = self.engine.config
+            from jira_client import JiraClient
+            client = JiraClient(self.config.jira, self.state_mgr)
+            is_empty = (comment == "__EMPTY__")
+            res = client.submit_worklog(
+                issue_key=issue_key,
+                time_spent_seconds=total_seconds,
+                started_iso=started_iso,
+                comment="" if is_empty else (comment or self.config.jira.default_comment),
+                no_comment=is_empty,
+            )
+            ok = res.get("status") == "success"
+            wid = str(res.get("worklog_id") or "")
+            if ok and wid and self.engine and self.engine.state:
+                if wid not in self.engine.state.jira_worklog_ids:
+                    self.engine.state.jira_worklog_ids.append(wid)
+                issue_sch = self.engine.state.get_issue_schedule_summary(
+                    issue_key, default_issue=self.config.jira.default_issue
+                )
+                if issue_sch.get("start_hm"):
+                    self.state_mgr.save_worklog_schedule(wid, issue_sch)
+                day_sch = self.engine.state.get_shift_times_summary()
+                if day_sch.get("start_hm"):
+                    self.state_mgr.save_day_shift_schedule(self.engine.state.date_str, day_sch)
+            return {"status": "success" if ok else "error", "worklog_id": wid}
+        except Exception as e:
+            logger.warning(f"Falha ao enviar worklog pela mini janela ({issue_key}): {e}")
+            return {"status": "error", "worklog_id": ""}
+
+    def _handle_worklog_update(
+        self,
+        issue_key: str,
+        worklog_id: str,
+        total_seconds: int,
+        started_iso: str,
+        comment: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Atualiza worklog existente no Jira ao reenviar pela mini janela."""
+        try:
+            self.engine.refresh_config()
+            self.config = self.engine.config
+            from jira_client import JiraClient
+            client = JiraClient(self.config.jira, self.state_mgr)
+            upd_res = client.update_worklog_full(
+                issue_key=issue_key,
+                worklog_id=worklog_id,
+                time_spent_seconds=total_seconds,
+                started_iso=started_iso,
+                comment="" if comment == "__EMPTY__" else (comment or ""),
+            )
+            return upd_res if isinstance(upd_res, dict) else {"success": bool(upd_res)}
+        except Exception as e:
+            logger.warning(f"Falha ao atualizar worklog pela mini janela ({issue_key}): {e}")
+            return {"success": False, "message": str(e)}
 
     def show_edit_comment_dialog(self) -> None:
         """Abre modal rapido para atualizar a descricao da atividade corrente."""

@@ -156,7 +156,7 @@ class SystemTrayIcon:
         engine: Optional[BotEngine] = None,
         on_exit_request: Optional[Callable[[], None]] = None,
     ):
-        self.engine = engine or BotEngine()
+        self.engine = engine or BotEngine(auto_reload_config=True)
         self.on_exit_request = on_exit_request
         self._hwnd: Optional[wintypes.HWND] = None
         self._hicon: Optional[wintypes.HICON] = None

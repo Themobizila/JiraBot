@@ -4,8 +4,11 @@ Modulo de persistencia local de estado, fila de contingencia e historico para o 
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
+import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, date, timedelta
@@ -130,15 +133,15 @@ class DailyState:
         Se seconds for parcial, transfere intervalos inteiros ou fatia o intervalo correspondente.
         Retorna a quantidade de segundos transferidos.
         """
-        src = source_issue.strip().upper()
-        tgt = target_issue.strip().upper()
+        src = clean_jira_issue_key(source_issue)
+        tgt = clean_jira_issue_key(target_issue)
         if not src or not tgt or src == tgt:
             return 0
 
         # Identifica os intervalos associados ao ticket de origem
         matching_intervals: List[TimeInterval] = []
         for inter in self.intervals:
-            assigned = (inter.issue_key or self.target_issue).strip().upper()
+            assigned = clean_jira_issue_key(inter.issue_key or self.target_issue)
             if assigned == src:
                 matching_intervals.append(inter)
 
@@ -209,18 +212,70 @@ class DailyState:
         """Retorna a lista ordenada e sem duplicatas de todos os tickets trabalhados no dia."""
         issues: List[str] = []
         for interval in self.intervals:
-            key = (interval.issue_key or self.target_issue or default_issue).strip().upper()
+            raw_key = interval.issue_key or self.target_issue or default_issue
+            key = clean_jira_issue_key(raw_key)
             if key and key not in issues and key != "SEM_TICKET":
                 issues.append(key)
-        if self.target_issue and self.target_issue.strip().upper() not in issues:
-            issues.append(self.target_issue.strip().upper())
+        target_clean = clean_jira_issue_key(self.target_issue)
+        if target_clean and target_clean not in issues and target_clean != "SEM_TICKET":
+            issues.append(target_clean)
         return issues
+
+    def get_issue_intervals(self, issue_key: str, default_issue: str = "") -> List[TimeInterval]:
+        """Retorna os intervalos pertencentes a um ticket especifico mantendo a ordem cronologica."""
+        target_clean = clean_jira_issue_key(issue_key)
+        if not target_clean:
+            return []
+        matched: List[TimeInterval] = []
+        for inter in self.intervals:
+            raw_key = inter.issue_key or self.target_issue or default_issue or "SEM_TICKET"
+            if clean_jira_issue_key(raw_key) == target_clean:
+                matched.append(inter)
+        return matched
 
     def get_first_start_time(self) -> Optional[datetime]:
         """Retorna o datetime do primeiro inicio do dia."""
         if not self.intervals:
             return None
         return datetime.fromisoformat(self.intervals[0].start)
+
+    def get_issue_first_start_time(self, issue_key: str, default_issue: str = "") -> Optional[datetime]:
+        """Retorna o datetime efetivo do primeiro intervalo trabalhado neste ticket no dia."""
+        matched = self.get_issue_intervals(issue_key, default_issue=default_issue)
+        if not matched:
+            return self.get_first_start_time()
+        non_zero = [i for i in matched if i.end is None or i.get_duration_seconds() > 0]
+        target_list = non_zero or matched
+        try:
+            return datetime.fromisoformat(target_list[0].start)
+        except Exception:
+            return self.get_first_start_time()
+
+    def get_day_lunch_break(self) -> Optional[Tuple[datetime, datetime]]:
+        """Identifica a pausa de almoco real do dia entre intervalos consecutivos de trabalho."""
+        if len(self.intervals) < 2:
+            return None
+        best_gap_idx = -1
+        best_gap_sec = -1.0
+        best_pair: Optional[Tuple[datetime, datetime]] = None
+        for i in range(len(self.intervals) - 1):
+            cur_end_str = self.intervals[i].end
+            nxt_start_str = self.intervals[i + 1].start
+            if not cur_end_str or not nxt_start_str:
+                continue
+            try:
+                ce = datetime.fromisoformat(cur_end_str)
+                ns = datetime.fromisoformat(nxt_start_str)
+                gap = (ns - ce).total_seconds()
+                if gap > best_gap_sec:
+                    best_gap_sec = gap
+                    best_gap_idx = i
+                    best_pair = (ce, ns)
+            except Exception:
+                continue
+        if best_gap_idx >= 0 and best_gap_sec >= 600 and best_pair:
+            return best_pair
+        return None
 
     def get_shift_times_summary(self) -> Dict[str, str]:
         """
@@ -246,61 +301,99 @@ class DailyState:
         except Exception:
             pass
 
-        if len(self.intervals) == 1:
-            inter = self.intervals[0]
-            if inter.end:
-                try:
-                    end_dt = datetime.fromisoformat(inter.end)
-                    if self.status == "PAUSED_LUNCH":
-                        lunch_start_hm = end_dt.strftime("%H:%M")
-                    else:
-                        end_hm = end_dt.strftime("%H:%M")
-                except Exception:
-                    pass
-        else:
-            # Procura a maior pausa ou a pausa proxima ao horario de almoco entre intervalos consecutivos
-            best_gap_idx = 0
-            best_gap_sec = -1
-            for i in range(len(self.intervals) - 1):
-                cur_end_str = self.intervals[i].end
-                nxt_start_str = self.intervals[i + 1].start
-                if cur_end_str and nxt_start_str:
-                    try:
-                        ce = datetime.fromisoformat(cur_end_str)
-                        ns = datetime.fromisoformat(nxt_start_str)
-                        gap = (ns - ce).total_seconds()
-                        if gap > best_gap_sec:
-                            best_gap_sec = gap
-                            best_gap_idx = i
-                    except Exception:
-                        pass
+        day_lunch = self.get_day_lunch_break()
+        if day_lunch:
+            lunch_start_hm = day_lunch[0].strftime("%H:%M")
+            lunch_end_hm = day_lunch[1].strftime("%H:%M")
 
-            if best_gap_sec >= 600:
-                try:
-                    if self.intervals[best_gap_idx].end:
-                        ls_dt = datetime.fromisoformat(self.intervals[best_gap_idx].end)
-                        lunch_start_hm = ls_dt.strftime("%H:%M")
-                    le_dt = datetime.fromisoformat(self.intervals[best_gap_idx + 1].start)
-                    lunch_end_hm = le_dt.strftime("%H:%M")
-                except Exception:
-                    pass
-
-            last_inter = self.intervals[-1]
-            if last_inter.end:
-                try:
-                    end_dt = datetime.fromisoformat(last_inter.end)
-                    if self.status == "PAUSED_LUNCH" and not lunch_start_hm:
-                        lunch_start_hm = end_dt.strftime("%H:%M")
-                    else:
-                        end_hm = end_dt.strftime("%H:%M")
-                except Exception:
-                    pass
+        last_inter = self.intervals[-1]
+        if last_inter.end:
+            try:
+                end_dt = datetime.fromisoformat(last_inter.end)
+                if self.status == "PAUSED_LUNCH" and not lunch_start_hm:
+                    lunch_start_hm = end_dt.strftime("%H:%M")
+                else:
+                    end_hm = end_dt.strftime("%H:%M")
+            except Exception:
+                pass
 
         return {
             "start_hm": start_hm,
             "lunch_start_hm": lunch_start_hm,
             "lunch_end_hm": lunch_end_hm,
             "end_hm": end_hm,
+        }
+
+    def get_issue_schedule_summary(self, issue_key: str, default_issue: str = "") -> Dict[str, str]:
+        """
+        Extrai os horarios efetivos de trabalho de um ticket especifico no dia (inicio real naquele
+        ticket, pausa/retorno apenas se esse ticket atravessou o almoco, e encerramento naquele ticket).
+        """
+        matched = self.get_issue_intervals(issue_key, default_issue=default_issue)
+        if not matched:
+            return {
+                "start_hm": "",
+                "lunch_start_hm": "",
+                "lunch_end_hm": "",
+                "end_hm": "",
+                "scope": "issue",
+            }
+
+        effective = [i for i in matched if i.end is None or i.get_duration_seconds() > 0]
+        if not effective:
+            effective = matched
+
+        start_hm = ""
+        lunch_start_hm = ""
+        lunch_end_hm = ""
+        end_hm = ""
+
+        try:
+            start_hm = datetime.fromisoformat(effective[0].start).strftime("%H:%M")
+        except Exception:
+            pass
+
+        day_lunch = self.get_day_lunch_break()
+        if day_lunch and len(effective) >= 2:
+            day_ls, day_le = day_lunch
+            for idx in range(len(effective) - 1):
+                cur_end_str = effective[idx].end
+                nxt_start_str = effective[idx + 1].start
+                if not cur_end_str or not nxt_start_str:
+                    continue
+                try:
+                    ce = datetime.fromisoformat(cur_end_str)
+                    ns = datetime.fromisoformat(nxt_start_str)
+                    if abs((ce - day_ls).total_seconds()) <= 120 and abs((ns - day_le).total_seconds()) <= 120:
+                        lunch_start_hm = day_ls.strftime("%H:%M")
+                        lunch_end_hm = day_le.strftime("%H:%M")
+                        break
+                except Exception:
+                    continue
+
+        last_inter = effective[-1]
+        if last_inter.end:
+            try:
+                end_dt = datetime.fromisoformat(last_inter.end)
+                is_paused_on_this = (
+                    self.status == "PAUSED_LUNCH"
+                    and not lunch_start_hm
+                    and self.intervals
+                    and last_inter is self.intervals[-1]
+                )
+                if is_paused_on_this:
+                    lunch_start_hm = end_dt.strftime("%H:%M")
+                else:
+                    end_hm = end_dt.strftime("%H:%M")
+            except Exception:
+                pass
+
+        return {
+            "start_hm": start_hm,
+            "lunch_start_hm": lunch_start_hm,
+            "lunch_end_hm": lunch_end_hm,
+            "end_hm": end_hm,
+            "scope": "issue",
         }
 
     def apply_shift_schedule(
@@ -690,12 +783,14 @@ class QueueItem:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     retry_count: int = 0
     last_error: Optional[str] = None
+    schedule: Optional[Dict[str, str]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> QueueItem:
+        raw_sch = data.get("schedule")
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             issue_key=data.get("issue_key", ""),
@@ -705,6 +800,7 @@ class QueueItem:
             created_at=data.get("created_at", datetime.now().isoformat()),
             retry_count=data.get("retry_count", 0),
             last_error=data.get("last_error"),
+            schedule=dict(raw_sch) if isinstance(raw_sch, dict) else None,
         )
 
 
@@ -735,6 +831,10 @@ class DaySummary:
         )
 
 
+_WORKLOG_THREAD_LOCK = threading.RLock()
+_WORKLOG_LOCK_TLS = threading.local()
+
+
 class StateManager:
     """Gerenciador de leitura e gravacao atomica do estado, fila e historico."""
 
@@ -745,6 +845,53 @@ class StateManager:
         self.history_file = self.base_dir / "history.json"
         self.schedules_file = self.base_dir / "worklog_schedules.json"
         self.snapshots_dir = self.base_dir / "state_history"
+
+    @contextmanager
+    def worklog_sync_lock(self, timeout_sec: float = 15.0):
+        """Lock reentrante entre threads e processos para serializar envios/atualizacoes de worklog e fila offline."""
+        lock_path = self.base_dir / "worklog_sync.lock"
+        with _WORKLOG_THREAD_LOCK:
+            depths = getattr(_WORKLOG_LOCK_TLS, "depths", None)
+            if depths is None:
+                depths = {}
+                _WORKLOG_LOCK_TLS.depths = depths
+            key = str(lock_path)
+            cur_depth = depths.get(key, 0)
+            acquired = False
+            if cur_depth == 0:
+                self.base_dir.mkdir(parents=True, exist_ok=True)
+                deadline = time.time() + timeout_sec
+                while time.time() < deadline:
+                    try:
+                        if lock_path.exists():
+                            age = time.time() - lock_path.stat().st_mtime
+                            if age > 30.0:
+                                try:
+                                    lock_path.unlink()
+                                except Exception:
+                                    pass
+                        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                        os.write(fd, str(os.getpid()).encode("utf-8"))
+                        os.close(fd)
+                        acquired = True
+                        break
+                    except FileExistsError:
+                        time.sleep(0.05)
+                    except Exception:
+                        break
+            depths[key] = cur_depth + 1
+            try:
+                yield
+            finally:
+                depths[key] = cur_depth
+                if depths[key] == 0:
+                    depths.pop(key, None)
+                if acquired:
+                    try:
+                        if lock_path.exists():
+                            lock_path.unlink()
+                    except Exception:
+                        pass
 
     def load_state(self) -> DailyState:
         """Carrega o estado atual do dia. Se for de um dia anterior, salva no historico e reseta."""
@@ -759,35 +906,46 @@ class StateManager:
                 data = json.load(f)
                 state = DailyState.from_dict(data)
                 if state.date_str != today_str:
-                    # Fecha com precisao qualquer intervalo em aberto do dia anterior
-                    state.close_previous_day_intervals()
-                    total_sec = state.get_total_seconds()
+                    with self.worklog_sync_lock():
+                        with open(self.state_file, "r", encoding="utf-8") as f2:
+                            state = DailyState.from_dict(json.load(f2))
+                        if state.date_str == today_str:
+                            return state
+                        # Fecha com precisao qualquer intervalo em aberto do dia anterior
+                        state.close_previous_day_intervals()
+                        total_sec = state.get_total_seconds()
 
-                    if total_sec > 0:
-                        # Se o dia anterior ainda nao havia sido transmitido ao Jira, enfileira na fila offline
-                        if not state.is_logged:
-                            first_start = state.get_first_start_time()
-                            started_iso = first_start.isoformat() if first_start else (state.intervals[0].start if state.intervals else datetime.now().isoformat())
-                            for issue_key, sec in state.get_seconds_by_issue().items():
-                                if sec > 0 and issue_key and issue_key != "SEM_TICKET":
-                                    clean_k = clean_jira_issue_key(issue_key)
-                                    prev_logged = state.logged_worklogs_by_issue.get(clean_k)
-                                    if prev_logged and prev_logged.get("worklog_id"):
-                                        continue
-                                    comment_to_use = "" if state.no_comment else state.get_issue_comment(issue_key, default="Lancamento automatico de expediente via JiraBot")
-                                    self.enqueue_worklog(
-                                        issue_key=issue_key,
-                                        started_iso=started_iso,
-                                        time_spent_seconds=sec,
-                                        comment=comment_to_use
-                                    )
-                            state.is_logged = True
+                        if total_sec > 0:
+                            # Se o dia anterior ainda nao havia sido transmitido ao Jira, enfileira na fila offline
+                            if not state.is_logged:
+                                for issue_key, sec in state.get_seconds_by_issue().items():
+                                    if sec > 0 and issue_key and issue_key != "SEM_TICKET":
+                                        clean_k = clean_jira_issue_key(issue_key)
+                                        prev_logged = state.logged_worklogs_by_issue.get(clean_k)
+                                        if prev_logged and prev_logged.get("worklog_id"):
+                                            continue
+                                        issue_first_start = state.get_issue_first_start_time(clean_k)
+                                        started_iso = (
+                                            issue_first_start.isoformat()
+                                            if issue_first_start
+                                            else (state.intervals[0].start if state.intervals else datetime.now().isoformat())
+                                        )
+                                        issue_sch = state.get_issue_schedule_summary(clean_k)
+                                        comment_to_use = "" if state.no_comment else state.get_issue_comment(issue_key, default="Lancamento automatico de expediente via JiraBot")
+                                        self.enqueue_worklog(
+                                            issue_key=clean_k,
+                                            started_iso=started_iso,
+                                            time_spent_seconds=sec,
+                                            comment=comment_to_use,
+                                            schedule=issue_sch if issue_sch.get("start_hm") else None,
+                                        )
+                                state.is_logged = True
 
-                        self.save_day_to_history(state)
+                            self.save_day_to_history(state)
 
-                    # Novo dia iniciado limpo
-                    state = DailyState(date_str=today_str)
-                    self.save_state(state)
+                        # Novo dia iniciado limpo
+                        state = DailyState(date_str=today_str)
+                        self.save_state(state)
                 return state
         except Exception:
             state = DailyState(date_str=today_str)
@@ -821,32 +979,45 @@ class StateManager:
         if temp_file.exists():
             temp_file.replace(self.queue_file)
 
-    def enqueue_worklog(self, issue_key: str, started_iso: str, time_spent_seconds: int, comment: str) -> QueueItem:
+    def enqueue_worklog(
+        self,
+        issue_key: str,
+        started_iso: str,
+        time_spent_seconds: int,
+        comment: str,
+        schedule: Optional[Dict[str, str]] = None,
+    ) -> QueueItem:
         """Adiciona ou atualiza um lancamento na fila de contingencia evitando duplicatas."""
         queue = self.load_queue()
+        clean_issue = clean_jira_issue_key(issue_key) or issue_key.strip().upper()
         work_date = started_iso[:10] if len(started_iso) >= 10 else started_iso
 
         # Verifica se ja existe um item para o mesmo ticket e mesma data
         existing = None
         for q in queue:
             q_date = q.started_iso[:10] if len(q.started_iso) >= 10 else q.started_iso
-            if q.issue_key == issue_key and q_date == work_date:
+            q_issue = clean_jira_issue_key(q.issue_key) or q.issue_key.strip().upper()
+            if q_issue == clean_issue and q_date == work_date:
                 existing = q
                 break
 
         if existing:
-            # Atualiza os dados com a versao mais recente/consolidada
-            existing.time_spent_seconds = max(existing.time_spent_seconds, time_spent_seconds)
+            # Atualiza os dados com a versao mais recente/consolidada (permite reducao por transferencia)
+            existing.issue_key = clean_issue
+            existing.time_spent_seconds = int(time_spent_seconds) if time_spent_seconds > 0 else existing.time_spent_seconds
             existing.comment = comment or existing.comment
             existing.started_iso = started_iso
+            if schedule:
+                existing.schedule = dict(schedule)
             self.save_queue(queue)
             return existing
 
         item = QueueItem(
-            issue_key=issue_key,
+            issue_key=clean_issue,
             started_iso=started_iso,
             time_spent_seconds=time_spent_seconds,
             comment=comment,
+            schedule=dict(schedule) if schedule else None,
         )
         queue.append(item)
         self.save_queue(queue)
@@ -859,12 +1030,14 @@ class StateManager:
 
         for item in queue:
             work_date = item.started_iso[:10] if len(item.started_iso) >= 10 else item.started_iso
-            key = (item.issue_key, work_date)
+            clean_issue = clean_jira_issue_key(item.issue_key) or item.issue_key.strip().upper()
+            item.issue_key = clean_issue
+            key = (clean_issue, work_date)
             if key not in unique_map:
                 unique_map[key] = item
             else:
-                # Mantem o com maior tempo ou mais recente
-                if item.time_spent_seconds >= unique_map[key].time_spent_seconds:
+                # Mantem o registro mais recente/completo
+                if item.created_at >= unique_map[key].created_at or item.time_spent_seconds >= unique_map[key].time_spent_seconds:
                     unique_map[key] = item
 
         deduped = list(unique_map.values())
@@ -932,13 +1105,16 @@ class StateManager:
         if not worklog_id:
             return
         schedules = self.load_worklog_schedules()
-        schedules[str(worklog_id)] = {
+        entry: Dict[str, Any] = {
             "start_hm": schedule_data.get("start_hm", ""),
             "lunch_start_hm": schedule_data.get("lunch_start_hm", ""),
             "lunch_end_hm": schedule_data.get("lunch_end_hm", ""),
             "end_hm": schedule_data.get("end_hm", ""),
             "updated_at": datetime.now().isoformat(),
         }
+        if schedule_data.get("scope"):
+            entry["scope"] = str(schedule_data["scope"])
+        schedules[str(worklog_id)] = entry
         temp_file = self.schedules_file.with_suffix(".tmp")
         with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(schedules, f, indent=2, ensure_ascii=False)
@@ -975,43 +1151,123 @@ class StateManager:
         if temp_file.exists():
             temp_file.replace(self.schedules_file)
 
+    @staticmethod
+    def _calc_schedule_net_seconds(date_str: str, schedule_data: Dict[str, Any]) -> int:
+        """Calcula segundos liquidos de um bloco de horarios, descontando o almoco se contido."""
+        s = _parse_hm(date_str, schedule_data.get("start_hm", ""))
+        e = _parse_hm(date_str, schedule_data.get("end_hm", ""))
+        if not s or not e or e <= s:
+            return 0
+        total = int((e - s).total_seconds())
+        ls = _parse_hm(date_str, schedule_data.get("lunch_start_hm", ""))
+        le = _parse_hm(date_str, schedule_data.get("lunch_end_hm", ""))
+        if ls and le and ls >= s and le > ls and e >= le:
+            total -= int((le - ls).total_seconds())
+        return max(0, total)
+
+    def consolidate_day_schedule(self, date_str: str, day_worklogs: List[Dict[str, Any]]) -> Dict[str, str]:
+        """Consolida os horarios globais de um dia (Visao Semanal) a partir dos metadados ou da soma dos worklogs."""
+        clean_date = (date_str or "")[:10]
+        schedules = self.load_worklog_schedules()
+        day_key = f"day:{clean_date}"
+        saved_day = schedules.get(day_key)
+        if saved_day and saved_day.get("start_hm"):
+            return {
+                "start_hm": saved_day.get("start_hm", ""),
+                "lunch_start_hm": saved_day.get("lunch_start_hm", ""),
+                "lunch_end_hm": saved_day.get("lunch_end_hm", ""),
+                "end_hm": saved_day.get("end_hm", ""),
+            }
+
+        scheds = [w.get("schedule") or {} for w in day_worklogs if (w.get("schedule") or {}).get("start_hm")]
+        if not scheds:
+            return {"start_hm": "-", "lunch_start_hm": "-", "lunch_end_hm": "-", "end_hm": "-"}
+
+        scheds_sorted = sorted(scheds, key=lambda item: item.get("start_hm", ""))
+        start_hm = scheds_sorted[0].get("start_hm", "")
+        ends = [s.get("end_hm", "") for s in scheds_sorted if s.get("end_hm")]
+        end_hm = max(ends) if ends else ""
+
+        lunch_start_hm = ""
+        lunch_end_hm = ""
+        for s in scheds_sorted:
+            if s.get("lunch_start_hm") and s.get("lunch_end_hm"):
+                lunch_start_hm = s["lunch_start_hm"]
+                lunch_end_hm = s["lunch_end_hm"]
+                break
+
+        if not lunch_start_hm and len(scheds_sorted) >= 2:
+            for idx in range(len(scheds_sorted) - 1):
+                cur_end = scheds_sorted[idx].get("end_hm", "")
+                nxt_start = scheds_sorted[idx + 1].get("start_hm", "")
+                ce_dt = _parse_hm(clean_date, cur_end)
+                ns_dt = _parse_hm(clean_date, nxt_start)
+                if ce_dt and ns_dt and (ns_dt - ce_dt).total_seconds() >= 1200 and 10 <= ce_dt.hour <= 14:
+                    lunch_start_hm = cur_end
+                    lunch_end_hm = nxt_start
+                    break
+
+        return {
+            "start_hm": start_hm,
+            "lunch_start_hm": lunch_start_hm,
+            "lunch_end_hm": lunch_end_hm,
+            "end_hm": end_hm,
+        }
+
     def get_or_infer_worklog_schedule(
         self,
         worklog: Dict[str, Any],
         default_lunch_start: str = "",
         default_lunch_end: str = "",
+        same_day_count: int = 1,
     ) -> Dict[str, str]:
         """
         Retorna os horarios de inicio, pausa de almoco, retorno e encerramento de um worklog.
-        Caso nao exista registro explicito salvo em worklog_schedules.json para o worklog_id,
-        verifica se ha metadados salvos para o dia (day:YYYY-MM-DD) ou no estado diario.
-        Caso contrario, calcula/infere com base na duracao e no perfil de turno ativo do usuario.
+        Prioriza registros explicitos por worklog_id (por ticket ou edicao manual) e evita aplicar
+        horarios globais do dia inteiro a fatias parciais quando houver multiplos tickets na mesma data.
         """
         wid = str(worklog.get("id", ""))
         started_str = worklog.get("started", "")
         date_part = started_str[:10] if len(started_str) >= 10 else date.today().isoformat()
         total_sec = int(worklog.get("time_spent_seconds", 0) or 0)
+        issue_key = clean_jira_issue_key(worklog.get("issue_key") or "")
 
         schedules = self.load_worklog_schedules()
         day_key = f"day:{date_part}"
+        saved_day = schedules.get(day_key) or {}
+
         if wid and wid in schedules:
             saved = schedules[wid]
             if saved.get("start_hm"):
-                end_hm_val = saved.get("end_hm", "")
-                if not end_hm_val and day_key in schedules:
-                    end_hm_val = schedules[day_key].get("end_hm", "")
-                return {
-                    "start_hm": saved.get("start_hm", ""),
-                    "lunch_start_hm": saved.get("lunch_start_hm", ""),
-                    "lunch_end_hm": saved.get("lunch_end_hm", ""),
-                    "end_hm": end_hm_val,
-                    "is_saved": "true",
-                }
+                scope = saved.get("scope", "")
+                # Detecta registros legados em dias multi-ticket onde o horario global do dia inteiro foi copiado no wid
+                is_legacy_polluted = False
+                if same_day_count > 1 and scope not in ("issue", "manual"):
+                    sched_sec = self._calc_schedule_net_seconds(date_part, saved)
+                    if sched_sec > 0 and total_sec > 0 and abs(sched_sec - total_sec) > 1800:
+                        if (
+                            (saved_day and saved.get("start_hm") == saved_day.get("start_hm") and saved.get("end_hm") == saved_day.get("end_hm"))
+                            or (saved.get("lunch_start_hm") and total_sec < 14400)
+                        ):
+                            is_legacy_polluted = True
 
-        # 2. Verifica se ha horario explicitamente salvo para o dia em worklog_schedules.json
-        if day_key in schedules:
-            saved_day = schedules[day_key]
-            if saved_day.get("start_hm"):
+                if not is_legacy_polluted:
+                    end_hm_val = saved.get("end_hm", "")
+                    if not end_hm_val and same_day_count <= 1 and saved_day:
+                        end_hm_val = saved_day.get("end_hm", "")
+                    return {
+                        "start_hm": saved.get("start_hm", ""),
+                        "lunch_start_hm": saved.get("lunch_start_hm", ""),
+                        "lunch_end_hm": saved.get("lunch_end_hm", ""),
+                        "end_hm": end_hm_val,
+                        "is_saved": "true",
+                    }
+
+        # 2. Horario salvo por dia (day:YYYY-MM-DD): aplica apenas em dia unico ou se bater com a duracao deste worklog
+        if saved_day and saved_day.get("start_hm"):
+            day_net_sec = self._calc_schedule_net_seconds(date_part, saved_day)
+            duration_matches = (total_sec > 0 and day_net_sec > 0 and abs(day_net_sec - total_sec) <= 900)
+            if same_day_count <= 1 or duration_matches:
                 return {
                     "start_hm": saved_day.get("start_hm", ""),
                     "lunch_start_hm": saved_day.get("lunch_start_hm", ""),
@@ -1020,12 +1276,15 @@ class StateManager:
                     "is_saved": "true",
                 }
 
-        # 3. Se a data for hoje e o estado local tiver intervalos registrados
+        # 3. Se a data for hoje e o estado local tiver intervalos registrados, extrai por ticket quando disponivel
         if date_part == date.today().isoformat() and self.state_file.exists():
             try:
                 cur_state = self.load_state()
                 if cur_state.intervals and cur_state.date_str == date_part:
-                    st_summary = cur_state.get_shift_times_summary()
+                    if issue_key:
+                        st_summary = cur_state.get_issue_schedule_summary(issue_key)
+                    else:
+                        st_summary = cur_state.get_shift_times_summary()
                     if st_summary.get("start_hm") and (st_summary.get("end_hm") or cur_state.status == "COMPLETED"):
                         return {
                             "start_hm": st_summary.get("start_hm", ""),

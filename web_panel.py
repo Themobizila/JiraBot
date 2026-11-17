@@ -288,6 +288,56 @@ def build_alerts_payload() -> Dict[str, Any]:
     }
 
 
+def _record_manual_worklog_in_today_state(
+    state_mgr: StateManager,
+    worklog_id: str,
+    issue_key: str,
+    seconds: int,
+    started_iso: str,
+    comment: str,
+    work_date_str: str,
+) -> None:
+    """
+    Registra no state.json do dia corrente um worklog criado manualmente pelo Painel Web,
+    evitando que o auto-lancamento ou fechamento posterior duplique ou sobrescreva as horas.
+    """
+    wid = str(worklog_id or "").strip()
+    norm_issue = clean_jira_issue_key(issue_key)
+    w_date = (work_date_str or "")[:10]
+    today_iso = date.today().isoformat()
+    if not wid or not norm_issue or norm_issue == "SEM_TICKET" or w_date != today_iso:
+        return
+
+    try:
+        with state_mgr.worklog_sync_lock():
+            cur_state = state_mgr.load_state()
+            if cur_state.date_str != today_iso:
+                return
+            if wid not in cur_state.jira_worklog_ids:
+                cur_state.jira_worklog_ids.append(wid)
+            prev = cur_state.logged_worklogs_by_issue.get(norm_issue) or {}
+            prev_sec = int(prev.get("seconds", 0) or 0) if prev.get("worklog_id") else 0
+            cur_state.logged_worklogs_by_issue[norm_issue] = {
+                "worklog_id": wid,
+                "seconds": prev_sec + max(0, int(seconds or 0)),
+                "started_iso": started_iso,
+                "comment": comment or "",
+                "manual": True,
+                "updated_at": datetime.now().isoformat(),
+            }
+            total_manual_logged = sum(
+                max(0, int(v.get("seconds", 0) or 0))
+                for v in cur_state.logged_worklogs_by_issue.values()
+                if isinstance(v, dict)
+            )
+            local_total = cur_state.get_total_seconds()
+            if local_total <= 0 or total_manual_logged >= max(60, local_total - 180):
+                cur_state.is_logged = True
+            state_mgr.save_state(cur_state)
+    except Exception as e:
+        logger.warning(f"Falha ao reconciliar lancamento manual {wid} ({norm_issue}) no state.json: {e}")
+
+
 def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dict[str, Any]:
     """
     Constroi a Visualizacao Semanal completa (Segunda a Domingo) com base na data ou semana escolhida,
@@ -331,12 +381,19 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
             def_ls = prof_act.get_lunch_start_hm()
             def_le = prof_act.get_lunch_end_hm()
             wls = client.get_user_worklogs_by_date_range(monday.isoformat(), sunday.isoformat())
+            date_counts: Dict[str, int] = {}
+            for w in wls:
+                dk = (w.get("date") or w.get("started") or "")[:10]
+                if dk:
+                    date_counts[dk] = date_counts.get(dk, 0) + 1
             for w in wls:
                 d_key = w.get("date", "")
                 sec = int(w.get("time_spent_seconds", 0) or 0)
                 w["time_formatted"] = format_duration(sec)
                 w["hm_formatted"] = format_hm_from_seconds(sec)
-                w["schedule"] = state_mgr.get_or_infer_worklog_schedule(w, def_ls, def_le)
+                w["schedule"] = state_mgr.get_or_infer_worklog_schedule(
+                    w, def_ls, def_le, same_day_count=date_counts.get(d_key, 1)
+                )
                 jira_by_date.setdefault(d_key, []).append(w)
         except Exception as e:
             logger.warning(f"Falha ao buscar worklogs da semana no Jira: {e}")
@@ -370,7 +427,7 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
         if day_wls:
             day_sec = sum(int(w.get("time_spent_seconds", 0) or 0) for w in day_wls)
             is_logged = True
-            first_sch = day_wls[-1].get("schedule", {})
+            first_sch = state_mgr.consolidate_day_schedule(d_str, day_wls)
             tickets_info = [
                 {
                     "id": w.get("id", ""),
@@ -394,7 +451,7 @@ def build_weekly_payload(ref_date_str: str = "", fetch_jira: bool = True) -> Dic
                     "seconds": v,
                     "formatted": format_duration(v),
                     "comment": current_state.get_issue_comment(k),
-                    "schedule": first_sch,
+                    "schedule": current_state.get_issue_schedule_summary(k, default_issue=config.jira.default_issue),
                     "date": d_str,
                 }
                 for k, v in current_state.get_seconds_by_issue(default_issue=config.jira.default_issue).items()
@@ -8622,7 +8679,20 @@ function openWorklogModal(worklog = null) {
   document.getElementById('wl-modal-le-hm').value = sch.lunch_end_hm || '';
   document.getElementById('wl-modal-end-hm').value = sch.end_hm || '';
 
-  document.getElementById('wl-modal-manual-dur-chk').checked = false;
+  let useManualDur = false;
+  if (isEdit && worklog) {
+    const startVal = sch.start_hm || defSch.start_hm;
+    const lsVal = sch.lunch_start_hm || '';
+    const leVal = sch.lunch_end_hm || '';
+    const endVal = sch.end_hm || '';
+    const schRes = computeScheduleMinutes(startVal, lsVal, leVal, endVal);
+    const schMins = (schRes && !schRes.error && typeof schRes.total === 'number') ? schRes.total : 0;
+    const actualMins = Math.round((worklog.time_spent_seconds || 0) / 60);
+    if (actualMins > 0 && (schMins <= 0 || Math.abs(schMins - actualMins) >= 2)) {
+      useManualDur = true;
+    }
+  }
+  document.getElementById('wl-modal-manual-dur-chk').checked = useManualDur;
   toggleModalDurationMode();
 
   if (isEdit) {
@@ -9618,12 +9688,22 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 def_ls = prof_act.get_lunch_start_hm()
                 def_le = prof_act.get_lunch_end_hm()
 
+                date_counts: Dict[str, int] = {}
+                for w in worklogs:
+                    dk = (w.get("date") or w.get("started") or "")[:10]
+                    if dk:
+                        date_counts[dk] = date_counts.get(dk, 0) + 1
+
                 for w in worklogs:
                     sec = int(w.get("time_spent_seconds", 0) or 0)
+                    d_key = (w.get("date") or w.get("started") or "")[:10]
                     w["time_formatted"] = format_duration(sec)
                     w["hm_formatted"] = format_hm_from_seconds(sec)
                     w["schedule"] = state_mgr.get_or_infer_worklog_schedule(
-                        w, default_lunch_start=def_ls, default_lunch_end=def_le
+                        w,
+                        default_lunch_start=def_ls,
+                        default_lunch_end=def_le,
+                        same_day_count=date_counts.get(d_key, 1),
                     )
 
                 self._send_json({"worklogs": worklogs})
@@ -9842,7 +9922,9 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 if action == "ignore":
                     self._send_json({"message": "Sugestão dispensada."})
                     return
-                engine = BotEngine(config=BotConfig.load(), state_manager=StateManager())
+                engine = BotEngine(
+                    config=BotConfig.load(), state_manager=StateManager(), auto_reload_config=True
+                )
                 try:
                     engine.switch_ticket(
                         suggestion["issue"],
@@ -10337,7 +10419,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 action = body.get("action", "")
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
-                engine = BotEngine(config=cfg, state_manager=state_mgr)
+                engine = BotEngine(config=cfg, state_manager=state_mgr, auto_reload_config=True)
 
                 if action == "start_daemon":
                     pid = start_background()
@@ -10444,8 +10526,23 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     "end_hm": end_hm,
                 }
                 state_mgr.save_day_shift_schedule(state.date_str, sch_meta)
-                for wid in state.jira_worklog_ids:
-                    state_mgr.save_worklog_schedule(wid, sch_meta)
+                by_issue_map = state.get_seconds_by_issue(default_issue=cfg.jira.default_issue)
+                active_issues = {clean_jira_issue_key(k): v for k, v in by_issue_map.items() if v > 0}
+                updated_wids: set[str] = set()
+                for norm_k in active_issues:
+                    entry = state.logged_worklogs_by_issue.get(norm_k) or {}
+                    e_wid = str(entry.get("worklog_id") or "").strip()
+                    if e_wid and not e_wid.startswith("local_"):
+                        issue_sch = state.get_issue_schedule_summary(norm_k, default_issue=cfg.jira.default_issue)
+                        if issue_sch.get("start_hm"):
+                            state_mgr.save_worklog_schedule(e_wid, issue_sch)
+                            updated_wids.add(e_wid)
+                if len(active_issues) == 1:
+                    only_k = next(iter(active_issues))
+                    only_sch = state.get_issue_schedule_summary(only_k, default_issue=cfg.jira.default_issue)
+                    for wid in state.jira_worklog_ids:
+                        if wid and wid not in updated_wids and only_sch.get("start_hm"):
+                            state_mgr.save_worklog_schedule(wid, only_sch)
 
                 dur_str = format_duration(state.get_total_seconds())
                 self._send_json({
@@ -10517,7 +10614,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 if action == "switch":
                     issue_key = clean_jira_issue_key(body.get("issue_key") or "")
                     comment = (body.get("comment") or "").strip()
-                    engine = BotEngine(config=cfg, state_manager=state_mgr)
+                    engine = BotEngine(config=cfg, state_manager=state_mgr, auto_reload_config=True)
                     engine.switch_ticket(issue_key, comment=comment if comment else None)
                     self._send_json({"success": True, "message": f"Ticket ativo alterado para {issue_key}."})
                     return
@@ -10546,7 +10643,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     tgt = clean_jira_issue_key(body.get("target_issue") or "")
                     t_str = (body.get("time_str") or "").strip()
                     sec = parse_duration_input(t_str) if t_str else None
-                    engine = BotEngine(config=cfg, state_manager=state_mgr)
+                    engine = BotEngine(config=cfg, state_manager=state_mgr, auto_reload_config=True)
                     transferred = engine.transfer_today_hours(source_issue=src, target_issue=tgt, seconds=sec)
                     if transferred <= 0:
                         self._send_json({"error": f"Nenhuma hora disponível em {src} para transferir hoje."}, status_code=400)
@@ -10576,7 +10673,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                             return res
                         return False
 
-                    engine = BotEngine(config=cfg, state_manager=state_mgr, on_worklog_trigger=_on_trigger)
+                    engine = BotEngine(
+                        config=cfg,
+                        state_manager=state_mgr,
+                        on_worklog_trigger=_on_trigger,
+                        auto_reload_config=True,
+                    )
                     total_sec = engine.manual_log(no_comment=no_comment)
                     for wid in engine.state.jira_worklog_ids:
                         if wid and wid not in created_ids:
@@ -10597,7 +10699,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                 cfg = BotConfig.load()
                 state_mgr = StateManager()
                 client = JiraClient(cfg.jira, state_mgr)
-                engine = BotEngine(config=cfg, state_manager=state_mgr)
+                engine = BotEngine(config=cfg, state_manager=state_mgr, auto_reload_config=True)
 
                 if not comment:
                     comment = client.get_issue_summary(issue_key) or "Desenvolvimento / Atividade em andamento"
@@ -10742,10 +10844,20 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                                 "lunch_start_hm": ls_hm,
                                 "lunch_end_hm": le_hm,
                                 "end_hm": end_hm,
+                                "scope": "manual",
                             })
                         except Exception:
                             logger.exception("Falha ao guardar os horários do worklog %s", wid)
                             schedule_warnings.append(f"{d_str} ({issue_key})")
+                        _record_manual_worklog_in_today_state(
+                            state_mgr=state_mgr,
+                            worklog_id=str(wid),
+                            issue_key=issue_key,
+                            seconds=sec,
+                            started_iso=started_iso,
+                            comment=final_comment,
+                            work_date_str=d_str,
+                        )
 
                 if success_count == 0 and errors:
                     self._send_json({"error": f"Falha ao lançar lote: {'; '.join(errors[:3])}"}, status_code=400)
@@ -10837,6 +10949,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                                     "lunch_start_hm": ls_hm,
                                     "lunch_end_hm": le_hm,
                                     "end_hm": end_hm,
+                                    "scope": "manual",
                                 })
                             updated_count += 1
                         else:
@@ -10856,6 +10969,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                                     "lunch_start_hm": ls_hm,
                                     "lunch_end_hm": le_hm,
                                     "end_hm": end_hm,
+                                    "scope": "manual",
                                 })
                             updated_count += 1
                         else:
@@ -10915,6 +11029,7 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     "lunch_start_hm": lunch_start_hm,
                     "lunch_end_hm": lunch_end_hm,
                     "end_hm": end_hm,
+                    "scope": "manual",
                 }
 
                 if not manual_duration and start_hm and end_hm:
@@ -10954,6 +11069,15 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     new_id = str(res.get("worklog_id", ""))
                     if new_id:
                         state_mgr.save_worklog_schedule(new_id, schedule_meta)
+                        _record_manual_worklog_in_today_state(
+                            state_mgr=state_mgr,
+                            worklog_id=new_id,
+                            issue_key=target_issue,
+                            seconds=total_seconds,
+                            started_iso=started_iso,
+                            comment=comment,
+                            work_date_str=date_str,
+                        )
                     self._send_json({
                         "success": True,
                         "worklog_id": new_id,

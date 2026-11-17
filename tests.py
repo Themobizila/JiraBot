@@ -3220,14 +3220,36 @@ Não aplicável
             self.assertEqual(updated_calls[0][1], "1002")
             self.assertEqual(updated_calls[0][2], 9360)  # 2h20m (8400s) + 16m (960s) = 2h36m (9360s)
 
-            # Verificacao: Os horarios de expediente salvos para ambos os worklogs possuem end_hm == "15:46" (sem "-")
-            sched_1001 = mgr.get_or_infer_worklog_schedule({"id": "1001", "started": f"{today_str}T07:56:00.000-0300", "time_spent_seconds": 14400})
-            sched_1002 = mgr.get_or_infer_worklog_schedule({"id": "1002", "started": f"{today_str}T13:00:00.000-0300", "time_spent_seconds": 9360})
+            # Verificacao: Cada ticket recebe seu started_iso real e seu horario individual isolado
+            self.assertTrue(created_calls[0][2].startswith(f"{today_str}T07:56:00"))
+            self.assertTrue(created_calls[1][2].startswith(f"{today_str}T13:00:00"))
+            self.assertTrue(updated_calls[0][3].startswith(f"{today_str}T13:00:00"))
+
+            sched_1001 = mgr.get_or_infer_worklog_schedule(
+                {"id": "1001", "started": f"{today_str}T07:56:00.000-0300", "time_spent_seconds": 14400},
+                same_day_count=2,
+            )
+            sched_1002 = mgr.get_or_infer_worklog_schedule(
+                {"id": "1002", "started": f"{today_str}T13:00:00.000-0300", "time_spent_seconds": 9360},
+                same_day_count=2,
+            )
             self.assertEqual(sched_1001["start_hm"], "07:56")
-            self.assertEqual(sched_1001["lunch_start_hm"], "11:56")
-            self.assertEqual(sched_1001["lunch_end_hm"], "13:00")
-            self.assertEqual(sched_1001["end_hm"], "15:46")
+            self.assertEqual(sched_1001["lunch_start_hm"], "")
+            self.assertEqual(sched_1001["lunch_end_hm"], "")
+            self.assertEqual(sched_1001["end_hm"], "11:56")
+
+            self.assertEqual(sched_1002["start_hm"], "13:00")
+            self.assertEqual(sched_1002["lunch_start_hm"], "")
+            self.assertEqual(sched_1002["lunch_end_hm"], "")
             self.assertEqual(sched_1002["end_hm"], "15:46")
+
+            # Verificacao: Resumo consolidado do dia preserva inicio 07:56, almoco 11:56-13:00 e saida 15:46
+            day_sch = mgr.load_worklog_schedules().get(f"day:{today_str}")
+            self.assertIsNotNone(day_sch)
+            self.assertEqual(day_sch["start_hm"], "07:56")
+            self.assertEqual(day_sch["lunch_start_hm"], "11:56")
+            self.assertEqual(day_sch["lunch_end_hm"], "13:00")
+            self.assertEqual(day_sch["end_hm"], "15:46")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -3634,6 +3656,259 @@ Não aplicável
             self.assertEqual(loaded.get("checklist"), [])
         finally:
             shutil.rmtree(test_dir, ignore_errors=True)
+
+    def test_per_ticket_started_iso_switch_and_legacy_polluted_schedule_recovery(self):
+        """
+        Garante que trocas de ticket geram started_iso e schedules individuais por ticket,
+        ignora schedules legados poluidos com duracao do dia inteiro em multi-ticket,
+        e consolida corretamente para a Visualizacao Semanal.
+        """
+        from engine import BotEngine
+        from config import BotConfig
+        from storage import StateManager, DailyState, TimeInterval
+        import tempfile
+        import shutil
+        from datetime import datetime, date, time
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            today_str = date.today().isoformat()
+            cfg = BotConfig(active_profile="6h_0800", notifications_enabled=False)
+            mgr = StateManager(base_dir=temp_dir)
+            created = []
+
+            def fake_create(issue_key, seconds, started_iso, comment):
+                wid = "2001" if issue_key == "ATIVDIV-32" else "2002"
+                created.append((issue_key, seconds, started_iso, wid))
+                return {"status": "success", "worklog_id": wid}
+
+            # Manha 07:47-10:03 em ATIVDIV-32 (2h16m), troca as 10:03 para CONSISABI-457, almoco 12:01-13:30, saida 15:15 (3h44m)
+            state = DailyState(date_str=today_str, status="RUNNING", target_issue="ATIVDIV-32")
+            state.intervals.append(TimeInterval(start=f"{today_str}T07:47:00", end=None, issue_key="ATIVDIV-32"))
+            mgr.save_state(state)
+
+            engine = BotEngine(config=cfg, state_manager=mgr, on_worklog_trigger=fake_create)
+            engine.switch_ticket("CONSISABI-457", now=datetime.combine(date.today(), time(10, 3, 0)))
+
+            # Ajusta almoco (12:01 - 13:30) e retorno + saida 15:16 manualmente no state (2h16m + 3h44m = 6h00m)
+            st = mgr.load_state()
+            st.intervals[-1].end = f"{today_str}T12:01:00"
+            st.intervals.append(TimeInterval(start=f"{today_str}T13:30:00", end=None, issue_key="CONSISABI-457"))
+            mgr.save_state(st)
+
+            engine.manual_log(now=datetime.combine(date.today(), time(15, 16, 0)))
+            self.assertEqual(len(created), 2)
+            by_k = {c[0]: c for c in created}
+            self.assertEqual(by_k["ATIVDIV-32"][1], 8160)   # 2h16m
+            self.assertEqual(by_k["CONSISABI-457"][1], 13440)  # 3h44m
+            self.assertTrue(by_k["ATIVDIV-32"][2].startswith(f"{today_str}T07:47:00"))
+            self.assertTrue(by_k["CONSISABI-457"][2].startswith(f"{today_str}T10:03:00"))
+
+            # Verifica schedules por worklog com get_or_infer_worklog_schedule
+            sch_a = mgr.get_or_infer_worklog_schedule(
+                {"id": "2001", "started": by_k["ATIVDIV-32"][2], "time_spent_seconds": 8160},
+                same_day_count=2,
+            )
+            sch_c = mgr.get_or_infer_worklog_schedule(
+                {"id": "2002", "started": by_k["CONSISABI-457"][2], "time_spent_seconds": 13440},
+                same_day_count=2,
+            )
+            self.assertEqual(sch_a["start_hm"], "07:47")
+            self.assertEqual(sch_a["lunch_start_hm"], "")
+            self.assertEqual(sch_a["lunch_end_hm"], "")
+            self.assertEqual(sch_a["end_hm"], "10:03")
+            self.assertEqual(sch_c["start_hm"], "10:03")
+            self.assertEqual(sch_c["lunch_start_hm"], "12:01")
+            self.assertEqual(sch_c["lunch_end_hm"], "13:30")
+            self.assertEqual(sch_c["end_hm"], "15:16")
+
+            # Consolida para Visualizacao Semanal -> deve cobrir 07:47 | 12:01 | 13:30 | 15:16
+            consolidated = mgr.consolidate_day_schedule(
+                today_str,
+                [
+                    {"id": "2001", "schedule": sch_a},
+                    {"id": "2002", "schedule": sch_c},
+                ],
+            )
+            self.assertEqual(consolidated["start_hm"], "07:47")
+            self.assertEqual(consolidated["lunch_start_hm"], "12:01")
+            self.assertEqual(consolidated["lunch_end_hm"], "13:30")
+            self.assertEqual(consolidated["end_hm"], "15:16")
+
+            # Testa recuperacao contra schedule legado poluido (sem scope) em dia historico multi-ticket (ex: 2026-11-16)
+            legacy_day = "2026-11-16"
+            mgr.save_worklog_schedule("9001", {"start_hm": "07:47", "lunch_start_hm": "12:01", "lunch_end_hm": "13:30", "end_hm": "15:15"})
+            inferred_legacy = mgr.get_or_infer_worklog_schedule(
+                {"id": "9001", "started": f"{legacy_day}T07:47:00.000-0300", "time_spent_seconds": 8160},
+                default_lunch_start="12:00",
+                default_lunch_end="13:30",
+                same_day_count=2,
+            )
+            self.assertEqual(inferred_legacy["start_hm"], "07:47")
+            self.assertEqual(inferred_legacy["end_hm"], "10:03")
+            self.assertEqual(inferred_legacy["lunch_start_hm"], "")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_jira_reconciliation_prevents_duplicate_6h_auto_log_and_flush_queue(self):
+        """
+        Reproduz o cenario em que o usuario ja lancou manualmente QE-6668 (4h) e ATIVDIV-32 (2h) no Jira,
+        enquanto o timer/fila local acumulava QE-6668 (6h). Nem handle_lock nem flush_queue podem criar
+        o terceiro worklog duplicado QE-6668 - 6h.
+        """
+        from unittest.mock import patch
+        from engine import BotEngine
+        from config import BotConfig, JiraConfig
+        from jira_client import JiraClient
+        from storage import StateManager, DailyState, TimeInterval
+        import tempfile
+        import shutil
+        from datetime import datetime, date, time
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            today_str = date.today().isoformat()
+            jira_cfg = JiraConfig(
+                base_url="https://fake.atlassian.net",
+                email="dev@consisa.com.br",
+                api_token="fake-token-for-unit-test",
+                default_issue="QE-6668",
+            )
+            cfg = BotConfig(active_profile="6h_0800", jira=jira_cfg, notifications_enabled=False, auto_log_on_exit=True)
+            mgr = StateManager(base_dir=temp_dir)
+
+            # Estado local acumulou 6h inteiras em QE-6668
+            state = DailyState(date_str=today_str, status="RUNNING", target_issue="QE-6668")
+            state.intervals.append(TimeInterval(start=f"{today_str}T07:50:00", end=f"{today_str}T12:00:00", issue_key="QE-6668"))
+            state.intervals.append(TimeInterval(start=f"{today_str}T13:30:00", end=f"{today_str}T15:20:00", issue_key="QE-6668"))
+            mgr.save_state(state)
+
+            # Fila offline tambem possui pendencia antiga de 6h em QE-6668 para o mesmo dia
+            mgr.enqueue_worklog(
+                issue_key="QE-6668",
+                started_iso=f"{today_str}T07:50:00",
+                time_spent_seconds=21600,
+                comment="Atividade em QE-6668",
+                schedule={"start_hm": "07:50", "lunch_start_hm": "12:00", "lunch_end_hm": "13:30", "end_hm": "15:20", "scope": "issue"},
+            )
+
+            created_calls = []
+
+            def fake_trigger(issue_key, seconds, started_iso, comment):
+                created_calls.append((issue_key, seconds, started_iso))
+                return {"status": "success", "worklog_id": "9999"}
+
+            remote_worklogs = [
+                {
+                    "id": "8101",
+                    "issue_key": "QE-6668",
+                    "date": today_str,
+                    "started": f"{today_str}T07:50:00.000-0300",
+                    "time_spent_seconds": 14400,
+                    "comment": "Lancamento manual 4h",
+                },
+                {
+                    "id": "8102",
+                    "issue_key": "ATIVDIV-32",
+                    "date": today_str,
+                    "started": f"{today_str}T13:20:00.000-0300",
+                    "time_spent_seconds": 7200,
+                    "comment": "Lancamento manual 2h",
+                },
+            ]
+
+            with patch.object(JiraClient, "get_user_worklogs_by_date_range", return_value=remote_worklogs), \
+                 patch.object(JiraClient, "submit_worklog", side_effect=AssertionError("submit_worklog nao deveria ser chamado")):
+                engine = BotEngine(config=cfg, state_manager=mgr, on_worklog_trigger=fake_trigger)
+                now_exit = datetime.combine(date.today(), time(15, 25, 0))
+                res_state = engine.handle_lock(now=now_exit)
+
+                self.assertEqual(len(created_calls), 0)
+                self.assertTrue(res_state.is_logged)
+                self.assertIn("8101", res_state.jira_worklog_ids)
+                self.assertIn("8102", res_state.jira_worklog_ids)
+                self.assertEqual(len(mgr.load_queue()), 0)
+
+                # Testa tambem flush_queue diretamente caso exista item pendente na fila duplicado com Jira
+                mgr.enqueue_worklog(
+                    issue_key="QE-6668",
+                    started_iso=f"{today_str}T07:50:00",
+                    time_spent_seconds=21600,
+                    comment="Duplicado",
+                )
+                # Limpa state logado para validar que flush_queue detecta no Jira E atualiza o state.json
+                st2 = mgr.load_state()
+                st2.is_logged = False
+                st2.logged_worklogs_by_issue = {}
+                st2.jira_worklog_ids = []
+                mgr.save_state(st2)
+
+                jc = JiraClient(jira_cfg, mgr)
+                synced = jc.flush_queue()
+                self.assertEqual(synced, 1)
+                self.assertEqual(len(mgr.load_queue()), 0)
+                after_state = mgr.load_state()
+                self.assertTrue(after_state.is_logged)
+                self.assertIn("8101", after_state.jira_worklog_ids)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_auto_reload_config_mini_window_callbacks_and_modal_duration_guard(self):
+        """
+        Valida recarga dinamica de config.json (ex: desativar auto_log_on_exit sem reiniciar daemon),
+        callbacks reais de envio/atualizacao na Mini Janela e trava de duracao manual no modal Web.
+        """
+        from unittest.mock import patch
+        from engine import BotEngine
+        from config import BotConfig
+        from storage import StateManager, DailyState, TimeInterval
+        from web_panel import HTML_PAGE
+        import inspect
+        import mini_window
+        import tempfile
+        import shutil
+        from datetime import datetime, date, time
+
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            today_str = date.today().isoformat()
+            cfg = BotConfig(active_profile="6h_0800", notifications_enabled=False, auto_log_on_exit=True)
+            mgr = StateManager(base_dir=temp_dir)
+            st = DailyState(date_str=today_str, status="RUNNING", target_issue="ATIVDIV-32")
+            st.intervals.append(TimeInterval(start=f"{today_str}T08:00:00", end=None, issue_key="ATIVDIV-32"))
+            mgr.save_state(st)
+
+            calls = []
+
+            def fake_trigger(issue_key, seconds, started_iso, comment):
+                calls.append((issue_key, seconds))
+                return {"status": "success", "worklog_id": "5555"}
+
+            cfg_updated = BotConfig(active_profile="6h_0800", notifications_enabled=False, auto_log_on_exit=False)
+            with patch.object(BotConfig, "load", return_value=cfg_updated):
+                engine = BotEngine(
+                    config=cfg,
+                    state_manager=mgr,
+                    on_worklog_trigger=fake_trigger,
+                    auto_reload_config=True,
+                )
+                end_dt = datetime.combine(date.today(), time(15, 25, 0))
+                res = engine.handle_lock(now=end_dt)
+                self.assertEqual(res.status, "COMPLETED")
+                self.assertFalse(res.is_logged)
+                self.assertEqual(len(calls), 0)
+
+            # Valida que MiniWidgetApp passa on_worklog_trigger, on_worklog_update e auto_reload_config=True
+            mw_src = inspect.getsource(mini_window.MiniWidgetApp)
+            self.assertIn("on_worklog_trigger=self._handle_worklog_trigger", mw_src)
+            self.assertIn("on_worklog_update=self._handle_worklog_update", mw_src)
+            self.assertIn("auto_reload_config=True", mw_src)
+
+            # Valida protecao de duracao manual no openWorklogModal para schedules historicos poluidos
+            self.assertIn("useManualDur", HTML_PAGE)
+            self.assertIn("Math.abs(schMins - actualMins) >= 2", HTML_PAGE)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

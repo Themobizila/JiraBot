@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from config import BotConfig, get_default_config_dir
 from engine import BotEngine
@@ -116,6 +116,8 @@ class JiraBotService:
             config=self.config,
             state_manager=self.state_manager,
             on_worklog_trigger=self._handle_worklog_trigger,
+            on_worklog_update=self._handle_worklog_update,
+            auto_reload_config=True,
         )
 
         self.watcher = SessionWatcher(
@@ -131,15 +133,26 @@ class JiraBotService:
         self._web_server = None
         self._start_mtime = get_source_files_mtime()
 
+    def _sync_runtime_config(self) -> None:
+        """Recarrega config.json no disco e sincroniza engine e jira_client sem exigir reinicio."""
+        try:
+            self.engine.refresh_config()
+            self.config = self.engine.config
+            self.jira_client.config = self.config.jira
+        except Exception:
+            pass
+
     def _on_session_lock(self):
         focus_pilot.reset()
         from mascote_runtime.control import publish_event
         publish_event("Windows_Lock", self.state_manager.base_dir)
+        self._sync_runtime_config()
         self.engine.handle_lock()
 
     def _on_session_unlock(self):
         from mascote_runtime.control import publish_event
         publish_event("Windows_Unlock", self.state_manager.base_dir)
+        self._sync_runtime_config()
         self.engine.handle_unlock()
 
     def _handle_worklog_trigger(
@@ -148,9 +161,10 @@ class JiraBotService:
         total_seconds: int,
         started_iso: str,
         comment: Optional[str] = None,
-    ) -> bool:
+    ) -> Dict[str, Any]:
         """Callback acionado pelo Engine quando um worklog deve ser enviado."""
         try:
+            self._sync_runtime_config()
             is_empty = (comment == "__EMPTY__")
             res = self.jira_client.submit_worklog(
                 issue_key=issue_key,
@@ -164,14 +178,41 @@ class JiraBotService:
             if ok and wid and self.engine and self.engine.state:
                 if wid not in self.engine.state.jira_worklog_ids:
                     self.engine.state.jira_worklog_ids.append(wid)
-                shift_times = self.engine.state.get_shift_times_summary()
-                if shift_times.get("start_hm"):
-                    self.state_manager.save_worklog_schedule(wid, shift_times)
-                    self.state_manager.save_day_shift_schedule(self.engine.state.date_str, shift_times)
-            return ok
+                issue_sch = self.engine.state.get_issue_schedule_summary(
+                    issue_key, default_issue=self.config.jira.default_issue
+                )
+                if issue_sch.get("start_hm"):
+                    self.state_manager.save_worklog_schedule(wid, issue_sch)
+                day_sch = self.engine.state.get_shift_times_summary()
+                if day_sch.get("start_hm"):
+                    self.state_manager.save_day_shift_schedule(self.engine.state.date_str, day_sch)
+            return {"status": "success" if ok else "error", "worklog_id": wid}
         except Exception as e:
             logger.warning(f"Envio imediato falhou para {issue_key}, item sera mantido na fila offline: {e}")
-            return False
+            return {"status": "error", "worklog_id": ""}
+
+    def _handle_worklog_update(
+        self,
+        issue_key: str,
+        worklog_id: str,
+        total_seconds: int,
+        started_iso: str,
+        comment: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Callback acionado pelo Engine quando um worklog existente precisa ser atualizado."""
+        try:
+            self._sync_runtime_config()
+            upd_res = self.jira_client.update_worklog_full(
+                issue_key=issue_key,
+                worklog_id=worklog_id,
+                time_spent_seconds=total_seconds,
+                started_iso=started_iso,
+                comment="" if comment == "__EMPTY__" else (comment or ""),
+            )
+            return upd_res if isinstance(upd_res, dict) else {"success": bool(upd_res)}
+        except Exception as e:
+            logger.warning(f"Falha ao atualizar worklog {worklog_id} ({issue_key}): {e}")
+            return {"success": False, "message": str(e)}
 
     def _trigger_auto_reload(self) -> None:
         """Reinicia o servico de forma transparente ao detectar mudanca de codigo no disco."""
@@ -216,6 +257,7 @@ class JiraBotService:
                 logger.debug(f"Falha ao verificar auto-update na inicializacao: {e}")
 
         try:
+            self._sync_runtime_config()
             self.engine.refresh_state()
             if (
                 self.engine.state.status == "COMPLETED"
@@ -224,7 +266,7 @@ class JiraBotService:
                 and self.engine.state.get_total_seconds() > 0
             ):
                 logger.info("Expediente de hoje ja concluido (ex: desligamento do PC) e pendente de envio. Sincronizando...")
-                self.engine._trigger_worklog_all_issues()
+                self.engine._trigger_worklog_all_issues(auto_triggered=True)
             elif (
                 self.engine.state.status == "PAUSED_AWAY"
                 and self.engine.state.last_event == "PAUSED_SHUTDOWN"
@@ -273,6 +315,7 @@ class JiraBotService:
                         self._trigger_auto_reload()
                         break
 
+                    self._sync_runtime_config()
                     self.engine.check_scheduled_transitions()
                     from mascote_runtime.control import service_heartbeat
                     service_heartbeat(True)
