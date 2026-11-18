@@ -40,7 +40,39 @@ from review_dialog import get_fallback_description, show_pre_exit_popup
 from sharepoint_client import DdsWriteAuthorizationRequired, SharePointManager
 from time import monotonic
 from uuid import uuid4
-from dds_append import append_development, prepare_entry, prepare_mcp_evidence
+from dds_append import _parse_entry_date, append_development, has_empty_development_header_fields, prepare_entry, prepare_mcp_evidence
+
+
+def _extract_mcp_header_from_text(raw_text):
+    """Extrai autor e data/hora iniciais do texto MCP, se presentes no topo."""
+    lines = raw_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    extracted_author = ""
+    extracted_date = ""
+    consumed = 0
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            consumed = idx + 1
+            continue
+        author_match = re.match(r"^(?:respons[áa]vel|nome)\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
+        if author_match and not extracted_author and len(author_match.group(1).strip()) <= 120:
+            extracted_author = author_match.group(1).strip()
+            consumed = idx + 1
+            continue
+        date_match = re.match(r"^(?:data(?:\s+e\s+hora)?)\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
+        if date_match and not extracted_date:
+            try:
+                extracted_date = _parse_entry_date(date_match.group(1).strip())
+                consumed = idx + 1
+                continue
+            except ValueError:
+                pass
+        break
+    if not (extracted_author or extracted_date):
+        return raw_text, "", ""
+    while consumed < len(lines) and not lines[consumed].strip():
+        consumed += 1
+    return "\n".join(lines[consumed:]), extracted_author, extracted_date
 
 _dds_previews = {}
 _dds_preview_lock = threading.Lock()
@@ -3494,8 +3526,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <option value="" disabled>Tamanhos mistos</option>
             </select>
             <button id="fill-dev-bold" type="button" class="btn btn-outline btn-sm" onmousedown="event.preventDefault()" onclick="toggleDdsBold()" aria-label="Negrito (Ctrl+B)"><strong>B</strong></button>
+            <button id="fill-dev-indent" type="button" class="btn btn-outline btn-sm" onmousedown="event.preventDefault()" onclick="adjustDdsIndent(1)" aria-label="Aumentar recuo (Tab)">Recuar + (Tab)</button>
+            <button id="fill-dev-outdent" type="button" class="btn btn-outline btn-sm" onmousedown="event.preventDefault()" onclick="adjustDdsIndent(-1)" aria-label="Diminuir recuo (Shift+Tab)">Recuar -</button>
           </div>
-          <div id="fill-dev-detalhes" class="form-control" contenteditable="true" role="textbox" aria-label="Detalhamento da implementação" aria-multiline="true" style="font-size:11pt; line-height:1.5; min-height:120px; white-space:pre-wrap; overflow-wrap:anywhere;"></div>
+          <div id="fill-dev-detalhes" class="form-control" contenteditable="true" role="textbox" aria-label="Detalhamento da implementação" aria-multiline="true" style="font-size:11pt; line-height:1.5; min-height:120px; white-space:pre-wrap; tab-size:4; overflow-wrap:anywhere;"></div>
         </div>
 
         <div style="margin-bottom:16px;">
@@ -3903,6 +3937,8 @@ async function showDdsAgentReview(reviewId) {
         image.alt = line.name;
         row.append(image);
       } else {
+        const indent = Number(line.indent ?? line.runs?.[0]?.indent ?? 0);
+        if (indent > 0) row.style.paddingLeft = (indent * 24) + 'px';
         for (const run of line.runs) {
           const span = document.createElement(run.bold ? 'strong' : 'span');
           span.textContent = run.text;
@@ -3990,16 +4026,25 @@ async function showDdsAgentReview(reviewId) {
         return;
       }
       confirm.disabled = dismiss.disabled = true;
+      confirm.textContent = 'Gravando na DDS oficial…';
       status.textContent = 'Aguardando sua confirmação na janela do JiraBot…';
       try {
         const result = await apiCall('/api/jira/dds/append-confirm', 'POST',
           {key: data.key, preview_id: reviewId, approval: data.approval}, 0);
         if (activeDdsAgentReview !== session) return;
         status.textContent = result.message;
+        confirm.textContent = 'Gravado com sucesso na DDS oficial';
+        if (typeof showToast === 'function') showToast(result.message || 'Acréscimo gravado com sucesso na DDS oficial!', 'success');
         dismiss.textContent = 'Fechar';
         dismiss.onclick = () => closeDdsAgentReview(popup);
       } catch (err) {
-        if (activeDdsAgentReview === session) status.textContent = err.message;
+        if (activeDdsAgentReview === session) {
+          status.textContent = err.message;
+          confirm.textContent = 'Confirmar e gravar na DDS oficial';
+          if (typeof showToast === 'function') showToast(err.message, 'warning');
+          confirm.disabled = select.disabled = full.disabled = false;
+          partial.disabled = !savedSelection;
+        }
       } finally {
         if (activeDdsAgentReview === session) dismiss.disabled = false;
       }
@@ -6104,13 +6149,28 @@ function renderLiveDdsDraft(header = readDdsHeader()) {
       img.alt = images[0].name;
       row.append(img);
     } else {
-      for (const run of line) {
+      let lineIndent = 0;
+      const displayLine = [];
+      line.forEach((run, runIdx) => {
+        let text = run.text;
+        if (runIdx === 0) {
+          let tabs = 0;
+          while (tabs < 6 && text.startsWith('\t')) {
+            text = text.slice(1);
+            tabs++;
+          }
+          lineIndent = Math.min(6, Math.max(run.indent || 0, tabs));
+        }
+        if (text || line.length === 1) displayLine.push({...run, text});
+      });
+      if (lineIndent > 0) row.style.paddingLeft = (lineIndent * 24) + 'px';
+      for (const run of displayLine) {
         const span = document.createElement(run.bold ? 'strong' : 'span');
         span.textContent = run.text;
         if (run.font_size) span.style.fontSize = run.font_size + 'pt';
         row.append(span);
       }
-      if (!line.length) row.append(document.createElement('br'));
+      if (!displayLine.length) row.append(document.createElement('br'));
     }
     return row;
   }));
@@ -6184,6 +6244,74 @@ function toggleDdsBold() {
   document.execCommand('bold');
   invalidateDdsAppendPreview();
 }
+
+function adjustDdsIndent(delta) {
+  const range = ddsTextRange;
+  ddsDetailsEditor.focus();
+  const selection = window.getSelection();
+  if (range && ddsDetailsEditor.contains(range.commonAncestorContainer)) {
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  if (!selection.rangeCount) return;
+  const activeRange = selection.getRangeAt(0);
+  if (delta > 0 && activeRange.collapsed) {
+    document.execCommand('insertText', false, '\t');
+    invalidateDdsAppendPreview();
+    return;
+  }
+  const containerBlock = node => {
+    let cur = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
+    while (cur && cur !== ddsDetailsEditor && !['DIV', 'P'].includes(cur.tagName)) {
+      cur = cur.parentNode;
+    }
+    return cur || ddsDetailsEditor;
+  };
+  const blocks = [];
+  const walker = document.createTreeWalker(ddsDetailsEditor, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!activeRange.intersectsNode(node)) continue;
+    const blk = containerBlock(node);
+    if (!blocks.includes(blk)) blocks.push(blk);
+  }
+  if (!blocks.length) blocks.push(containerBlock(activeRange.startContainer));
+  blocks.forEach(blk => {
+    const firstTextWalker = document.createTreeWalker(blk, NodeFilter.SHOW_TEXT);
+    const firstText = firstTextWalker.nextNode();
+    if (delta > 0) {
+      const r = document.createRange();
+      if (firstText) r.setStart(firstText, 0);
+      else r.setStart(blk, 0);
+      r.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(r);
+      document.execCommand('insertText', false, '\t');
+    } else if (firstText && firstText.textContent.startsWith('\t')) {
+      const r = document.createRange();
+      r.setStart(firstText, 0);
+      r.setEnd(firstText, 1);
+      selection.removeAllRanges();
+      selection.addRange(r);
+      document.execCommand('delete');
+    } else if (firstText && /^ {1,4}/.test(firstText.textContent)) {
+      const sp = /^ {1,4}/.exec(firstText.textContent)[0].length;
+      const r = document.createRange();
+      r.setStart(firstText, 0);
+      r.setEnd(firstText, sp);
+      selection.removeAllRanges();
+      selection.addRange(r);
+      document.execCommand('delete');
+    }
+  });
+  invalidateDdsAppendPreview();
+}
+
+ddsDetailsEditor.addEventListener('keydown', event => {
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    adjustDdsIndent(event.shiftKey ? -1 : 1);
+  }
+});
 
 ddsDetailsEditor.addEventListener('paste', event => {
   if (Array.from(event.clipboardData.items).some(item => item.type.startsWith('image/'))) return;
@@ -6653,6 +6781,8 @@ async function submitDdsFill() {
           image.alt = line.name;
           row.append(image);
         } else {
+          const indent = Number(line.indent ?? line.runs?.[0]?.indent ?? 0);
+          if (indent > 0) row.style.paddingLeft = (indent * 24) + 'px';
           for (const run of line.runs) {
             const text = document.createElement((run.bold ?? result.bold) ? 'strong' : 'span');
             text.style.fontSize = (run.font_size ?? result.font_size) + 'pt';
@@ -10114,7 +10244,12 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                     elif review:
                         result = {"status": "expired", "message": "O prazo da proposta terminou. Prepare uma nova proposta."}
                     elif isinstance(review_id, str) and review_id in _dds_approved_examples:
-                        result = {"status": "approved", "approved_example": _dds_approved_examples[review_id]}
+                        result = {
+                            "status": "approved",
+                            "confirmed": True,
+                            "message": "Acréscimo confirmado pelo usuário e gravado com sucesso na DDS oficial.",
+                            "approved_example": _dds_approved_examples[review_id],
+                        }
                     else:
                         result = {"status": "closed", "message": "Proposta não encontrada. Confira o identificador. Propostas descartadas ou anteriores ao reinício do painel ficam indisponíveis."}
                 self._send_json(result)
@@ -10198,10 +10333,17 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         if origin:
                             self._send_json({"error": "Use o conector MCP para enviar propostas."}, status_code=403)
                             return
-                        text = body.get("implementacao_texto")
+                        text = body.get("implementacao_texto", "")
                         recommendations = body.get("recomendacoes", "")
                         previous_id = body.get("revisao_anterior")
-                        if not isinstance(text, str) or len(text) > 20000 or (not previous_id and not text.strip()) or not isinstance(recommendations, str) or len(recommendations) > 10000:
+                        runs_payload = body.get("implementacao_runs")
+                        if (
+                            not isinstance(text, str)
+                            or len(text) > 20000
+                            or (not previous_id and not text.strip() and not runs_payload)
+                            or not isinstance(recommendations, str)
+                            or len(recommendations) > 10000
+                        ):
                             raise ValueError("Informe o detalhamento e recomendações válidos.")
                         previous = None
                         if previous_id:
@@ -10213,18 +10355,43 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                             if feedback["scope"] == "selection":
                                 start, end = feedback["start"], feedback["end"]
                                 text = previous["draft"][:start] + text + previous["draft"][end:]
-                            if not text.strip() or text.strip() == previous["draft"].strip() or len(text) > 20000:
+                            if (not text.strip() and not runs_payload) or (not runs_payload and text.strip() == previous["draft"].strip()) or len(text) > 20000:
                                 raise ValueError("A revisão precisa alterar o trecho solicitado e respeitar o limite de texto.")
                             recommendations = previous["recommendations"]
+                        cleaned_text, extracted_author, extracted_date = _extract_mcp_header_from_text(text)
                         email = BotConfig.load().jira.email or ""
+                        fallback_author = email.split("@")[0].replace(".", " ").title() or "Desenvolvedor"
+                        explicit_author = (body.get("autor_nome") or "").strip() if isinstance(body.get("autor_nome"), str) else ""
+                        explicit_date = (body.get("data_preenchimento") or "").strip() if isinstance(body.get("data_preenchimento"), str) else ""
+                        prev_author = previous.get("author_name", "") if previous else ""
+                        prev_date = previous.get("fill_date", "") if previous else ""
+                        author_name = (explicit_author or extracted_author or prev_author or fallback_author)[:120]
+                        fill_date = explicit_date or extracted_date or prev_date or datetime.now().strftime("%d/%m/%Y - %H:%M:%S")
+                        font_size = body.get("font_size", previous.get("font_size", 11) if previous else 11)
+                        bold = body.get("bold", previous.get("bold", False) if previous else False)
+                        if type(font_size) is not int or not 8 <= font_size <= 36:
+                            raise ValueError("Escolha um tamanho de letra entre 8 e 36 pt.")
+                        if type(bold) is not bool:
+                            raise ValueError("Informe um valor booleano válido para negrito.")
+                        if runs_payload is not None and not cleaned_text.strip() and isinstance(runs_payload, list):
+                            cleaned_text = "\n".join(
+                                "".join(r.get("text", "") for r in ln if isinstance(r, dict))
+                                for ln in runs_payload if isinstance(ln, list)
+                            )
                         evidence = prepare_mcp_evidence(body.get("evidencias", []), previous.get("evidence", ()) if previous else ())
+                        skip_plain_match = bool(body.get("skip_plain_match")) or (runs_payload is not None and not body.get("implementacao_texto", "").strip())
                         body = {
-                            "autor_nome": email.split("@")[0].replace(".", " ").title() or "Desenvolvedor",
-                            "data_preenchimento": datetime.now().strftime("%d/%m/%Y"),
-                            "implementacao_texto": text,
+                            "autor_nome": author_name,
+                            "data_preenchimento": fill_date,
+                            "implementacao_texto": cleaned_text,
                             "recomendacoes": recommendations,
                             "mcp_evidence": evidence,
+                            "font_size": font_size,
+                            "bold": bold,
+                            "skip_plain_match": skip_plain_match,
                         }
+                        if runs_payload is not None:
+                            body["implementacao_runs"] = runs_payload
                     if proposal or path.endswith("append-preview"):
                         client = JiraClient(BotConfig.load().jira, state_mgr)
                         details = client.get_ticket_dds_details(issue_key, force_refresh=True)
@@ -10244,6 +10411,13 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                                 raise ValueError("Não foi possível renderizar o ponto de inserção da DDS.")
                             self._send_json({"filename": document["filename"], "document_html": html, "marker": marker})
                             return
+                        if proposal:
+                            empty_header = has_empty_development_header_fields(live["docx_bytes"])
+                            if empty_header:
+                                fill_date = fill_date.partition(" - ")[0].strip()
+                            elif " - " not in fill_date:
+                                fill_date = f"{fill_date} - {datetime.now().strftime('%H:%M:%S')}"
+                            body["data_preenchimento"] = fill_date
                         local_images = sp_mgr.list_dds_images(issue_key)
                         if proposal:
                             local_images = evidence + local_images
@@ -10272,6 +10446,10 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                                     "draft": body["implementacao_texto"].replace("\r\n", "\n").replace("\r", "\n"),
                                     "recommendations": body["recomendacoes"],
                                     "evidence": evidence,
+                                    "author_name": author_name,
+                                    "fill_date": fill_date,
+                                    "font_size": font_size,
+                                    "bold": bold,
                                     "feedback": None,
                                 }
                             self._send_json({"review_id": preview_id, "reused_review": bool(previous), "approved_example": _dds_approved_examples.get(issue_key)})
@@ -10302,12 +10480,11 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                             if review["expires"] <= monotonic() or review["key"] != issue_key:
                                 raise ValueError("A proposta expirou ou pertence a outro ticket.")
                             document, content, fill = review["document"], review["content"], {}
-                            del _dds_agent_reviews[preview_id]
                         else:
                             pending = _dds_previews.get(preview_id) if isinstance(preview_id, str) else None
                             if not pending or pending[0] <= monotonic() or pending[1] != issue_key:
                                 raise ValueError("A prévia expirou ou pertence a outro ticket. Gere outra prévia.")
-                            _, _, document, content, fill = _dds_previews.pop(preview_id)
+                            _, _, document, content, fill = pending
                     if review:
                         from notifier import confirm_dds_publication
                         if not confirm_dds_publication(issue_key, review["filename"]):
@@ -10316,12 +10493,15 @@ class JiraBotWebHandler(BaseHTTPRequestHandler):
                         if review and review["expires"] <= monotonic():
                             raise ValueError("A proposta expirou durante a revisão. Prepare outra proposta.")
                         sp_mgr.publish_dds_version(document, content)
-                    if review:
-                        with _dds_preview_lock:
+                    with _dds_preview_lock:
+                        if review:
+                            _dds_agent_reviews.pop(preview_id, None)
                             if len(_dds_approved_examples) >= 40:
                                 del _dds_approved_examples[next(iter(_dds_approved_examples))]
                             _dds_approved_examples[issue_key] = review["draft"]
                             _dds_approved_examples[preview_id] = review["draft"]
+                        else:
+                            _dds_previews.pop(preview_id, None)
                     JiraClient.invalidate_ticket_cache(issue_key)
                     message = "Acréscimo gravado na DDS oficial."
                     if fill.get("post_jira_comment"):

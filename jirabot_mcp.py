@@ -131,18 +131,41 @@ def buscar_tickets(contexto: str, ctx: Context) -> dict[str, Any]:
 
 @server.tool()
 def preparar_acrescimo_dds(chave: str, detalhamento: str, ctx: Context, recomendacoes: str = "",
-                           revisao_anterior: str = "", evidencias: list[dict[str, str]] | None = None) -> dict[str, Any]:
+                           revisao_anterior: str = "", evidencias: list[dict[str, str]] | None = None,
+                           autor_nome: str = "", data_preenchimento: str = "",
+                           tamanho_fonte: int = 11, negrito: bool = False,
+                           linhas_formatadas: list[list[dict[str, Any]]] | None = None) -> dict[str, Any]:
     """Prepara um acréscimo para revisão humana. Evidências PNG/JPEG usam nome e conteudo_base64.
 
     Use !evidencia-1!, !evidencia-2! etc. em linhas próprias para posicionar
     imagens na ordem enviada. Sem marcador, a imagem aparece ao fim da entrada.
+    Formatação inline suportada em detalhamento: **negrito**, [14pt]/[12pt]/[9pt],
+    [tam=N]...[/tam] (8 a 36), # Título (14pt negrito), ## Subtítulo (12pt negrito),
+    e \\t ou [tab] no início da linha para recuo. Opcionalmente informe autor_nome,
+    data_preenchimento (DD/MM/AAAA ou DD/MM/AAAA - HH:MM), tamanho_fonte, negrito ou linhas_formatadas.
     """
     report_client(ctx, "preparar_acrescimo_dds")
+    payload: dict[str, Any] = {
+        "key": chave.strip().upper(),
+        "implementacao_texto": detalhamento,
+        "recomendacoes": recomendacoes,
+        "revisao_anterior": revisao_anterior,
+        "evidencias": evidencias or [],
+        "font_size": tamanho_fonte,
+        "bold": negrito,
+    }
+    if autor_nome.strip():
+        payload["autor_nome"] = autor_nome.strip()
+    if data_preenchimento.strip():
+        payload["data_preenchimento"] = data_preenchimento.strip()
+    if linhas_formatadas is not None:
+        payload["implementacao_runs"] = linhas_formatadas
+        if not detalhamento.strip():
+            payload["skip_plain_match"] = True
     try:
         status, result = local_focus_request(
             "/api/jira/dds/append-propose",
-            {"key": chave.strip().upper(), "implementacao_texto": detalhamento,
-             "recomendacoes": recomendacoes, "revisao_anterior": revisao_anterior, "evidencias": evidencias or []},
+            payload,
             port=panel_port, timeout=90,
         )
     except (OSError, HTTPException, ValueError):
@@ -159,10 +182,10 @@ def preparar_acrescimo_dds(chave: str, detalhamento: str, ctx: Context, recomend
 
 
 @server.tool()
-def consultar_revisao_dds(identificador: str, ctx: Context, aguardar_segundos: int = 40) -> dict[str, Any]:
-    """Aguarda feedback humano por até 45 segundos ou consulta exemplo aprovado pela chave do ticket."""
+def consultar_revisao_dds(identificador: str, ctx: Context, aguardar_segundos: int = 90) -> dict[str, Any]:
+    """Aguarda feedback ou confirmação humana por até 180 segundos e retorna status 'approved' com 'confirmed': True quando gravado na DDS oficial."""
     report_client(ctx, "consultar_revisao_dds")
-    deadline = monotonic() + min(45, max(0, aguardar_segundos))
+    deadline = monotonic() + min(180, max(0, aguardar_segundos))
     payload = {"review_id": identificador.strip()}
     while True:
         result = request_panel("/api/jira/dds/append-feedback-status", payload)

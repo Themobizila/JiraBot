@@ -3910,6 +3910,134 @@ Não aplicável
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_dds_append_name_date_fields_rich_text_and_indent(self):
+        """Valida preenchimento condicional de Nome/Data, insercao no campo largo, Rich Text, recuo Tab e protecao de revisao."""
+        import inspect
+        import io
+        import zipfile
+        from xml.dom import minidom
+        from dds_append import W, append_development, has_empty_development_header_fields, paragraph_text, prepare_entry
+        import jirabot_mcp
+        from web_panel import HTML_PAGE, _extract_mcp_header_from_text
+
+        def build_dds(nome_txt, data_txt, body_paragraphs_xml):
+            buf = io.BytesIO()
+            doc_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:tbl>
+                  <w:tr>
+                    <w:tc>
+                      <w:tcPr><w:gridSpan w:val="2"/></w:tcPr>
+                      <w:p><w:r><w:t>Preenchido pelo Desenvolvimento (dados necessários para encaminhamento ao teste de implementação)</w:t></w:r></w:p>
+                    </w:tc>
+                  </w:tr>
+                  <w:tr>
+                    <w:tc>
+                      <w:tcPr><w:tcW w:w="8647" w:type="dxa"/></w:tcPr>
+                      <w:p><w:r><w:t>{nome_txt}</w:t></w:r></w:p>
+                    </w:tc>
+                    <w:tc>
+                      <w:tcPr><w:tcW w:w="1843" w:type="dxa"/></w:tcPr>
+                      <w:p><w:r><w:t>{data_txt}</w:t></w:r></w:p>
+                    </w:tc>
+                  </w:tr>
+                  <w:tr>
+                    <w:tc>
+                      <w:tcPr><w:tcW w:w="10490" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>
+                      {body_paragraphs_xml}
+                      <w:tbl>
+                        <w:tr><w:tc><w:p><w:r><w:t>Revisão final</w:t></w:r></w:p></w:tc></w:tr>
+                      </w:tbl>
+                    </w:tc>
+                  </w:tr>
+                </w:tbl>
+              </w:body>
+            </w:document>"""
+            with zipfile.ZipFile(buf, "w") as zf:
+                zf.writestr("word/document.xml", doc_xml.encode("utf-8"))
+            return buf.getvalue()
+
+        # Cenario 1 e 3: Nome e Data vazios -> Data recebe apenas DD/MM/AAAA + Rich Text + recuo Tab
+        empty_docx = build_dds("Nome: ", "Data: ", "<w:p/>")
+        self.assertTrue(has_empty_development_header_fields(empty_docx))
+        raw_text = (
+            "Responsável: João Henrique Segalla de Moura\n"
+            "Data e hora: 18/11/2026 - 11:50:00\n\n"
+            "[13pt]**Principais entregas realizadas:**\n"
+            "[12pt]**1. Unificação das versões**\n"
+            "\t- Item com **destaque** recuado\n"
+            "[9pt]Legenda simples abaixo da imagem."
+        )
+        cleaned, ext_author, ext_date = _extract_mcp_header_from_text(raw_text)
+        self.assertEqual(ext_author, "João Henrique Segalla de Moura")
+        self.assertEqual(ext_date, "18/11/2026 - 11:50:00")
+        lines, images, preview = prepare_entry({
+            "autor_nome": ext_author,
+            "data_preenchimento": ext_date,
+            "implementacao_texto": cleaned,
+        }, [])
+        out1, _, anchor1 = append_development(empty_docx, lines, images)
+        self.assertEqual(anchor1, "Revisão final")
+        with zipfile.ZipFile(io.BytesIO(out1)) as zf:
+            d1 = minidom.parseString(zf.read("word/document.xml"))
+        ps1 = list(d1.getElementsByTagNameNS(W, "p"))
+        texts1 = [paragraph_text(p) for p in ps1]
+        self.assertIn("Nome: João Henrique Segalla de Moura", texts1)
+        self.assertIn("Data: 18/11/2026", texts1)
+        self.assertNotIn("Data: 18/11/2026 - 11:50:00", texts1)
+        # Nome e Data nao devem ficar duplicados fora das celulas superiores
+        self.assertEqual(texts1.count("Nome: João Henrique Segalla de Moura"), 1)
+        self.assertEqual(texts1.count("Data: 18/11/2026"), 1)
+        # Inserido na celula larga (tcW 10490) antes de Revisao final
+        idx_item = texts1.index("- Item com destaque recuado")
+        idx_rev = texts1.index("Revisão final")
+        self.assertLess(idx_item, idx_rev)
+        tc_pr_item = ps1[idx_item].parentNode.getElementsByTagNameNS(W, "tcW")[0]
+        self.assertEqual(tc_pr_item.getAttribute("w:w"), "10490")
+        xml_str1 = d1.toxml()
+        self.assertIn('<w:sz w:val="26"/>', xml_str1)
+        self.assertIn('<w:sz w:val="24"/>', xml_str1)
+        self.assertIn('<w:sz w:val="18"/>', xml_str1)
+        self.assertIn('<w:b w:val="1"/>', xml_str1)
+        self.assertIn('<w:ind w:left="360"/>', xml_str1)
+        self.assertEqual(preview[3]["indent"], 0)
+        self.assertEqual(preview[4]["indent"], 1)
+
+        # Cenario 2: Nome e Data ja preenchidos -> preserva barra superior e aplica Data - Hora no corpo
+        filled_docx = build_dds(
+            "Nome: Dev Anterior",
+            "Data: 17/11/2026",
+            "<w:p><w:r><w:t>Entrega anterior registrada.</w:t></w:r></w:p>",
+        )
+        self.assertFalse(has_empty_development_header_fields(filled_docx))
+        lines2, images2, _ = prepare_entry({
+            "autor_nome": "João Henrique Segalla de Moura",
+            "data_preenchimento": "18/11/2026 - 11:55:00",
+            "implementacao_texto": "Segunda entrega ajustada.",
+        }, [])
+        out2, before2, _ = append_development(filled_docx, lines2, images2)
+        self.assertEqual(before2, "Entrega anterior registrada.")
+        with zipfile.ZipFile(io.BytesIO(out2)) as zf:
+            d2 = minidom.parseString(zf.read("word/document.xml"))
+        ps2 = list(d2.getElementsByTagNameNS(W, "p"))
+        texts2 = [paragraph_text(p) for p in ps2]
+        self.assertIn("Nome: Dev Anterior", texts2)
+        self.assertIn("Data: 17/11/2026", texts2)
+        self.assertIn("Responsável: João Henrique Segalla de Moura", texts2)
+        self.assertIn("- 18/11/2026 - 11:55:00", texts2)
+        self.assertIn("Segunda entrega ajustada.", texts2)
+        self.assertLess(texts2.index("Entrega anterior registrada."), texts2.index("- 18/11/2026 - 11:55:00"))
+        self.assertLess(texts2.index("Segunda entrega ajustada."), texts2.index("Revisão final"))
+
+        # Contratos de UI e MCP
+        self.assertIn("Recuar + (Tab)", HTML_PAGE)
+        self.assertIn("function adjustDdsIndent", HTML_PAGE)
+        self.assertIn("Gravado com sucesso na DDS oficial", HTML_PAGE)
+        sig = inspect.signature(jirabot_mcp.preparar_acrescimo_dds)
+        for param in ("autor_nome", "data_preenchimento", "tamanho_fonte", "negrito", "linhas_formatadas"):
+            self.assertIn(param, sig.parameters)
+
 
 if __name__ == "__main__":
     unittest.main()
